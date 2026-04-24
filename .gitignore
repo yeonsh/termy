@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+*.swp
+
+# Xcode / Swift (ready for Weekend 1+)
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+.build/
+.swiftpm/
+Package.resolved
+
+# Local dev
+.env
+.env.local
+termy.xcodeproj/
+apps/*/Info.plist
+apps/*/*.entitlements
+
+# Local tooling + profiling
+.omx/
+.gstack/
+.claude/
+*.profraw
+
+# Sparkle CLI tools — installed by scripts/setup-sparkle.sh, per-developer.
+scripts/vendor/

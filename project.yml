@@ -1,0 +1,100 @@
+name: termy
+options:
+  bundleIdPrefix: app.termy
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  minimumXcodeGenVersion: "2.42.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    DEVELOPMENT_TEAM: "4M7G2HXTMV"
+    CODE_SIGN_STYLE: "Automatic"
+    ENABLE_HARDENED_RUNTIME: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    DEAD_CODE_STRIPPING: YES
+
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    branch: main
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: "2.6.4"
+
+targets:
+  termy-hook:
+    type: tool
+    platform: macOS
+    sources:
+      - path: apps/termy-hook/Sources
+    settings:
+      base:
+        PRODUCT_NAME: "termy-hook"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "6.0"
+        SKIP_INSTALL: YES
+
+  termy-tests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: apps/termy-tests/Sources
+    dependencies:
+      - target: termy
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/termy.app/Contents/MacOS/termy"
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+  termy:
+    type: application
+    platform: macOS
+    sources:
+      - path: apps/termy/Sources
+      - path: apps/termy/Resources/Assets.xcassets
+    dependencies:
+      - package: SwiftTerm
+        product: SwiftTerm
+      - package: Sparkle
+      - target: termy-hook
+        copy:
+          destination: resources
+    info:
+      path: apps/termy/Info.plist
+      properties:
+        CFBundleName: termy
+        CFBundleDisplayName: termy
+        CFBundleIdentifier: app.termy.macos
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        NSHumanReadableCopyright: "© 2026 termy"
+        NSHighResolutionCapable: YES
+        NSPrincipalClass: NSApplication
+        LSUIElement: NO
+        NSSupportsAutomaticTermination: NO
+        NSSupportsSuddenTermination: NO
+        SUFeedURL: "https://termy.nugo.cc/appcast.xml"
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 86400
+        SUAllowsAutomaticUpdates: false
+        SUPublicEDKey: "ewcqSTKc31qYDzW9udArygzlKyXGj3alcOC1y91nojk="
+    entitlements:
+      path: apps/termy/termy.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.cs.allow-unsigned-executable-memory: false
+        com.apple.security.cs.allow-jit: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.termy.macos
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        OTHER_LDFLAGS: "-Xlinker -no_adhoc_codesign"
