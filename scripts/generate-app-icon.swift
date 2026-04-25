@@ -71,51 +71,8 @@ func drawIcon(size: CGFloat) -> NSImage {
     )
     attributed.draw(in: textRect)
 
-    drawSmileBar(in: ctx, font: font, textRect: textRect, size: size)
-
     image.unlockFocus()
     return image
-}
-
-// Blue pill below the "_" in the face — same ink size as the underscore,
-// pill-shaped like the eyebrows, one "_"-height below the underscore's bottom.
-func drawSmileBar(in ctx: CGContext, font: NSFont, textRect: CGRect, size: CGFloat) {
-    let ctFont = font as CTFont
-    var chars: [UniChar] = [UniChar(UnicodeScalar("_").value)]
-    var glyphs: [CGGlyph] = [0]
-    CTFontGetGlyphsForCharacters(ctFont, &chars, &glyphs, 1)
-    let inkBounds = CTFontGetBoundingRectsForGlyphs(ctFont, .horizontal, &glyphs, nil, 1)
-
-    // NSAttributedString.draw(in:) top-anchors single-line text, so the
-    // baseline ends up one ascender below the rect's top edge (y-up coords).
-    let baselineY = textRect.origin.y + textRect.height - font.ascender
-    let underscoreBottomY = baselineY + inkBounds.origin.y
-    let inkHeight = inkBounds.size.height
-    let inkWidth = inkBounds.size.width
-
-    // Gap of one underscore-height, then a bar of the same height.
-    let barRect = CGRect(
-        x: size / 2 - inkWidth / 2,
-        y: underscoreBottomY - 2 * inkHeight,
-        width: inkWidth,
-        height: inkHeight
-    )
-
-    let sky = NSColor(calibratedRed: 125.0 / 255.0, green: 211.0 / 255.0, blue: 252.0 / 255.0, alpha: 1)
-    let cornerRadius = inkHeight * 0.35
-    let path = CGPath(
-        roundedRect: barRect,
-        cornerWidth: cornerRadius,
-        cornerHeight: cornerRadius,
-        transform: nil
-    )
-    ctx.addPath(path)
-    ctx.setFillColor(sky.withAlphaComponent(0.85).cgColor)
-    ctx.fillPath()
-    ctx.addPath(path)
-    ctx.setStrokeColor(sky.withAlphaComponent(0.95).cgColor)
-    ctx.setLineWidth(size * 0.004)
-    ctx.strokePath()
 }
 
 // Renders the eyebrow row — three pane-filter chips spread across the full
