@@ -582,30 +582,139 @@ final class Workspace: NSView, NSSplitViewDelegate {
         let outerFrame = bounds.insetBy(dx: 4, dy: 4)
         outer.frame = outerFrame
 
+        let projectIds = Set(visibleRows.flatMap { $0.map(\.projectId) })
+        if filter.isAll && projectIds.count > 1 {
+            populateProjectGrid(outer: outer, frame: outerFrame, visibleRows: visibleRows)
+        } else {
+            populateColumns(outer: outer, frame: outerFrame, visibleRows: visibleRows)
+        }
+    }
+
+    private func populateColumns(outer: NSSplitView, frame: CGRect, visibleRows: [[Pane]]) {
+        outer.isVertical = true
         let columnCount = max(visibleRows.count, 1)
-        let columnWidth = outerFrame.width / CGFloat(columnCount)
+        let columnWidth = frame.width / CGFloat(columnCount)
         for (rowIndex, rowPanes) in visibleRows.enumerated() {
             let row = makeSplit(vertical: false)
             row.frame = CGRect(
                 x: CGFloat(rowIndex) * columnWidth,
                 y: 0,
                 width: columnWidth,
-                height: outerFrame.height
+                height: frame.height
             )
             outer.addArrangedSubview(row)
 
             let paneCount = max(rowPanes.count, 1)
-            let paneHeight = outerFrame.height / CGFloat(paneCount)
+            let paneHeight = frame.height / CGFloat(paneCount)
             for (paneIndex, pane) in rowPanes.enumerated() {
                 pane.frame = CGRect(
                     x: 0,
-                    y: outerFrame.height - CGFloat(paneIndex + 1) * paneHeight,
+                    y: frame.height - CGFloat(paneIndex + 1) * paneHeight,
                     width: columnWidth,
                     height: paneHeight
                 )
                 row.addArrangedSubview(pane)
             }
         }
+    }
+
+    /// ALL 뷰에서 프로젝트가 둘 이상일 때, 각 프로젝트의 row/column 배치를
+    /// 보존한 채 프로젝트 셀들을 √N 그리드(예: 4 → 2×2)에 균등 배치한다.
+    /// 기존 단일 프로젝트 경로(`populateColumns`)와 달리 4단계 split이 된다:
+    ///   outer(grid-rows) → grid-row(cells) → cell(columns) → column(panes)
+    private func populateProjectGrid(outer: NSSplitView, frame: CGRect, visibleRows: [[Pane]]) {
+        let clusters = clusterRowsByProject(visibleRows: visibleRows)
+        guard !clusters.isEmpty else {
+            populateColumns(outer: outer, frame: frame, visibleRows: visibleRows)
+            return
+        }
+
+        let n = clusters.count
+        let cols = max(Int(ceil(Double(n).squareRoot())), 1)
+        let gridRows = (n + cols - 1) / cols
+        let cellHeight = frame.height / CGFloat(gridRows)
+
+        outer.isVertical = false
+
+        for gridRow in 0..<gridRows {
+            let start = gridRow * cols
+            let end = min(start + cols, n)
+            let clustersInRow = Array(clusters[start..<end])
+            guard !clustersInRow.isEmpty else { continue }
+
+            let rowSplit = makeSplit(vertical: true)
+            rowSplit.frame = CGRect(
+                x: 0,
+                y: frame.height - CGFloat(gridRow + 1) * cellHeight,
+                width: frame.width,
+                height: cellHeight
+            )
+            outer.addArrangedSubview(rowSplit)
+
+            let cellCount = max(clustersInRow.count, 1)
+            let cellWidth = frame.width / CGFloat(cellCount)
+
+            for (cellIdx, cluster) in clustersInRow.enumerated() {
+                let cell = makeSplit(vertical: true)
+                cell.frame = CGRect(
+                    x: CGFloat(cellIdx) * cellWidth,
+                    y: 0,
+                    width: cellWidth,
+                    height: cellHeight
+                )
+                rowSplit.addArrangedSubview(cell)
+
+                let columnCount = max(cluster.count, 1)
+                let columnWidth = cellWidth / CGFloat(columnCount)
+                for (colIdx, columnPanes) in cluster.enumerated() {
+                    let column = makeSplit(vertical: false)
+                    column.frame = CGRect(
+                        x: CGFloat(colIdx) * columnWidth,
+                        y: 0,
+                        width: columnWidth,
+                        height: cellHeight
+                    )
+                    cell.addArrangedSubview(column)
+
+                    let paneCount = max(columnPanes.count, 1)
+                    let paneHeight = cellHeight / CGFloat(paneCount)
+                    for (paneIdx, pane) in columnPanes.enumerated() {
+                        pane.frame = CGRect(
+                            x: 0,
+                            y: cellHeight - CGFloat(paneIdx + 1) * paneHeight,
+                            width: columnWidth,
+                            height: paneHeight
+                        )
+                        column.addArrangedSubview(pane)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 각 visibleRow를 (보통 동일한) projectId 기준으로 쪼갠 뒤, 같은 프로젝트의
+    /// row 조각들을 묶어 클러스터([컬럼들의 배열])로 만든다. 클러스터 순서는
+    /// `knownProjectIds`를 따라가서 토올바와 일치한다. 한 row가 여러 프로젝트를
+    /// 섞고 있을 경우(드물다)에도 각 projectId의 panes만 모아서 별도 클러스터로
+    /// 할당한다.
+    private func clusterRowsByProject(visibleRows: [[Pane]]) -> [[[Pane]]] {
+        var byProject: [String: [[Pane]]] = [:]
+        for row in visibleRows {
+            var bucket: [String: [Pane]] = [:]
+            var orderInRow: [String] = []
+            for pane in row {
+                if bucket[pane.projectId] == nil {
+                    orderInRow.append(pane.projectId)
+                }
+                bucket[pane.projectId, default: []].append(pane)
+            }
+            for projectId in orderInRow {
+                if let panes = bucket[projectId], !panes.isEmpty {
+                    byProject[projectId, default: []].append(panes)
+                }
+            }
+        }
+        return knownProjectIds.compactMap { byProject[$0] }
     }
 
     private func installRootSplit(
@@ -720,9 +829,13 @@ final class Workspace: NSView, NSSplitViewDelegate {
         guard !isEqualizingSplits else { return }
         isEqualizingSplits = true
         defer { isEqualizingSplits = false }
-        equalize(outer)
-        for sub in outer.arrangedSubviews.compactMap({ $0 as? NSSplitView }) {
-            equalize(sub)
+        equalizeRecursively(outer)
+    }
+
+    private func equalizeRecursively(_ split: NSSplitView) {
+        equalize(split)
+        for sub in split.arrangedSubviews.compactMap({ $0 as? NSSplitView }) {
+            equalizeRecursively(sub)
         }
     }
 
