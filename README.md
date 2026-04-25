@@ -12,7 +12,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/s0.png" width="760" alt="Four Claude Code agents grouped by project, with a live status dashboard at the bottom" />
+  <img src="docs/screenshots/s0.png" width="760" alt="Four Claude Code agents grouped by project, with a live status dashboard at the bottom (dark theme)" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/s0-light.png" width="760" alt="Same view in light theme" />
 </p>
 
 <p align="center">
