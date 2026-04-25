@@ -110,23 +110,21 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     // MARK: - Project filter (top row)
 
     private func installFilterBar() {
-        guard let window = window, let contentView = rootContentView else { return }
+        guard let contentView = rootContentView else { return }
         let bar = ProjectFilterBar(workspace: workspace)
         filterBar = bar
 
         bar.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(bar)
-        let topAnchor: NSLayoutYAxisAnchor = {
-            if let guide = window.contentLayoutGuide as? NSLayoutGuide {
-                return guide.topAnchor
-            }
-            return contentView.topAnchor
-        }()
         NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: topAnchor),
-            bar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            // Pinned to the actual top of contentView (under the traffic-light
+            // cluster) so the filter row absorbs the titlebar zone, Chrome-style.
+            // `.fullSizeContentView` lets the system still render the traffic
+            // lights on top; `78` clears their cluster width.
+            bar.topAnchor.constraint(equalTo: contentView.topAnchor),
+            bar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 78),
             bar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
-            bar.heightAnchor.constraint(equalToConstant: 32)
+            bar.heightAnchor.constraint(equalToConstant: 40)
         ])
     }
 

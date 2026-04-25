@@ -32,6 +32,12 @@ final class ProjectFilterBar: NSView {
         scrollView.autohidesScrollers = true
         scrollView.horizontalScrollElasticity = .automatic
         scrollView.verticalScrollElasticity = .none
+        // .fullSizeContentView lets the bar sit in the titlebar zone, but the
+        // scrollView reads the titlebar height as a safe-area inset and shoves
+        // its document view 28pt down — chips end up rendered outside the bar.
+        // Disable auto-adjustment.
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = .init()
         scrollView.documentView = stripView
         stripView.frame = NSRect(x: 0, y: 0, width: 0, height: 28)
 
@@ -51,6 +57,11 @@ final class ProjectFilterBar: NSView {
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: 28)
     }
+
+    // Empty regions of the bar pass mouse-down to the window for drag, so
+    // the filter row doubles as a titlebar handle. NSButton subviews override
+    // back to false (default), so chip clicks still work.
+    override var mouseDownCanMoveWindow: Bool { true }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
@@ -314,6 +325,11 @@ private final class FilterStripView: NSView {
     private var underlines: [NSView] = []
 
     override var isFlipped: Bool { true }
+
+    // The strip is the deepest hit-test target between the chips, so this
+    // is what AppKit consults when deciding whether a click in empty space
+    // should drag the window.
+    override var mouseDownCanMoveWindow: Bool { true }
 
     func setButtons(_ newButtons: [NSButton]) {
         buttons.forEach { $0.removeFromSuperview() }
