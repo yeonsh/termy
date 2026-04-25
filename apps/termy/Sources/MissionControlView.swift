@@ -250,10 +250,11 @@ private struct DashboardItem: View {
     let onClick: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button(action: onClick) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 HStack(spacing: 4) {
                     Text(projectText)
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
@@ -272,21 +273,26 @@ private struct DashboardItem: View {
                             .truncationMode(.middle)
                     }
                 }
-                Text(shortStateLabel(snapshot.state))
-                    .font(.system(size: 11, weight: .heavy))
-                    .foregroundColor(stateLabelColor(snapshot.state))
-                    .tracking(0.5)
+                StatePill(state: snapshot.state)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.leading, 14)
+            .padding(.trailing, 5)
+            .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(backgroundTint)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(chipBackgroundColor)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 7)
-                    .strokeBorder(strokeTint, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(chipStrokeColor, lineWidth: 1)
             )
+            .overlay(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(projectAccentColor)
+                    .frame(width: 3)
+                    .padding(.vertical, 5)
+                    .padding(.leading, 4)
+            }
             .overlay(alignment: .topLeading) {
                 if let shortcutHint {
                     ShortcutNumberBadge(text: shortcutHint)
@@ -328,72 +334,24 @@ private struct DashboardItem: View {
         return "\(start)…\(end)"
     }
 
-    /// Per-state tinted background. THINKING was previously the dimmest
-    /// variant (0.36) and disappeared against the black titlebar — every
-    /// state now sits at 0.56+ for resting alpha so the chip reads at a
-    /// glance. The accent override only fires for WAITING — that's the one
-    /// state where Claude is actually blocked on the user. Non-blocking
-    /// notifications (auth_success during IDLE) keep needsAttention=true for
-    /// the dock-badge overlay, but painting the chip accent-blue made an IDLE
-    /// pane read like a THINKING/blocking one.
-    private var backgroundTint: Color {
-        if snapshot.needsAttention, snapshot.state == .waiting {
-            let base = Color(nsColor: .controlAccentColor)
-            return base.opacity(isHovering ? 0.80 : 0.66)
-        }
-        switch snapshot.state {
-        case .waiting:
-            return Color(nsColor: .systemOrange).opacity(isHovering ? 0.76 : 0.62)
-        case .errored:
-            return Color(nsColor: .systemRed).opacity(isHovering ? 0.78 : 0.64)
-        case .thinking:
-            return Color(nsColor: .systemBlue).opacity(isHovering ? 0.74 : 0.58)
-        case .idle:
-            // `tertiaryLabelColor` picked up a subtle blue cast against the
-            // titlebar vibrancy and read similar to THINKING's blue chip.
-            // `systemGray` is the semantic neutral — unambiguously not-blue.
-            return Color(nsColor: .systemGray).opacity(isHovering ? 0.62 : 0.44)
-        case .initializing:
-            return Color(nsColor: .systemGray).opacity(isHovering ? 0.42 : 0.26)
-        }
+    /// Neutral chip surface — the per-pane state color sits in the right-side
+    /// pill, the project hue sits in the left accent bar, and the chip body
+    /// reads as a calm container in both light and dark modes.
+    private var chipBackgroundColor: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(isHovering ? 0.10 : 0.06)
+            : Color.white.opacity(isHovering ? 0.95 : 0.78)
     }
 
-    /// Stroke that echoes the tint at full saturation — crisp chip edge
-    /// against the titlebar vibrancy.
-    private var strokeTint: Color {
-        if snapshot.needsAttention, snapshot.state == .waiting {
-            return Color(nsColor: .controlAccentColor).opacity(0.95)
-        }
-        switch snapshot.state {
-        case .waiting:      return Color(nsColor: .systemOrange).opacity(0.90)
-        case .errored:      return Color(nsColor: .systemRed).opacity(0.92)
-        case .thinking:     return Color(nsColor: .systemBlue).opacity(0.88)
-        case .idle:         return Color(nsColor: .systemGray).opacity(0.80)
-        case .initializing: return Color(nsColor: .systemGray).opacity(0.55)
-        }
+    private var chipStrokeColor: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.14)
+            : Color.black.opacity(0.10)
     }
 
-    private func shortStateLabel(_ state: PaneState) -> String {
-        switch state {
-        case .initializing: return "INIT"
-        case .thinking:     return "THINK"
-        case .waiting:      return "WAIT"
-        case .idle:         return "IDLE"
-        case .errored:      return "ERR"
-        }
-    }
-
-    /// Label text color. The chip background already carries the state color,
-    /// so the text itself is drawn in white/label-color — anything else ends
-    /// up as e.g. systemBlue-on-systemBlue and vanishes. INIT stays muted on
-    /// purpose (init panes aren't actionable yet).
-    private func stateLabelColor(_ state: PaneState) -> Color {
-        switch state {
-        case .waiting, .errored, .thinking, .idle:
-            return Color(nsColor: .labelColor)
-        case .initializing:
-            return Color(nsColor: .secondaryLabelColor)
-        }
+    private var projectAccentColor: Color {
+        let key = snapshot.projectId ?? label.project
+        return Color(nsColor: PaneStyling.accentColor(for: key))
     }
 
     private func tooltip(for snapshot: PaneSnapshot) -> String {
@@ -407,6 +365,84 @@ private struct DashboardItem: View {
             parts.append("last prompt: \(prompt.prefix(120))")
         }
         return parts.joined(separator: "\n")
+    }
+}
+
+// MARK: - State pill
+
+/// Right-side capsule that carries the state color: blinking dot + label.
+/// The dot blinks for THINK and WAIT (Claude is actively working / blocked
+/// on the user); IDLE / INIT / ERR show a steady dot.
+private struct StatePill: View {
+    let state: PaneState
+
+    var body: some View {
+        HStack(spacing: 4) {
+            BlinkingDot(color: stateColor, blinks: shouldBlink)
+            Text(stateLabel)
+                .font(.system(size: 10, weight: .heavy))
+                .foregroundColor(stateColor)
+                .tracking(0.4)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(
+            Capsule(style: .continuous)
+                .fill(stateColor.opacity(0.18))
+        )
+    }
+
+    private var shouldBlink: Bool {
+        state == .thinking || state == .waiting
+    }
+
+    private var stateColor: Color {
+        switch state {
+        case .thinking:     return Color(nsColor: .systemBlue)
+        case .waiting:      return Color(nsColor: .systemOrange)
+        case .errored:      return Color(nsColor: .systemRed)
+        case .idle:         return Color(nsColor: .systemGray)
+        case .initializing: return Color(nsColor: .systemGray)
+        }
+    }
+
+    private var stateLabel: String {
+        switch state {
+        case .initializing: return "INIT"
+        case .thinking:     return "THINK"
+        case .waiting:      return "WAIT"
+        case .idle:         return "IDLE"
+        case .errored:      return "ERR"
+        }
+    }
+}
+
+/// Smoothly-pulsing dot driven by `TimelineView(.animation)` so the phase
+/// keeps advancing without a stateful animation token (which is fragile
+/// across `repeatForever` start/stop transitions in SwiftUI). When `blinks`
+/// is false the view collapses to a steady circle and stops scheduling
+/// per-frame updates.
+private struct BlinkingDot: View {
+    let color: Color
+    let blinks: Bool
+
+    var body: some View {
+        Group {
+            if blinks {
+                TimelineView(.animation) { context in
+                    let t = context.date.timeIntervalSinceReferenceDate
+                    // ~1.3s period, opacity oscillates between 0.35 and 1.0.
+                    let phase = (sin(t * .pi / 0.65) + 1) / 2
+                    Circle()
+                        .fill(color)
+                        .opacity(0.35 + phase * 0.65)
+                }
+            } else {
+                Circle()
+                    .fill(color)
+            }
+        }
+        .frame(width: 5, height: 5)
     }
 }
 
