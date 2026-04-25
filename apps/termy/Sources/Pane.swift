@@ -234,7 +234,7 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         terminal.caretColor = active
             ? NSColor.selectedControlColor
             : theme.terminalForegroundColor.withAlphaComponent(0.55)
-        terminal.terminal.setCursorStyle(active ? .blinkBlock : .steadyBar)
+        terminal.terminal.setCursorStyle(active ? .blinkBar : .steadyBar)
         layer?.borderWidth = active ? 1.5 : 0
         layer?.borderColor = active
             ? NSColor.selectedControlColor.withAlphaComponent(0.45).cgColor
