@@ -176,6 +176,19 @@ final class Workspace: NSView, NSSplitViewDelegate {
                 pane.terminal.thawSizePropagation()
             }
         }
+        // A pane parked under `hiddenPaneParkingView` keeps receiving PTY
+        // writes (and SwiftTerm clears its `refreshStart/refreshEnd` after
+        // each `updateDisplay` tick), but AppKit doesn't draw a hidden
+        // ancestor. When the pane is reparented back into the visible split
+        // tree, only cells the PTY *next* writes get repainted — earlier
+        // updates show through as fragments on a blank background. Force a
+        // full redraw at the transaction boundary so unparked panes catch up
+        // to the buffer. Cheap, idempotent, and panes that didn't change
+        // parent just re-paint identical pixels.
+        for pane in panes {
+            pane.terminal.terminal.updateFullScreen()
+            pane.terminal.setNeedsDisplay(pane.terminal.bounds)
+        }
     }
 
     // MARK: - Filter helpers
