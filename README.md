@@ -16,10 +16,6 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/s0-light.png" width="760" alt="Same view in light theme" />
-</p>
-
-<p align="center">
   <em>Press <kbd>⌘</kbd><kbd>G</kbd> to jump straight to the next <b>WAIT</b> agent.</em>
 </p>
 
@@ -48,7 +44,7 @@ dashboard chip, filter pill — so a four-agent window stops looking like a
 soup of identical black rectangles.
 
 <p align="center">
-  <img src="docs/screenshots/switch-project-1.png" width="620" alt="Filter bar with numbered project pills visible while holding ⌘" />
+  <img src="docs/screenshots/pane-filter.png" width="620" alt="Filter bar with numbered project pills visible while holding ⌘" />
 </p>
 
 **Hold <kbd>⌘</kbd>** and a number appears on every filter pill. Press the
@@ -80,10 +76,6 @@ Code. Each chip shows **project / branch** and a live state:
 <kbd>⌘</kbd><kbd>G</kbd> jumps to the next `WAIT` pane, wherever it is —
 across splits, across project filters. The single most useful keystroke in
 the app.
-
-<p align="center">
-  <img src="docs/screenshots/dashboard-3.png" width="620" alt="Dashboard chips with numbered badges visible while holding ⌘⌥" />
-</p>
 
 **Hold <kbd>⌘</kbd><kbd>⌥</kbd>** and a number appears on each dashboard
 chip; press the number to focus that pane directly, even if it's in a
