@@ -331,9 +331,13 @@ private struct DashboardItem: View {
     /// Per-state tinted background. THINKING was previously the dimmest
     /// variant (0.36) and disappeared against the black titlebar — every
     /// state now sits at 0.56+ for resting alpha so the chip reads at a
-    /// glance. needsAttention still jumps toward the accent.
+    /// glance. The accent override only fires for WAITING — that's the one
+    /// state where Claude is actually blocked on the user. Non-blocking
+    /// notifications (auth_success during IDLE) keep needsAttention=true for
+    /// the dock-badge overlay, but painting the chip accent-blue made an IDLE
+    /// pane read like a THINKING/blocking one.
     private var backgroundTint: Color {
-        if snapshot.needsAttention {
+        if snapshot.needsAttention, snapshot.state == .waiting {
             let base = Color(nsColor: .controlAccentColor)
             return base.opacity(isHovering ? 0.80 : 0.66)
         }
@@ -357,7 +361,7 @@ private struct DashboardItem: View {
     /// Stroke that echoes the tint at full saturation — crisp chip edge
     /// against the titlebar vibrancy.
     private var strokeTint: Color {
-        if snapshot.needsAttention {
+        if snapshot.needsAttention, snapshot.state == .waiting {
             return Color(nsColor: .controlAccentColor).opacity(0.95)
         }
         switch snapshot.state {
