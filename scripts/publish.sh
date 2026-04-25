@@ -62,7 +62,20 @@ gh release create "$TAG" "$DMG" \
 
 echo "==> publish appcast to Pages repo at $PAGES"
 cp "$APPCAST" "$PAGES/appcast.xml"
-git -C "$PAGES" add appcast.xml
+
+echo "==> rewrite hero download CTA to v${VERSION} in index.html / index.en.html"
+for f in "$PAGES/index.html" "$PAGES/index.en.html"; do
+    sed -i '' -E \
+        -e "s|releases/download/v[0-9]+\.[0-9]+\.[0-9]+/termy-[0-9]+\.[0-9]+\.[0-9]+\.dmg|releases/download/v${VERSION}/termy-${VERSION}.dmg|g" \
+        -e "s|Download v[0-9]+\.[0-9]+\.[0-9]+ \(2 MB DMG\)|Download v${VERSION} (2 MB DMG)|g" \
+        "$f"
+    if ! grep -q "termy-${VERSION}\.dmg" "$f" || ! grep -q "Download v${VERSION} (2 MB DMG)" "$f"; then
+        echo "publish.sh: version rewrite failed in $f — pattern not found" >&2
+        exit 1
+    fi
+done
+
+git -C "$PAGES" add appcast.xml index.html index.en.html
 git -C "$PAGES" commit -m "termy ${VERSION}"
 git -C "$PAGES" push
 
