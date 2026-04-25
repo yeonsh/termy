@@ -113,6 +113,40 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// could run its multi-click selection code.
     var onClickInBounds: (() -> Void)?
 
+    /// Pane writes the focus-state caret color here instead of mutating
+    /// `caretColor` directly. We mirror it onto `caretColor` except while
+    /// an IME composition is in flight, where the cursor block would
+    /// otherwise show through behind SwiftTerm's marked-text NSTextField
+    /// overlay as a faint gray box (the overlay's background is clear; the
+    /// caret behind it isn't). During composition we force `caretColor` to
+    /// `.clear`; when composition ends we restore the pinned value.
+    ///
+    /// Stored separately from `caretColor` so we know what to restore — the
+    /// terminal still needs `caretView.frame.origin` to position the
+    /// overlay, so we can't simply hide the caret view (which is internal
+    /// to SwiftTerm anyway).
+    var pinnedCaretColor: NSColor? {
+        didSet {
+            applyEffectiveCaretColor()
+        }
+    }
+
+    private var imeCompositionActive = false {
+        didSet {
+            if imeCompositionActive != oldValue {
+                applyEffectiveCaretColor()
+            }
+        }
+    }
+
+    private func applyEffectiveCaretColor() {
+        if imeCompositionActive {
+            caretColor = .clear
+        } else if let pinned = pinnedCaretColor {
+            caretColor = pinned
+        }
+    }
+
     private func installSelectionClearMonitor() {
         selectionClearMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             guard let self else { return event }
@@ -351,9 +385,11 @@ final class TermyTerminalView: LocalProcessTerminalView {
             // the Korean + space that lands here) sees `composing: true` and is
             // silently dropped by KittyKeyboardEncoder.
             super.unmarkText()
+            imeCompositionActive = false
             return
         }
         super.insertText(string, replacementRange: replacementRange)
+        imeCompositionActive = hasMarkedText()
     }
 
     /// SwiftTerm's `setMarkedText` unconditionally sets its private
@@ -366,9 +402,16 @@ final class TermyTerminalView: LocalProcessTerminalView {
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         if let text = Self.plainText(from: string), text.isEmpty {
             super.unmarkText()
+            imeCompositionActive = false
             return
         }
         super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        imeCompositionActive = hasMarkedText()
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        imeCompositionActive = false
     }
 
     /// SwiftTerm anchors the IME preview overlay to `caretView.frame.origin`

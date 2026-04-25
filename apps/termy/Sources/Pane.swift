@@ -231,9 +231,19 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     func applyActiveAppearance(_ active: Bool) {
         isShowingActiveAppearance = active
         let theme = PaneStyling.theme(for: effectiveAppearance)
-        terminal.caretColor = active
+        // Route the focus-state caret color through TermyTerminalView's pin
+        // instead of mutating `caretColor` directly: Termy needs to swap the
+        // caret to `.clear` while a Korean/CJK IME composition is in flight
+        // (otherwise the cursor block bleeds through behind the marked-text
+        // overlay as a faint gray box), and the pin lets it remember what
+        // color to restore once composition ends.
+        terminal.pinnedCaretColor = active
             ? NSColor.selectedControlColor
             : theme.terminalForegroundColor.withAlphaComponent(0.55)
+        // Initial cursor-style preference. TUIs (claude code, vim, etc.)
+        // legitimately drive cursor style via DECSCUSR (`\e[N q`); we set
+        // ours on focus changes and let the running app override mid-session
+        // — that's the contract terminals honor.
         terminal.terminal.setCursorStyle(active ? .blinkBar : .steadyBar)
         layer?.borderWidth = active ? 1.5 : 0
         layer?.borderColor = active
