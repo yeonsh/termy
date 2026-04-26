@@ -117,6 +117,17 @@ struct PaneFocusHistory {
         }
         return nil
     }
+
+    func focusAfterVisibilityChange(
+        currentPaneId: String?,
+        visiblePaneIds: [String]
+    ) -> String? {
+        guard !visiblePaneIds.isEmpty else { return nil }
+        if let currentPaneId, visiblePaneIds.contains(currentPaneId) {
+            return currentPaneId
+        }
+        return mostRecent(in: visiblePaneIds) ?? visiblePaneIds.first
+    }
 }
 
 final class Workspace: NSView, NSSplitViewDelegate {
@@ -587,10 +598,19 @@ final class Workspace: NSView, NSSplitViewDelegate {
             return
         }
 
-        // Re-focus something reasonable if the previous focus was filtered out.
+        // Re-focus the pane that was last active inside this filter. If this
+        // filter has never had focus, fall back to the first visible pane.
         let visiblePaneList = visibleRows.flatMap { $0 }
-        if let focused = focusedPane, !visiblePaneList.contains(where: { $0 === focused }) {
-            focusedPane = visiblePaneList.first
+        let visiblePaneIds = visiblePaneList.map(\.paneId)
+        let nextFocusedPaneId = focusHistory.focusAfterVisibilityChange(
+            currentPaneId: focusedPane?.paneId,
+            visiblePaneIds: visiblePaneIds
+        )
+        if focusedPane?.paneId != nextFocusedPaneId {
+            focusedPane = visiblePaneList.first { $0.paneId == nextFocusedPaneId }
+            if let focusedPane {
+                focusHistory.markFocused(focusedPane.paneId)
+            }
         }
 
         let outer = makeSplit(vertical: true)
