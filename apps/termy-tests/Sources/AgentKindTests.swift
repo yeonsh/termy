@@ -189,6 +189,119 @@ final class AgentKindTests: XCTestCase {
         XCTAssertEqual(after.notificationReason, "permission")
     }
 
+    // MARK: - Codex fake-WAIT recovery
+    //
+    // CodexForegroundReconciler flips a quiet THINKING pane to WAITING after
+    // 8s of hook silence (typical for reasoning-model LLM calls). When real
+    // hook activity arrives, the pane is provably still working — recover.
+    // Fake WAIT is identifiable by `notificationReason == nil`; real
+    // permission/ask_user_question WAITs always carry a reason.
+
+    func test_codexPreToolUse_inFakeWaiting_recoversToThinking() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .waiting
+        s.needsAttention = false
+        s.notificationReason = nil
+        let event = HookEvent(
+            event: .preToolUse,
+            paneId: "p1",
+            projectId: nil,
+            ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.toolName = "Bash"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .thinking)
+    }
+
+    func test_codexPostToolUse_inFakeWaiting_recoversToThinking() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .waiting
+        s.needsAttention = false
+        s.notificationReason = nil
+        let after = PaneStateMachine.apply(makeCodexPostToolUse(), to: s)
+        XCTAssertEqual(after.state, .thinking)
+    }
+
+    func test_codexPreToolUse_inPermissionWaiting_preservesWaiting() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .waiting
+        s.needsAttention = true
+        s.notificationReason = "permission"
+        let event = HookEvent(
+            event: .preToolUse,
+            paneId: "p1",
+            projectId: nil,
+            ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.toolName = "Bash"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertTrue(after.needsAttention)
+        XCTAssertEqual(after.notificationReason, "permission")
+    }
+
+    func test_codexPreToolUse_inAskUserQuestionWaiting_preservesWaiting() {
+        // ask_user_question WAIT means the user is staring at a Codex prompt
+        // they have to answer. Even if Codex synthesises a PreToolUse event
+        // alongside the question, we must not collapse the chip back to THINK.
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .waiting
+        s.needsAttention = true
+        s.notificationReason = "ask_user_question"
+        let event = HookEvent(
+            event: .preToolUse,
+            paneId: "p1",
+            projectId: nil,
+            ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.toolName = "Bash"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertEqual(after.notificationReason, "ask_user_question")
+    }
+
+    func test_claudePreToolUse_inWaiting_doesNotRecover() {
+        // No reconciler exists for Claude; a Claude pane in WAITING with nil
+        // reason should be left alone (Claude's Stop puts it there honestly).
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .claude)
+        s.state = .waiting
+        s.needsAttention = false
+        s.notificationReason = nil
+        let event = HookEvent(
+            event: .preToolUse,
+            paneId: "p1",
+            projectId: nil,
+            ts: 1.0,
+            agent: "claude-code",
+            meta: { var m = HookEvent.Meta(); m.toolName = "Bash"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .waiting)
+    }
+
+    func test_codexPostToolUse_inFakeWaiting_recoversAndAskUserQuestionStillFlips() {
+        // Sanity: the AskUserQuestion PostToolUse path still wins over the
+        // fake-WAIT recovery branch when the pane was actually parked there.
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .waiting
+        s.needsAttention = true
+        s.notificationReason = "ask_user_question"
+        let event = HookEvent(
+            event: .postToolUse,
+            paneId: "p1",
+            projectId: nil,
+            ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.toolName = "AskUserQuestion"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .thinking)
+        XCTAssertNil(after.notificationReason)
+    }
+
     // MARK: - PaneStateMachine — SessionStart branching
 
     func test_codexSessionStart_resetsFromAnyState() {

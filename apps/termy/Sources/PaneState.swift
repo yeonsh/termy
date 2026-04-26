@@ -22,6 +22,9 @@
 //   *         ──(PermissionRequest)─────▶ WAITING        (Codex; needsAttention=true)
 //   WAITING   ──(PostToolUse after PermissionRequest)▶ THINKING (Codex resumed)
 //   *(codex)  ──(SessionStart)───────────▶ IDLE          (hard reset; SessionEnd absent)
+//   WAITING(codex, reason=nil) ──(Pre/PostToolUse)──▶ THINKING
+//                                       (recovery from CodexForegroundReconciler's
+//                                        silence-induced fake WAIT — see below)
 //
 // Notification events do NOT change the `state` field — they toggle the
 // `needsAttention` overlay on the snapshot. The dock badge shows the union
@@ -234,6 +237,18 @@ enum PaneStateMachine {
                 next.needsAttention = true
                 next.notificationReason = "ask_user_question"
                 next.enteredStateAt = next.updatedAt
+            } else if (event.agentKind ?? previous.agentKind) == .codex,
+                      previous.state == .waiting,
+                      previous.notificationReason == nil {
+                // Codex fake-WAIT recovery. CodexForegroundReconciler flips a
+                // quiet THINKING pane to WAITING after 8s of hook silence
+                // (typical for reasoning-model LLM calls). When real hook
+                // activity arrives, the pane is provably still working — the
+                // reconciler guessed wrong, so flip back. Real permission /
+                // ask_user_question WAITs always carry a notificationReason,
+                // so they're untouched.
+                next.state = .thinking
+                next.enteredStateAt = next.updatedAt
             }
 
         case .postToolUse:
@@ -257,6 +272,14 @@ enum PaneStateMachine {
                 next.state = .thinking
                 next.needsAttention = false
                 next.notificationReason = nil
+                next.enteredStateAt = next.updatedAt
+            } else if (event.agentKind ?? previous.agentKind) == .codex,
+                      previous.state == .waiting,
+                      previous.notificationReason == nil {
+                // Same fake-WAIT recovery as PreToolUse — the reconciler's
+                // 8s silence guess was wrong because Codex just emitted a
+                // real PostToolUse. Flip back to THINKING.
+                next.state = .thinking
                 next.enteredStateAt = next.updatedAt
             }
 
