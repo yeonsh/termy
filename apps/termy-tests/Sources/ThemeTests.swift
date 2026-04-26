@@ -43,6 +43,21 @@ final class ThemeTests: XCTestCase {
         XCTAssertLessThan(lightTheme.headerTintAlpha, darkTheme.headerTintAlpha)
     }
 
+    func test_focusAppearance_emphasizesActivePaneAndDimsInactivePane() {
+        for variant: TermyThemeVariant in [.dark, .light] {
+            let theme = PaneStyling.theme(for: variant)
+            let accent = theme.accentPalette[0]
+            let active = PaneStyling.focusAppearance(active: true, accent: accent, theme: theme)
+            let inactive = PaneStyling.focusAppearance(active: false, accent: accent, theme: theme)
+
+            XCTAssertEqual(active.paneOpacity, 1.0)
+            XCTAssertLessThan(inactive.paneOpacity, active.paneOpacity)
+            XCTAssertGreaterThan(active.borderWidth, inactive.borderWidth)
+            XCTAssertGreaterThan(alpha(of: active.borderColor), alpha(of: inactive.borderColor))
+            XCTAssertEqual(alpha(of: inactive.caretColor), 0)
+        }
+    }
+
     private func brightness(of color: NSColor) -> CGFloat {
         let resolved = color.usingColorSpace(.deviceRGB) ?? color
         var red: CGFloat = 0
@@ -51,5 +66,12 @@ final class ThemeTests: XCTestCase {
         var alpha: CGFloat = 0
         resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
         return (red * 0.299) + (green * 0.587) + (blue * 0.114)
+    }
+
+    private func alpha(of color: NSColor) -> CGFloat {
+        let resolved = color.usingColorSpace(.deviceRGB) ?? color
+        var alpha: CGFloat = 0
+        resolved.getRed(nil, green: nil, blue: nil, alpha: &alpha)
+        return alpha
     }
 }

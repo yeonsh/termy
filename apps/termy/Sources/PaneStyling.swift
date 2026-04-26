@@ -27,6 +27,13 @@ struct TermyTheme {
     let terminalANSIColors: [NSColor]
 }
 
+struct PaneFocusAppearance {
+    let paneOpacity: Float
+    let borderWidth: CGFloat
+    let borderColor: NSColor
+    let caretColor: NSColor
+}
+
 enum PaneStyling {
     /// Hash-based assignment produced repeat hues for small project counts —
     /// 4 projects could easily land on three shades of red. Sequential
@@ -65,6 +72,24 @@ enum PaneStyling {
         nextIndex += 1
         let palette = theme(for: appearance).accentPalette
         return palette[idx % palette.count]
+    }
+
+    static func focusAppearance(active: Bool, accent: NSColor, theme: TermyTheme) -> PaneFocusAppearance {
+        if active {
+            return PaneFocusAppearance(
+                paneOpacity: 1.0,
+                borderWidth: 2.5,
+                borderColor: accent.withAlphaComponent(theme.variant == .dark ? 0.95 : 0.85),
+                caretColor: accent
+            )
+        }
+
+        return PaneFocusAppearance(
+            paneOpacity: theme.variant == .dark ? 0.88 : 0.91,
+            borderWidth: 1.0,
+            borderColor: theme.terminalForegroundColor.withAlphaComponent(theme.variant == .dark ? 0.14 : 0.16),
+            caretColor: .clear
+        )
     }
 
     private static func rgb(_ r: Int, _ g: Int, _ b: Int) -> NSColor {
