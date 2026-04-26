@@ -43,7 +43,11 @@ struct DaemonUpdate: Sendable {
 }
 
 enum CodexForegroundReconciler {
-    static func waitingSnapshotIfInputReady(
+    /// Returns a `.possiblyWaiting` snapshot if a foreground Codex pane has
+    /// been silent on hooks for at least `silenceThreshold` seconds while in
+    /// THINKING. Returns nil if it should be left alone (recent activity,
+    /// already attention-seeking, non-Codex, or wrong base state).
+    static func possiblyWaitingSnapshotIfQuiet(
         _ snapshot: PaneSnapshot,
         now: Date,
         silenceThreshold: TimeInterval
@@ -57,7 +61,8 @@ enum CodexForegroundReconciler {
         guard quietFor >= silenceThreshold else { return nil }
 
         var updated = snapshot
-        updated.state = .waiting
+        updated.state = .possiblyWaiting
+        updated.waitSource = nil
         updated.updatedAt = now
         updated.enteredStateAt = now
         return updated
@@ -202,7 +207,7 @@ actor HookDaemon {
     /// can otherwise stick on THINK forever.
     func reconcileCodexForeground(paneId: String, now: Date = Date()) {
         guard let current = panes[paneId],
-              let snapshot = CodexForegroundReconciler.waitingSnapshotIfInputReady(
+              let snapshot = CodexForegroundReconciler.possiblyWaitingSnapshotIfQuiet(
                 current,
                 now: now,
                 silenceThreshold: codexThinkingSilenceThreshold

@@ -20,17 +20,19 @@ final class CodexForegroundReconcilerTests: XCTestCase {
         return snapshot
     }
 
-    func test_quietForegroundCodexThinkingPaneBecomesWaiting() {
+    func test_quietForegroundCodexThinkingPaneBecomesPossiblyWaiting() {
         let updatedAt = Date(timeIntervalSince1970: 100)
         let now = Date(timeIntervalSince1970: 109)
 
-        let reconciled = CodexForegroundReconciler.waitingSnapshotIfInputReady(
+        let reconciled = CodexForegroundReconciler.possiblyWaitingSnapshotIfQuiet(
             snapshot(updatedAt: updatedAt),
             now: now,
             silenceThreshold: 8
         )
 
-        XCTAssertEqual(reconciled?.state, .waiting)
+        XCTAssertEqual(reconciled?.state, .possiblyWaiting)
+        XCTAssertNil(reconciled?.waitSource)
+        XCTAssertFalse(reconciled?.needsAttention ?? true)
         XCTAssertEqual(reconciled?.updatedAt, now)
         XCTAssertEqual(reconciled?.enteredStateAt, now)
     }
@@ -39,7 +41,7 @@ final class CodexForegroundReconcilerTests: XCTestCase {
         let updatedAt = Date(timeIntervalSince1970: 100)
         let now = Date(timeIntervalSince1970: 107)
 
-        let reconciled = CodexForegroundReconciler.waitingSnapshotIfInputReady(
+        let reconciled = CodexForegroundReconciler.possiblyWaitingSnapshotIfQuiet(
             snapshot(updatedAt: updatedAt),
             now: now,
             silenceThreshold: 8
@@ -52,7 +54,7 @@ final class CodexForegroundReconcilerTests: XCTestCase {
         let updatedAt = Date(timeIntervalSince1970: 100)
         let now = Date(timeIntervalSince1970: 120)
 
-        let reconciled = CodexForegroundReconciler.waitingSnapshotIfInputReady(
+        let reconciled = CodexForegroundReconciler.possiblyWaitingSnapshotIfQuiet(
             snapshot(needsAttention: true, updatedAt: updatedAt),
             now: now,
             silenceThreshold: 8
@@ -65,7 +67,7 @@ final class CodexForegroundReconcilerTests: XCTestCase {
         let updatedAt = Date(timeIntervalSince1970: 100)
         let now = Date(timeIntervalSince1970: 120)
 
-        let reconciled = CodexForegroundReconciler.waitingSnapshotIfInputReady(
+        let reconciled = CodexForegroundReconciler.possiblyWaitingSnapshotIfQuiet(
             snapshot(agentKind: .claude, updatedAt: updatedAt),
             now: now,
             silenceThreshold: 8
