@@ -267,11 +267,12 @@ final class PaneStateMachineTests: XCTestCase {
     }
 
     func test_postToolUse_askUserQuestion_resumesThinking() {
+        // Claude path — entry sets notificationReason but NOT waitSource (which
+        // is reserved for Codex). Recovery must therefore match on either key.
         var s = empty()
         s.state = .waiting
         s.needsAttention = true
         s.notificationReason = "ask_user_question"
-        s.waitSource = .askUserQuestion  // Tasks 2-3 ensure this is set alongside notificationReason
         let after = PaneStateMachine.apply(
             makeEvent(.postToolUse, toolName: "AskUserQuestion"),
             to: s
@@ -279,6 +280,37 @@ final class PaneStateMachineTests: XCTestCase {
         XCTAssertEqual(after.state, .thinking)
         XCTAssertFalse(after.needsAttention)
         XCTAssertNil(after.notificationReason)
+        XCTAssertNil(after.waitSource)
+    }
+
+    func test_claudeStop_doesNotSetWaitSource() {
+        // waitSource is Codex-only — a Claude Stop must not tag the WAIT
+        // with .turnEnd, otherwise Notifier reads it as Codex and mis-attributes
+        // the banner copy.
+        var s = empty()
+        s.state = .thinking
+        let after = PaneStateMachine.apply(
+            makeEvent(.stop, last: "ok"),
+            to: s
+        )
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertNil(after.waitSource)
+        XCTAssertEqual(after.lastAssistantMessage, "ok")
+    }
+
+    func test_claudePreToolUseAskUserQuestion_doesNotSetWaitSource() {
+        // Same gating rationale as Stop — Claude AskUserQuestion uses the
+        // legacy notificationReason path, never waitSource.
+        var s = empty()
+        s.state = .thinking
+        let after = PaneStateMachine.apply(
+            makeEvent(.preToolUse, toolName: "AskUserQuestion"),
+            to: s
+        )
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertNil(after.waitSource)
+        XCTAssertEqual(after.notificationReason, "ask_user_question")
+        XCTAssertTrue(after.needsAttention)
     }
 
     func test_subagentStop_doesNotChangeState() {

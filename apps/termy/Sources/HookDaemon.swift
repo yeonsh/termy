@@ -241,18 +241,40 @@ actor HookDaemon {
     }
 
     /// Called by TermyTerminalView every time the PTY produces output.
-    /// Updates `lastPtyActivityAt` and reverts a `.possiblyWaiting` Codex
-    /// pane to `.thinking` — PTY bytes are proof the model is working
-    /// (reasoning summary text prints to the PTY even between hook events).
-    /// No-op on unknown paneId.
+    /// PTY bytes are proof the model is working (reasoning summaries print
+    /// to the PTY even between hook events). Reverts a Codex pane to
+    /// `.thinking` from either:
+    ///   - `.possiblyWaiting` (silent interim, no badge to clear), or
+    ///   - `.waiting(.promotedFromPossible)` (timer-fired false WAIT — clears
+    ///     needsAttention and badge so the user isn't paged for a still-live
+    ///     turn).
+    /// No-op for Claude panes, unknown paneId, or Codex states where the
+    /// signal can't act (THINKING, real WAITs, IDLE, ERRORED). The early
+    /// return matters: every yield drives MissionControlModel.recomputeItems
+    /// + Notifier handling, which would otherwise fire on every PTY chunk
+    /// of any pane.
     func recordPtyActivity(paneId: String, at now: Date = Date()) {
-        guard var snapshot = panes[paneId] else { return }
-        snapshot.lastPtyActivityAt = now
-        if snapshot.state == .possiblyWaiting {
-            snapshot.state = .thinking
-            snapshot.enteredStateAt = now
+        guard var snapshot = panes[paneId],
+              snapshot.agentKind == .codex
+        else { return }
+
+        let needsRevert: Bool
+        switch (snapshot.state, snapshot.waitSource) {
+        case (.possiblyWaiting, _):
+            needsRevert = true
+        case (.waiting, .promotedFromPossible):
+            needsRevert = true
+        default:
+            needsRevert = false
         }
+        guard needsRevert else { return }
+
+        snapshot.lastPtyActivityAt = now
+        snapshot.state = .thinking
+        snapshot.needsAttention = false
+        snapshot.waitSource = nil
         snapshot.updatedAt = now
+        snapshot.enteredStateAt = now
         panes[paneId] = snapshot
         seq &+= 1
         updateContinuation.yield(DaemonUpdate(seq: seq, snapshot: snapshot))

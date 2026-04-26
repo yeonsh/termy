@@ -189,7 +189,14 @@ enum PaneStateMachine {
         case .stop:
             next.lastAssistantMessage = event.meta.lastAssistantMessage
             next.state = .waiting
-            next.waitSource = .turnEnd
+            // waitSource is the Codex-only typed reason (see PaneState.swift).
+            // Claude paths leave it nil and continue using notificationReason
+            // for legacy reason strings; Notifier reads waitSource as Codex,
+            // so tagging Claude WAITs with .turnEnd would mis-attribute the
+            // notification copy.
+            if (event.agentKind ?? previous.agentKind) == .codex {
+                next.waitSource = .turnEnd
+            }
             next.enteredStateAt = next.updatedAt
 
         case .stopFailure:
@@ -254,7 +261,10 @@ enum PaneStateMachine {
                 next.state = .waiting
                 next.needsAttention = true
                 next.notificationReason = "ask_user_question"
-                next.waitSource = .askUserQuestion
+                // Codex-only — Notifier reads waitSource as Codex copy.
+                if (event.agentKind ?? previous.agentKind) == .codex {
+                    next.waitSource = .askUserQuestion
+                }
                 next.enteredStateAt = next.updatedAt
             } else if (event.agentKind ?? previous.agentKind) == .codex,
                       previous.state == .possiblyWaiting {
@@ -277,7 +287,11 @@ enum PaneStateMachine {
         case .postToolUse:
             if event.meta.toolName == "AskUserQuestion",
                previous.state == .waiting,
-               previous.waitSource == .askUserQuestion {
+               previous.waitSource == .askUserQuestion
+                || previous.notificationReason == "ask_user_question" {
+                // Match either typed source (Codex) or legacy reason string
+                // (Claude) — entry sites diverge by agent but recovery is
+                // symmetric.
                 next.state = .thinking
                 next.needsAttention = false
                 next.notificationReason = nil
