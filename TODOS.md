@@ -10,14 +10,23 @@ Both Codex hooks (via `~/.codex/config.toml` + TOMLKit) and the
 foreground-process watcher (synthetic `SessionStart`/`SessionEnd`) landed.
 PermissionRequest drives THINK→WAIT; Codex `SessionStart` is a hard reset
 to IDLE; the fg-process watcher closes the missing-`SessionEnd` gap.
-Open follow-ups:
-- ERR inference from `Stop.stopReason` + `PostToolUse.tool_response`
-- 0.124.0 hook regression (issue #19199) — version warning at install
-- THINK timeout guard for drift correction
-- Live integration smoke test (real codex CLI in CI)
-- "Works with every LLM CLI" reach — fg-process watcher already covers
-  start/end; THINK/WAIT/IDLE for hook-less agents would still need
-  bespoke heuristics
+Squash-merged to main as `690a193` on 2026-04-26.
+
+### Codex follow-ups
+- **ERR inference** — derive ERRORED state from `Stop.stopReason` +
+  `PostToolUse.tool_response` so failed runs surface in the dashboard
+  without a manual reset.
+- **0.124.0 hook regression (issue #19199)** — emit a version warning
+  during `CodexHookInstaller` install when the local Codex CLI is on a
+  known-broken release.
+- **THINK timeout guard** — drift-correct panes stuck in THINK past a
+  threshold (foreground process gone but no terminal SessionEnd / Stop).
+- **Live integration smoke test** — real `codex` CLI invocation in CI
+  exercising the full hook → daemon → PaneState path; current tests are
+  unit-level only.
+- **"Works with every LLM CLI" reach** — fg-process watcher already
+  covers start/end; THINK/WAIT/IDLE for hook-less agents would need
+  bespoke heuristics (e.g., output cadence, prompt regex).
 
 ### Separate LaunchAgent daemon
 - **What:** Move HookDaemon out of termy.app into `~/Library/LaunchAgents/app.termy.daemon.plist`.
