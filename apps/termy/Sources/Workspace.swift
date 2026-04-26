@@ -99,12 +99,33 @@ enum BalancedPanePlacementPlanner {
     }
 }
 
+struct PaneFocusHistory {
+    private var paneIds: [String] = []
+
+    mutating func markFocused(_ paneId: String) {
+        paneIds.removeAll { $0 == paneId }
+        paneIds.append(paneId)
+    }
+
+    mutating func remove(_ paneId: String) {
+        paneIds.removeAll { $0 == paneId }
+    }
+
+    func mostRecent(in candidateIds: [String]) -> String? {
+        for paneId in paneIds.reversed() where candidateIds.contains(paneId) {
+            return paneId
+        }
+        return nil
+    }
+}
+
 final class Workspace: NSView, NSSplitViewDelegate {
     /// Source of truth for pane layout: ordered rows of ordered panes. A
     /// column split appends to the focused pane's row; a row split inserts a
     /// fresh row immediately after it.
     private(set) var rows: [[Pane]] = []
     private var paneCreationOrder: [Pane] = []
+    private var focusHistory = PaneFocusHistory()
     var panes: [Pane] { paneCreationOrder }
     private(set) var focusedPane: Pane?
     var filter: WorkspaceFilter = .all {
@@ -364,7 +385,11 @@ final class Workspace: NSView, NSSplitViewDelegate {
             } else {
                 relayout()
             }
-            focusedPane = visiblePanes.first
+            let fallbackPaneId = focusHistory.mostRecent(in: visiblePanes.map(\.paneId))
+            focusedPane = visiblePanes.first { $0.paneId == fallbackPaneId } ?? visiblePanes.first
+            if let focusedPane {
+                focusHistory.markFocused(focusedPane.paneId)
+            }
             updateActivePaneAppearance()
             focusedPane?.focusTerminal()
         } else {
@@ -383,6 +408,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
         pane.removeFromSuperview()
         if maximizedPane === pane { maximizedPane = nil }
         parkedPaneFrames.removeValue(forKey: ObjectIdentifier(pane))
+        focusHistory.remove(pane.paneId)
         paneCreationOrder.removeAll { $0 === pane }
         for r in 0..<rows.count {
             rows[r].removeAll { $0 === pane }
@@ -435,6 +461,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
             relayout()
         }
         focusedPane = pane
+        focusHistory.markFocused(pane.paneId)
         updateActivePaneAppearance()
         pane.focusTerminal()
     }
