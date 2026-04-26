@@ -297,4 +297,35 @@ final class PaneStateMachineTests: XCTestCase {
         let after = PaneStateMachine.apply(makeEvent(.userPromptSubmit, prompt: "x"), to: s)
         XCTAssertGreaterThan(after.enteredStateAt, t0)
     }
+
+    // MARK: - Model: WaitSource + possiblyWaiting
+
+    func test_possiblyWaitingState_rawValue() {
+        XCTAssertEqual(PaneState.possiblyWaiting.rawValue, "POSSIBLY_WAITING")
+    }
+
+    func test_waitSource_rawValues_areKebabStable() {
+        XCTAssertEqual(WaitSource.permission.rawValue, "permission")
+        XCTAssertEqual(WaitSource.askUserQuestion.rawValue, "ask_user_question")
+        XCTAssertEqual(WaitSource.turnEnd.rawValue, "turn_end")
+        XCTAssertEqual(WaitSource.promotedFromPossible.rawValue, "promoted_from_possible")
+    }
+
+    func test_emptySnapshot_hasNilWaitSourceAndNilLastPtyActivityAt() {
+        let s = PaneSnapshot.empty(paneId: "p1", projectId: nil)
+        XCTAssertNil(s.waitSource)
+        XCTAssertNil(s.lastPtyActivityAt)
+    }
+
+    func test_paneSnapshot_codableRoundTrip_preservesNewFields() throws {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: "proj")
+        s.state = .waiting
+        s.waitSource = .promotedFromPossible
+        s.lastPtyActivityAt = Date(timeIntervalSince1970: 42)
+        let data = try JSONEncoder().encode(s)
+        let decoded = try JSONDecoder().decode(PaneSnapshot.self, from: data)
+        XCTAssertEqual(decoded.state, .waiting)
+        XCTAssertEqual(decoded.waitSource, .promotedFromPossible)
+        XCTAssertEqual(decoded.lastPtyActivityAt, Date(timeIntervalSince1970: 42))
+    }
 }

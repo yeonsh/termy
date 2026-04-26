@@ -33,11 +33,27 @@
 import Foundation
 
 enum PaneState: String, Sendable, Codable {
-    case initializing = "INIT"
-    case thinking     = "THINKING"
-    case waiting      = "WAITING"
-    case idle         = "IDLE"
-    case errored      = "ERRORED"
+    case initializing    = "INIT"
+    case thinking        = "THINKING"
+    case possiblyWaiting = "POSSIBLY_WAITING"
+    case waiting         = "WAITING"
+    case idle            = "IDLE"
+    case errored         = "ERRORED"
+}
+
+/// Why a pane is in `.waiting`. Codex paths set this; Claude paths leave nil
+/// and rely on `notificationReason` for the legacy reason strings.
+enum WaitSource: String, Sendable, Codable {
+    /// Codex emitted PermissionRequest — user must approve a tool call.
+    case permission           = "permission"
+    /// Codex called AskUserQuestion — user must pick an option.
+    case askUserQuestion      = "ask_user_question"
+    /// Codex's Stop hook fired — turn naturally ended.
+    case turnEnd              = "turn_end"
+    /// Reconciler-induced POSSIBLY_WAITING aged out without recovery —
+    /// promoted to real WAITING by the daemon's tick. Eligible for
+    /// hook-based recovery on next Pre/PostToolUse.
+    case promotedFromPossible = "promoted_from_possible"
 }
 
 /// Immutable snapshot of everything HookDaemon tracks for one pane.
@@ -46,7 +62,9 @@ struct PaneSnapshot: Sendable, Codable {
     let projectId: String?
     var state: PaneState
     var needsAttention: Bool
-    var notificationReason: String?     // "permission" | "idle" | "mcp_elicit" or nil
+    var notificationReason: String?     // Claude legacy: "permission" | "idle" | "mcp_elicit" or nil
+    /// Codex-only typed reason for `.waiting`. nil for Claude and for non-waiting states.
+    var waitSource: WaitSource?
     var lastSessionId: String?
     var lastCwd: String?
     var lastPrompt: String?              // UserPromptSubmit.prompt (truncated)
@@ -59,11 +77,15 @@ struct PaneSnapshot: Sendable, Codable {
     /// (or by foreground-process detection) and sticky thereafter until a
     /// new SessionStart from a different agent arrives.
     var agentKind: AgentKind = .claude
+    /// Last time PTY produced output for this pane. Updated by
+    /// TermyTerminalView.dataReceived → HookDaemon.recordPtyActivity.
+    /// Used as a liveness signal during POSSIBLY_WAITING.
+    var lastPtyActivityAt: Date?
 
     private enum CodingKeys: String, CodingKey {
-        case paneId, projectId, state, needsAttention, notificationReason
+        case paneId, projectId, state, needsAttention, notificationReason, waitSource
         case lastSessionId, lastCwd, lastPrompt, lastAssistantMessage
-        case updatedAt, enteredStateAt, agentKind
+        case updatedAt, enteredStateAt, agentKind, lastPtyActivityAt
     }
 }
 
@@ -80,13 +102,15 @@ extension PaneSnapshot {
             state: .initializing,
             needsAttention: false,
             notificationReason: nil,
+            waitSource: nil,
             lastSessionId: nil,
             lastCwd: nil,
             lastPrompt: nil,
             lastAssistantMessage: nil,
             updatedAt: now,
             enteredStateAt: now,
-            agentKind: agentKind
+            agentKind: agentKind,
+            lastPtyActivityAt: nil
         )
     }
 }

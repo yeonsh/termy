@@ -401,6 +401,7 @@ private struct StatePill: View {
     private var stateColor: Color {
         switch state {
         case .thinking:     return Color(nsColor: .systemBlue)
+        case .possiblyWaiting: return Color(nsColor: .systemBlue)
         case .waiting:      return Color(nsColor: .systemOrange)
         case .errored:      return Color(nsColor: .systemRed)
         case .idle:         return Color(nsColor: .systemGray)
@@ -412,6 +413,7 @@ private struct StatePill: View {
         switch state {
         case .initializing: return "INIT"
         case .thinking:     return "THINK"
+        case .possiblyWaiting: return "THINK"
         case .waiting:      return "WAIT"
         case .idle:         return "IDLE"
         case .errored:      return "ERR"
