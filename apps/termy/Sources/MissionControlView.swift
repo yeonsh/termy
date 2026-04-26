@@ -395,13 +395,14 @@ private struct StatePill: View {
     }
 
     private var shouldBlink: Bool {
-        state == .thinking || state == .waiting
+        state == .thinking || state == .waiting || state == .possiblyWaiting
     }
 
     private var stateColor: Color {
         switch state {
-        case .thinking:     return Color(nsColor: .systemBlue)
-        case .possiblyWaiting: return Color(nsColor: .systemBlue)
+        case .thinking, .possiblyWaiting:
+            // POSSIBLY_WAITING is rendered as THINK — invisible to the user.
+            return Color(nsColor: .systemBlue)
         case .waiting:      return Color(nsColor: .systemOrange)
         case .errored:      return Color(nsColor: .systemRed)
         case .idle:         return Color(nsColor: .systemGray)
@@ -411,12 +412,12 @@ private struct StatePill: View {
 
     private var stateLabel: String {
         switch state {
-        case .initializing: return "INIT"
-        case .thinking:     return "THINK"
-        case .possiblyWaiting: return "THINK"
-        case .waiting:      return "WAIT"
-        case .idle:         return "IDLE"
-        case .errored:      return "ERR"
+        case .initializing:    return "INIT"
+        case .thinking,
+             .possiblyWaiting: return "THINK"
+        case .waiting:         return "WAIT"
+        case .idle:            return "IDLE"
+        case .errored:         return "ERR"
         }
     }
 }

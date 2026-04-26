@@ -143,6 +143,19 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func notificationBody(for snap: PaneSnapshot) -> String {
+        // Codex panes carry waitSource; map it to user-facing copy first.
+        if let source = snap.waitSource {
+            switch source {
+            case .permission:           return "Waiting for your approval."
+            case .askUserQuestion:      return "Codex is asking a question."
+            case .turnEnd:
+                if let msg = snap.lastAssistantMessage, !msg.isEmpty {
+                    return String(msg.prefix(140))
+                }
+                return "Codex finished — your turn."
+            case .promotedFromPossible: return "Codex has been quiet for a while — check on it."
+            }
+        }
         if let reason = snap.notificationReason {
             switch reason {
             case "permission":         return "Waiting for your approval."
