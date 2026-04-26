@@ -102,6 +102,11 @@ actor HookDaemon {
     /// hook. If Codex stays in the PTY foreground after its last hook event
     /// and no more activity arrives for this long, treat it as input-ready.
     private let codexThinkingSilenceThreshold: TimeInterval = 8
+    /// POSSIBLY_WAITING → WAITING(.promotedFromPossible) after this many
+    /// seconds elapsed since entering possibly with no recovery. Total
+    /// silence-to-sound is `codexThinkingSilenceThreshold` + this value
+    /// (default 8 + 12 = ~20s).
+    private let codexPromotionThreshold: TimeInterval = 12
 
     // MARK: - Init
 
@@ -451,7 +456,29 @@ actor HookDaemon {
     private func idleLoop() async {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 5 * 1_000_000_000) // 5s tick
+            await tickPromotePossiblyWaiting()
             await tickIdle()
+        }
+    }
+
+    /// Walk POSSIBLY_WAITING Codex panes; promote any that have been in
+    /// the state for `codexPromotionThreshold` seconds with no hook or
+    /// PTY recovery. Promotion sets `waitSource = .promotedFromPossible`
+    /// and `needsAttention = true`, which Notifier turns into a sound +
+    /// dock badge. Called from `idleLoop`.
+    func tickPromotePossiblyWaiting(now: Date = Date()) {
+        for (id, snapshot) in panes where snapshot.state == .possiblyWaiting {
+            let elapsed = now.timeIntervalSince(snapshot.enteredStateAt)
+            guard elapsed >= codexPromotionThreshold else { continue }
+            var updated = snapshot
+            updated.state = .waiting
+            updated.waitSource = .promotedFromPossible
+            updated.needsAttention = true
+            updated.updatedAt = now
+            updated.enteredStateAt = now
+            panes[id] = updated
+            seq &+= 1
+            updateContinuation.yield(DaemonUpdate(seq: seq, snapshot: updated))
         }
     }
 

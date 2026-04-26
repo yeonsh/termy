@@ -69,4 +69,62 @@ final class HookDaemonPossiblyWaitingTests: XCTestCase {
         let after = await daemon.snapshot(paneId: "ghost")
         XCTAssertNil(after)
     }
+
+    func test_tickPromote_underThreshold_doesNothing() async {
+        let daemon = HookDaemon.testInstance()
+        let enteredAt = Date(timeIntervalSince1970: 1000)
+        _ = await daemon.injectSnapshot {
+            var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+            s.state = .possiblyWaiting
+            s.enteredStateAt = enteredAt
+            s.updatedAt = enteredAt
+            return s
+        }
+
+        // 11s after entering possibly — below the 12s threshold.
+        let now = Date(timeIntervalSince1970: 1011)
+        await daemon.tickPromotePossiblyWaiting(now: now)
+
+        let after = await daemon.snapshot(paneId: "p1")
+        XCTAssertEqual(after?.state, .possiblyWaiting)
+        XCTAssertNil(after?.waitSource)
+        XCTAssertFalse(after?.needsAttention ?? true)
+    }
+
+    func test_tickPromote_pastThreshold_promotesToWaiting() async {
+        let daemon = HookDaemon.testInstance()
+        let enteredAt = Date(timeIntervalSince1970: 1000)
+        _ = await daemon.injectSnapshot {
+            var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+            s.state = .possiblyWaiting
+            s.enteredStateAt = enteredAt
+            s.updatedAt = enteredAt
+            return s
+        }
+
+        // 12s after entering possibly — at threshold.
+        let now = Date(timeIntervalSince1970: 1012)
+        await daemon.tickPromotePossiblyWaiting(now: now)
+
+        let after = await daemon.snapshot(paneId: "p1")
+        XCTAssertEqual(after?.state, .waiting)
+        XCTAssertEqual(after?.waitSource, .promotedFromPossible)
+        XCTAssertTrue(after?.needsAttention ?? false)
+        XCTAssertEqual(after?.enteredStateAt, now)
+    }
+
+    func test_tickPromote_thinkingPane_isUntouched() async {
+        let daemon = HookDaemon.testInstance()
+        _ = await daemon.injectSnapshot {
+            var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+            s.state = .thinking
+            s.enteredStateAt = Date(timeIntervalSince1970: 0)
+            return s
+        }
+
+        await daemon.tickPromotePossiblyWaiting(now: Date(timeIntervalSince1970: 100_000))
+
+        let after = await daemon.snapshot(paneId: "p1")
+        XCTAssertEqual(after?.state, .thinking)
+    }
 }
