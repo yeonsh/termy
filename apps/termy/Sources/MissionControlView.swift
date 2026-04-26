@@ -383,6 +383,8 @@ private struct StatePill: View {
                 .font(.system(size: 10, weight: .heavy))
                 .foregroundColor(stateColor)
                 .tracking(0.4)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
