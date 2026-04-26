@@ -164,6 +164,7 @@ final class AgentKindTests: XCTestCase {
         s.state = .waiting
         s.needsAttention = true
         s.notificationReason = "permission"
+        s.waitSource = .permission  // Tasks 2-3 ensure this is always set alongside notificationReason
         let after = PaneStateMachine.apply(makeCodexPostToolUse(), to: s)
         XCTAssertEqual(after.state, .thinking)
         XCTAssertFalse(after.needsAttention)
@@ -198,10 +199,14 @@ final class AgentKindTests: XCTestCase {
     // permission/ask_user_question WAITs always carry a reason.
 
     func test_codexPreToolUse_inFakeWaiting_recoversToThinking() {
+        // "Fake WAIT" is now modelled as WAITING(.promotedFromPossible) —
+        // the reconciler's silence-induced POSSIBLY_WAITING aged out and was
+        // promoted by the daemon tick. Tasks 2-3 ensure waitSource is set.
         var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
         s.state = .waiting
         s.needsAttention = false
         s.notificationReason = nil
+        s.waitSource = .promotedFromPossible
         let event = HookEvent(
             event: .preToolUse,
             paneId: "p1",
@@ -215,10 +220,12 @@ final class AgentKindTests: XCTestCase {
     }
 
     func test_codexPostToolUse_inFakeWaiting_recoversToThinking() {
+        // "Fake WAIT" is now modelled as WAITING(.promotedFromPossible).
         var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
         s.state = .waiting
         s.needsAttention = false
         s.notificationReason = nil
+        s.waitSource = .promotedFromPossible
         let after = PaneStateMachine.apply(makeCodexPostToolUse(), to: s)
         XCTAssertEqual(after.state, .thinking)
     }
@@ -284,11 +291,13 @@ final class AgentKindTests: XCTestCase {
 
     func test_codexPostToolUse_inFakeWaiting_recoversAndAskUserQuestionStillFlips() {
         // Sanity: the AskUserQuestion PostToolUse path still wins over the
-        // fake-WAIT recovery branch when the pane was actually parked there.
+        // promoted-from-possible recovery branch when the pane was actually
+        // parked there. waitSource distinguishes the two cases.
         var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
         s.state = .waiting
         s.needsAttention = true
         s.notificationReason = "ask_user_question"
+        s.waitSource = .askUserQuestion  // Tasks 2-3 ensure this is set alongside notificationReason
         let event = HookEvent(
             event: .postToolUse,
             paneId: "p1",
@@ -340,6 +349,82 @@ final class AgentKindTests: XCTestCase {
         )
         let after = PaneStateMachine.apply(event, to: s)
         XCTAssertEqual(after.state, .thinking)
+    }
+
+    // MARK: - POSSIBLY_WAITING recovery
+
+    func test_codexPreToolUse_inPossiblyWaiting_recoversToThinking_silently() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .possiblyWaiting
+        s.needsAttention = false
+        s.waitSource = nil
+        let event = HookEvent(
+            event: .preToolUse, paneId: "p1", projectId: nil, ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.toolName = "Bash"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .thinking)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertNil(after.waitSource)
+    }
+
+    func test_codexPostToolUse_inPossiblyWaiting_recoversToThinking_silently() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .possiblyWaiting
+        let event = HookEvent(
+            event: .postToolUse, paneId: "p1", projectId: nil, ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.toolName = "Bash"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .thinking)
+    }
+
+    func test_codexPostToolUse_inPromotedFromPossibleWaiting_recoversToThinking() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .waiting
+        s.needsAttention = true
+        s.waitSource = .promotedFromPossible
+        let event = HookEvent(
+            event: .postToolUse, paneId: "p1", projectId: nil, ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.toolName = "Bash"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .thinking)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertNil(after.waitSource)
+    }
+
+    func test_codexStop_inPossiblyWaiting_promotesToTurnEndWaiting() {
+        // Stop arriving during POSSIBLY_WAITING is a real turn end — promote
+        // to WAITING(.turnEnd) so the user gets the sound.
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .possiblyWaiting
+        let event = HookEvent(
+            event: .stop, paneId: "p1", projectId: nil, ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.lastAssistantMessage = "done"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertEqual(after.waitSource, .turnEnd)
+        XCTAssertEqual(after.lastAssistantMessage, "done")
+    }
+
+    func test_codexPermissionRequest_inPossiblyWaiting_promotesToPermissionWaiting() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .possiblyWaiting
+        let event = HookEvent(
+            event: .permissionRequest, paneId: "p1", projectId: nil, ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.toolName = "Bash"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertEqual(after.waitSource, .permission)
+        XCTAssertTrue(after.needsAttention)
     }
 
     // MARK: - Helpers

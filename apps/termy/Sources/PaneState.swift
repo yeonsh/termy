@@ -2,33 +2,38 @@
 //
 // Per-pane state machine driven by HookEvents. ERRORED is driven by
 // PtyExit (exit_code != 0) or StopFailure — NOT by PostToolUseFailure, which
-// fires on routine tool errors (missing file, empty glob, Bash exit 1) that
-// Claude recovers from within the same turn.
+// fires on routine tool errors that Claude recovers from within the same turn.
 //
-//   INIT      ──(UserPromptSubmit)─────▶ THINKING
-//   INIT      ──(SessionStart)──────────▶ INIT         (informational; arm pane)
-//   THINKING  ──(Stop)───────────────────▶ WAITING
-//   THINKING  ──(SessionEnd)─────────────▶ INIT         (claude exited cleanly mid-turn)
-//   THINKING  ──(PtyExit, exit_code != 0)▶ ERRORED      (crash / SIGKILL / Ctrl+C)
-//   THINKING  ──(PtyExit, exit_code == 0)▶ INIT         (clean exit — rare mid-turn)
-//   WAITING   ──(UserPromptSubmit)──────▶ THINKING
-//   WAITING   ──(30s wall-clock timer)──▶ IDLE          (HookDaemon re-checks on wake)
-//   WAITING   ──(SessionEnd | PtyExit)──▶ INIT
+//   INIT             ──(UserPromptSubmit)─────────▶ THINKING
+//   INIT             ──(SessionStart)──────────────▶ INIT          (informational)
+//   THINKING         ──(Stop)───────────────────────▶ WAITING(.turnEnd)
+//   THINKING         ──(SessionEnd)─────────────────▶ INIT
+//   THINKING         ──(PtyExit, exit != 0)─────────▶ ERRORED
+//   THINKING         ──(reconciler 8s silence)──────▶ POSSIBLY_WAITING (silent)
+//   POSSIBLY_WAITING ──(Pre/PostToolUse)─────────────▶ THINKING       (silent recovery)
+//   POSSIBLY_WAITING ──(PTY byte)────────────────────▶ THINKING       (PTY proof of life)
+//   POSSIBLY_WAITING ──(Stop)────────────────────────▶ WAITING(.turnEnd)         ♪
+//   POSSIBLY_WAITING ──(PermissionRequest)───────────▶ WAITING(.permission)      ♪
+//   POSSIBLY_WAITING ──(AskUserQuestion)─────────────▶ WAITING(.askUserQuestion) ♪
+//   POSSIBLY_WAITING ──(promote timer 12s elapsed)───▶ WAITING(.promotedFromPossible) ♪
+//   WAITING          ──(UserPromptSubmit)───────────▶ THINKING
+//   WAITING          ──(30s wall-clock timer)───────▶ IDLE
+//   WAITING          ──(SessionEnd | PtyExit)───────▶ INIT
+//   WAITING(.permission)         ──(PostToolUse)──▶ THINKING (Codex resumed)
+//   WAITING(.askUserQuestion)    ──(PostToolUse AskUserQuestion)──▶ THINKING
+//   WAITING(.promotedFromPossible) ──(Pre/PostToolUse)──▶ THINKING (recovery, c80d2c4 lineage)
 //   IDLE      ──(UserPromptSubmit)──────▶ THINKING
 //   IDLE      ──(SessionEnd | PtyExit)──▶ INIT
-//   ERRORED   ──(UserPromptSubmit)──────▶ THINKING      (user retried in same pane)
-//   ERRORED   ──(Stop)───────────────────▶ WAITING       (recover-on-next-turn)
-//   ERRORED   ──(SessionStart)───────────▶ INIT          (fresh claude session)
-//   *         ──(PermissionRequest)─────▶ WAITING        (Codex; needsAttention=true)
-//   WAITING   ──(PostToolUse after PermissionRequest)▶ THINKING (Codex resumed)
-//   *(codex)  ──(SessionStart)───────────▶ IDLE          (hard reset; SessionEnd absent)
-//   WAITING(codex, reason=nil) ──(Pre/PostToolUse)──▶ THINKING
-//                                       (recovery from CodexForegroundReconciler's
-//                                        silence-induced fake WAIT — see below)
+//   ERRORED   ──(UserPromptSubmit)──────▶ THINKING
+//   ERRORED   ──(Stop)───────────────────▶ WAITING(.turnEnd)
+//   ERRORED   ──(SessionStart)───────────▶ INIT
+//   *(codex)  ──(SessionStart)───────────▶ IDLE          (hard reset)
 //
-// Notification events do NOT change the `state` field — they toggle the
-// `needsAttention` overlay on the snapshot. The dock badge shows the union
-// of (state == .waiting) and (needsAttention == true).
+// ♪ = Notifier plays a sound and raises needsAttention.
+//
+// POSSIBLY_WAITING is rendered as THINK in the dashboard chip — invisible to
+// the user. The two-stage WAIT is documented in
+// docs/superpowers/plans/2026-04-26-codex-possibly-waiting-state.md.
 
 import Foundation
 
@@ -245,12 +250,6 @@ enum PaneStateMachine {
             next.enteredStateAt = next.updatedAt
 
         case .preToolUse:
-            // Most tool uses are Claude actively doing work — stay THINKING.
-            // Exception: AskUserQuestion pauses Claude until the user picks an
-            // option. The user sees a blocking menu; the chip must say WAIT,
-            // not THINK. (No Notification fires for AskUserQuestion in
-            // practice — only PreToolUse + a delayed idle Notification ~6s
-            // later, which is too slow and often doesn't come.)
             if event.meta.toolName == "AskUserQuestion" {
                 next.state = .waiting
                 next.needsAttention = true
@@ -258,48 +257,50 @@ enum PaneStateMachine {
                 next.waitSource = .askUserQuestion
                 next.enteredStateAt = next.updatedAt
             } else if (event.agentKind ?? previous.agentKind) == .codex,
-                      previous.state == .waiting,
-                      previous.notificationReason == nil {
-                // Codex fake-WAIT recovery. CodexForegroundReconciler flips a
-                // quiet THINKING pane to WAITING after 8s of hook silence
-                // (typical for reasoning-model LLM calls). When real hook
-                // activity arrives, the pane is provably still working — the
-                // reconciler guessed wrong, so flip back. Real permission /
-                // ask_user_question WAITs always carry a notificationReason,
-                // so they're untouched.
+                      previous.state == .possiblyWaiting {
+                // Possible-WAIT recovery: hook activity proves the model is working.
+                // Silent — no needsAttention was raised on possibly entry.
                 next.state = .thinking
+                next.enteredStateAt = next.updatedAt
+            } else if (event.agentKind ?? previous.agentKind) == .codex,
+                      previous.state == .waiting,
+                      previous.waitSource == .promotedFromPossible {
+                // Real-WAIT recovery (preserved c80d2c4 logic, re-keyed on waitSource).
+                // The promotion timer fired but a real Pre/PostToolUse arrived after,
+                // so the model was working all along — flip back to THINKING.
+                next.state = .thinking
+                next.needsAttention = false
+                next.waitSource = nil
                 next.enteredStateAt = next.updatedAt
             }
 
         case .postToolUse:
-            // When AskUserQuestion resolves (user answered), Claude resumes —
-            // flip back to THINKING. Other PostToolUse events don't change
-            // state; Claude continues in THINKING from whatever it was doing.
             if event.meta.toolName == "AskUserQuestion",
                previous.state == .waiting,
-               previous.notificationReason == "ask_user_question" {
+               previous.waitSource == .askUserQuestion {
                 next.state = .thinking
                 next.needsAttention = false
                 next.notificationReason = nil
+                next.waitSource = nil
                 next.enteredStateAt = next.updatedAt
             } else if (event.agentKind ?? previous.agentKind) == .codex,
                       previous.state == .waiting,
-                      previous.notificationReason == "permission" {
-                // Codex emits PermissionRequest before showing an approval
-                // prompt, then PostToolUse after the approved tool runs. No
-                // separate "approval accepted" event exists, so PostToolUse is
-                // the first reliable signal that Codex has resumed work.
+                      previous.waitSource == .permission {
                 next.state = .thinking
                 next.needsAttention = false
                 next.notificationReason = nil
+                next.waitSource = nil
+                next.enteredStateAt = next.updatedAt
+            } else if (event.agentKind ?? previous.agentKind) == .codex,
+                      previous.state == .possiblyWaiting {
+                next.state = .thinking
                 next.enteredStateAt = next.updatedAt
             } else if (event.agentKind ?? previous.agentKind) == .codex,
                       previous.state == .waiting,
-                      previous.notificationReason == nil {
-                // Same fake-WAIT recovery as PreToolUse — the reconciler's
-                // 8s silence guess was wrong because Codex just emitted a
-                // real PostToolUse. Flip back to THINKING.
+                      previous.waitSource == .promotedFromPossible {
                 next.state = .thinking
+                next.needsAttention = false
+                next.waitSource = nil
                 next.enteredStateAt = next.updatedAt
             }
 

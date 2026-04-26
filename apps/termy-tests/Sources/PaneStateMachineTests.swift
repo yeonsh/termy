@@ -271,6 +271,7 @@ final class PaneStateMachineTests: XCTestCase {
         s.state = .waiting
         s.needsAttention = true
         s.notificationReason = "ask_user_question"
+        s.waitSource = .askUserQuestion  // Tasks 2-3 ensure this is set alongside notificationReason
         let after = PaneStateMachine.apply(
             makeEvent(.postToolUse, toolName: "AskUserQuestion"),
             to: s
