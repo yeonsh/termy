@@ -14,6 +14,10 @@ cd "$(dirname "$0")/.."
 
 pkill -x termy 2>/dev/null || true
 
+# Regenerate the Xcode project from project.yml. termy.xcodeproj is gitignored,
+# so switching branches that add/remove sources leaves stale file refs.
+xcodegen generate --quiet
+
 xcodebuild \
     -project termy.xcodeproj \
     -scheme termy \
