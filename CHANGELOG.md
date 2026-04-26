@@ -4,7 +4,7 @@ All notable changes to termy. Each section heading's version must match the
 `CFBundleShortVersionString` at release time — `scripts/render-release-notes.py`
 extracts the matching section into the Sparkle appcast `<description>`.
 
-## Unreleased
+## 0.1.5 — 2026-04-26
 
 - Codex CLI support: termy now reads Codex's hook events alongside Claude
   Code's, so panes running `codex` get the same live IDLE / THINK / WAIT
@@ -18,6 +18,13 @@ extracts the matching section into the Sparkle appcast `<description>`.
   `SessionStart` / `SessionEnd` when `claude` or `codex` enters or leaves
   the foreground PG of a pane's shell. Closes Codex's missing
   `SessionEnd` event and resets the chip when the user types `/exit`.
+- Active pane now wears the project accent border; inactive panes dim,
+  making focus state legible at a glance across a packed dashboard.
+- Project filter respects the last active pane: changing the filter
+  returns focus to the previously focused pane in that scope rather than
+  the topmost.
+- Dashboard chip's state pill no longer compresses its label when the
+  chip is narrow.
 
 ## 0.1.4 — 2026-04-25
 
