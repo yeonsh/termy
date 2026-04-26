@@ -13,6 +13,7 @@ to IDLE; the fg-process watcher closes the missing-`SessionEnd` gap.
 Squash-merged to main as `690a193` on 2026-04-26.
 
 ### Codex follow-ups
+- ~~**Fake-WAIT prevention** — reasoning-model silence shouldn't trip the 8s reconciler.~~ Shipped 2026-04-27 via two-stage WAIT (POSSIBLY_WAITING + PTY-activity gate + promotion timer). See `docs/superpowers/plans/2026-04-26-codex-possibly-waiting-state.md`.
 - **ERR inference** — derive ERRORED state from `Stop.stopReason` +
   `PostToolUse.tool_response` so failed runs surface in the dashboard
   without a manual reset.

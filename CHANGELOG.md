@@ -4,6 +4,10 @@ All notable changes to termy. Each section heading's version must match the
 `CFBundleShortVersionString` at release time — `scripts/render-release-notes.py`
 extracts the matching section into the Sparkle appcast `<description>`.
 
+## Unreleased
+
+- Codex: replace 8s fake-WAIT heuristic with two-stage POSSIBLY_WAITING → WAITING(.promotedFromPossible). Reasoning-model silence (GPT-5/o-series) no longer triggers spurious WAIT chips or sounds; PTY byte arrival reverts the silent interim state. Total silence-to-sound is now ~20s.
+
 ## 0.1.5 — 2026-04-26
 
 - Codex CLI support: termy now reads Codex's hook events alongside Claude
