@@ -16,6 +16,10 @@ import CoreText
 import SwiftTerm
 
 final class TermyTerminalView: LocalProcessTerminalView {
+    /// Set by Pane after construction — used to attribute PTY-byte pings
+    /// to the right snapshot inside HookDaemon. nil before assignment.
+    var paneId: String?
+
     // `nonisolated(unsafe)` so `deinit` (nonisolated) can read it. The monitor
     // is only written once during init on the main thread; removeMonitor is
     // safe to call from any thread.
@@ -428,8 +432,34 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// reposition.
     nonisolated(unsafe) private var markedTextRepositionWork: DispatchWorkItem?
 
+    // Live verification (required per memory `feedback_termy_live_verify.md`):
+    //   1. Build & launch termy with `xcodebuild -scheme termy -destination
+    //      'platform=macOS' run`.
+    //   2. Open a pane, run `codex` with a reasoning-heavy prompt
+    //      ("think carefully and explain X in 5 paragraphs").
+    //   3. Verify dashboard chip stays on THINK during the long reasoning
+    //      period — should NOT flicker to WAIT (silent POSSIBLY_WAITING).
+    //   4. Trigger an actual permission prompt (e.g. `codex` asks to run
+    //      Bash); verify chip flips to WAIT with sound.
+    //   5. After ~20s of model hang (kill -STOP `pidof codex`), confirm
+    //      promotion to WAIT(.promotedFromPossible) with sound.
+
+    /// PTY produced bytes — forward to SwiftTerm's renderer (via super) and
+    /// publish a liveness ping to HookDaemon. The ping reverts a Codex pane
+    /// out of POSSIBLY_WAITING because reasoning-summary text prints to the
+    /// PTY even between hook events. Also re-anchors an in-flight IME overlay
+    /// to the current caret position after each PTY echo.
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
+
+        // Liveness ping: revert POSSIBLY_WAITING → THINKING while PTY is
+        // producing output (reasoning text keeps flowing even between hooks).
+        if let id = paneId {
+            Task { await HookDaemon.shared.recordPtyActivity(paneId: id) }
+        }
+
+        // IME overlay re-anchor: after a PTY echo SwiftTerm repositions the
+        // caret, so we must re-deliver the marked text to sync the overlay.
         guard hasMarkedText() else { return }
         markedTextRepositionWork?.cancel()
         let work = DispatchWorkItem { [weak self] in

@@ -90,6 +90,7 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         self.initialCwd = Pane.resolveCwd(cwd)
         self.currentCwd = self.initialCwd
         self.terminal = TermyTerminalView(frame: .zero)
+        self.terminal.paneId = self.paneId
         self.headerView = PaneHeaderView()
         super.init(frame: .zero)
 
