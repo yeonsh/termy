@@ -183,14 +183,8 @@ enum PaneStateMachine {
 
         case .stop:
             next.lastAssistantMessage = event.meta.lastAssistantMessage
-            switch previous.state {
-            case .thinking, .errored:
-                next.state = .waiting
-            default:
-                // Defensive — Stop outside THINKING means our state drifted.
-                // Snap back to waiting rather than stay wrong.
-                next.state = .waiting
-            }
+            next.state = .waiting
+            next.waitSource = .turnEnd
             next.enteredStateAt = next.updatedAt
 
         case .stopFailure:
@@ -247,6 +241,7 @@ enum PaneStateMachine {
             next.state = .waiting
             next.needsAttention = true
             next.notificationReason = "permission"
+            next.waitSource = .permission
             next.enteredStateAt = next.updatedAt
 
         case .preToolUse:
@@ -260,6 +255,7 @@ enum PaneStateMachine {
                 next.state = .waiting
                 next.needsAttention = true
                 next.notificationReason = "ask_user_question"
+                next.waitSource = .askUserQuestion
                 next.enteredStateAt = next.updatedAt
             } else if (event.agentKind ?? previous.agentKind) == .codex,
                       previous.state == .waiting,

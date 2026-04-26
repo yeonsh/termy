@@ -328,4 +328,48 @@ final class PaneStateMachineTests: XCTestCase {
         XCTAssertEqual(decoded.waitSource, .promotedFromPossible)
         XCTAssertEqual(decoded.lastPtyActivityAt, Date(timeIntervalSince1970: 42))
     }
+
+    // MARK: - WaitSource on real-WAIT entry
+
+    func test_codexStop_setsWaitSourceTurnEnd() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .thinking
+        let event = HookEvent(
+            event: .stop, paneId: "p1", projectId: nil, ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.lastAssistantMessage = "ok"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertEqual(after.waitSource, .turnEnd)
+        XCTAssertEqual(after.lastAssistantMessage, "ok")
+    }
+
+    func test_codexPermissionRequest_setsWaitSourcePermission() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .thinking
+        let event = HookEvent(
+            event: .permissionRequest, paneId: "p1", projectId: nil, ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.toolName = "Bash"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertEqual(after.waitSource, .permission)
+        XCTAssertTrue(after.needsAttention)
+    }
+
+    func test_codexPreToolUseAskUserQuestion_setsWaitSourceAskUserQuestion() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .codex)
+        s.state = .thinking
+        let event = HookEvent(
+            event: .preToolUse, paneId: "p1", projectId: nil, ts: 1.0,
+            agent: "codex",
+            meta: { var m = HookEvent.Meta(); m.toolName = "AskUserQuestion"; return m }()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertEqual(after.waitSource, .askUserQuestion)
+        XCTAssertTrue(after.needsAttention)
+    }
 }
