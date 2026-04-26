@@ -120,6 +120,22 @@ actor HookDaemon {
         self.updates = updateStream
     }
 
+    /// Test seam — spins up a daemon without binding the socket. The
+    /// production path goes through `start()`; tests skip that and drive
+    /// the actor directly.
+    static func testInstance() -> HookDaemon {
+        HookDaemon()
+    }
+
+    /// Test seam — set or replace a pane's snapshot and return it. Used by
+    /// tests to bootstrap state before exercising actor methods.
+    @discardableResult
+    func injectSnapshot(_ build: @Sendable () -> PaneSnapshot) -> PaneSnapshot {
+        let snap = build()
+        panes[snap.paneId] = snap
+        return snap
+    }
+
     // MARK: - Lifecycle
 
     /// Start listening. Safe to call once per process; subsequent calls no-op.
@@ -214,6 +230,24 @@ actor HookDaemon {
               )
         else { return }
 
+        panes[paneId] = snapshot
+        seq &+= 1
+        updateContinuation.yield(DaemonUpdate(seq: seq, snapshot: snapshot))
+    }
+
+    /// Called by TermyTerminalView every time the PTY produces output.
+    /// Updates `lastPtyActivityAt` and reverts a `.possiblyWaiting` Codex
+    /// pane to `.thinking` — PTY bytes are proof the model is working
+    /// (reasoning summary text prints to the PTY even between hook events).
+    /// No-op on unknown paneId.
+    func recordPtyActivity(paneId: String, at now: Date = Date()) {
+        guard var snapshot = panes[paneId] else { return }
+        snapshot.lastPtyActivityAt = now
+        if snapshot.state == .possiblyWaiting {
+            snapshot.state = .thinking
+            snapshot.enteredStateAt = now
+        }
+        snapshot.updatedAt = now
         panes[paneId] = snapshot
         seq &+= 1
         updateContinuation.yield(DaemonUpdate(seq: seq, snapshot: snapshot))
