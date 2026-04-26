@@ -162,6 +162,37 @@ Durable findings about Claude Code's hook surface that shape the architecture:
 The canonical event set is defined in `HookEvent.swift`; treat the code as the
 source of truth, since CC's event surface has changed across versions.
 
+### Codex CLI hooks
+
+Codex CLI is supported alongside Claude Code via the same `termy-hook`
+helper, dispatched on its `--agent codex` flag. Per
+`developers.openai.com/codex/hooks`:
+
+- **Config lives in `~/.codex/config.toml`** (TOML, not JSON), gated by
+  `[features] codex_hooks = true`. The installer in `CodexHookInstaller.swift`
+  uses TOMLKit to merge our blocks non-destructively, marker-tagged
+  `_termy_managed = true` for surgical uninstall.
+- **Six events, no `SessionEnd` and no error event.** `PermissionRequest`
+  takes the role of CC's `Notification(reason: permission)` and is the
+  THINK→WAIT trigger. Codex has no in-band error hook, so termy infers
+  ERRORED the same way it does for any agent: a `PtyExit` with non-zero
+  status (crash, SIGKILL, Ctrl+C). Codex's own `Stop` event always lands
+  the pane in WAITING regardless of why the turn ended.
+- **Synthetic `SessionEnd` via foreground-process detection.**
+  `ForegroundProcessWatcher` polls `tcgetpgrp()` on each pane's PTY and
+  uses libproc's `proc_name()` to classify the foreground binary. When
+  `claude` or `codex` enters or leaves the foreground PG, the watcher
+  posts a synthetic `SessionStart` / `SessionEnd` to HookDaemon. This
+  closes Codex's hook gap and incidentally provides bookend coverage for
+  any future hook-less agent.
+- **Codex panes treat every `SessionStart` as a hard reset to IDLE**
+  (CC keeps prior state if not `.initializing`). Done because synthetic
+  `SessionEnd` can miss tight `/exit` + relaunch transitions.
+
+`AgentKind` is stamped onto `PaneSnapshot` from the wire-level `agent`
+field on the first non-synthetic event, so the daemon can branch on agent
+semantics without scattering string comparisons.
+
 ## Current Product Surface
 
 What is already implemented:

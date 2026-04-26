@@ -42,6 +42,28 @@ struct DaemonUpdate: Sendable {
     let snapshot: PaneSnapshot
 }
 
+enum CodexForegroundReconciler {
+    static func waitingSnapshotIfInputReady(
+        _ snapshot: PaneSnapshot,
+        now: Date,
+        silenceThreshold: TimeInterval
+    ) -> PaneSnapshot? {
+        guard snapshot.agentKind == .codex,
+              snapshot.state == .thinking,
+              !snapshot.needsAttention
+        else { return nil }
+
+        let quietFor = now.timeIntervalSince(snapshot.updatedAt)
+        guard quietFor >= silenceThreshold else { return nil }
+
+        var updated = snapshot
+        updated.state = .waiting
+        updated.updatedAt = now
+        updated.enteredStateAt = now
+        return updated
+    }
+}
+
 actor HookDaemon {
     static let shared = HookDaemon()
 
@@ -71,6 +93,10 @@ actor HookDaemon {
 
     /// WAITING → IDLE threshold. Per design doc §Premise 5, 30s is a knob.
     private let idleThreshold: TimeInterval = 30
+    /// Codex currently has no reliable "turn completed, prompt is ready"
+    /// hook. If Codex stays in the PTY foreground after its last hook event
+    /// and no more activity arrives for this long, treat it as input-ready.
+    private let codexThinkingSilenceThreshold: TimeInterval = 8
 
     // MARK: - Init
 
@@ -100,6 +126,10 @@ actor HookDaemon {
         idleTimerTask = Task.detached { [weak self] in
             await self?.idleLoop()
         }
+        // Foreground-process watcher synthesizes SessionStart/SessionEnd
+        // for agent CLIs that leave or enter the shell's fg PG. Closes
+        // Codex's missing SessionEnd gap and covers hook-less agents.
+        await ForegroundProcessWatcher.shared.start(daemon: self)
     }
 
     /// Tear down socket and cancel background tasks. Call on app quit.
@@ -107,6 +137,7 @@ actor HookDaemon {
         listening = false
         idleTimerTask?.cancel()
         idleTimerTask = nil
+        Task { await ForegroundProcessWatcher.shared.stop() }
         if serverFD >= 0 {
             close(serverFD)
             serverFD = -1
@@ -129,6 +160,60 @@ actor HookDaemon {
         await ingest(event)
     }
 
+    /// Called by ForegroundProcessWatcher when a known agent CLI enters
+    /// the foreground process group of a pane's PTY. We tag the synthetic
+    /// event with the detected agent (not "termy") so PaneStateMachine
+    /// stamps the correct agentKind on the snapshot.
+    func postSyntheticSessionStart(
+        paneId: String,
+        projectId: String?,
+        agent: AgentKind
+    ) async {
+        let event = HookEvent(
+            event: .sessionStart,
+            paneId: paneId,
+            projectId: projectId,
+            ts: Date().timeIntervalSince1970,
+            agent: agent == .codex ? "codex" : "claude-code",
+            meta: HookEvent.Meta()
+        )
+        await ingest(event)
+    }
+
+    /// Called by ForegroundProcessWatcher when the foreground binary
+    /// returns to the shell (or transitions to a non-agent process).
+    /// `agent` stays "termy" because the source isn't an agent itself —
+    /// the snapshot's existing agentKind is preserved by PaneStateMachine.
+    func postSyntheticSessionEnd(paneId: String, projectId: String?) async {
+        let event = HookEvent(
+            event: .sessionEnd,
+            paneId: paneId,
+            projectId: projectId,
+            ts: Date().timeIntervalSince1970,
+            agent: "termy",
+            meta: HookEvent.Meta()
+        )
+        await ingest(event)
+    }
+
+    /// Called by ForegroundProcessWatcher while Codex remains the pane's
+    /// foreground process. Codex does not emit a Claude-style Stop hook when
+    /// a normal turn returns to the prompt, so a quiet foreground Codex pane
+    /// can otherwise stick on THINK forever.
+    func reconcileCodexForeground(paneId: String, now: Date = Date()) {
+        guard let current = panes[paneId],
+              let snapshot = CodexForegroundReconciler.waitingSnapshotIfInputReady(
+                current,
+                now: now,
+                silenceThreshold: codexThinkingSilenceThreshold
+              )
+        else { return }
+
+        panes[paneId] = snapshot
+        seq &+= 1
+        updateContinuation.yield(DaemonUpdate(seq: seq, snapshot: snapshot))
+    }
+
     /// Read-only accessor for the UI layer.
     func snapshot(paneId: String) -> PaneSnapshot? {
         panes[paneId]
@@ -148,6 +233,14 @@ actor HookDaemon {
             TrayLog.log("HookDaemon: socket() failed errno=\(errno)")
             return
         }
+
+        // Without FD_CLOEXEC, every shell SwiftTerm forks for a pane (and
+        // every claude/codex/MCP-helper exec'd from those shells) inherits
+        // this listening fd. The kernel then can't free the listen-socket
+        // inode when termy restarts, and child references keep the listen
+        // queue alive beyond our process's lifetime. Set close-on-exec so
+        // forks see the bind but exec() drops it.
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
@@ -199,12 +292,31 @@ actor HookDaemon {
                     }
                 }
                 guard cfd >= 0 else {
-                    if errno == EINTR { continue }
-                    if self.listening {
-                        TrayLog.log("HookDaemon: accept() failed errno=\(errno)")
+                    let err = errno
+                    if err == EINTR { continue }
+                    // The previous behavior was to `return` on every
+                    // non-EINTR error, which silently killed the daemon:
+                    // the bound fd stayed open but no thread serviced it,
+                    // so further connect()s landed ECONNREFUSED until the
+                    // user noticed the dashboard had gone deaf. Recover
+                    // instead — a single accept() failure is almost never
+                    // permanent (EMFILE/ENFILE/ECONNABORTED all clear once
+                    // load drops). Only fatal-fd errors warrant exiting.
+                    TrayLog.log("HookDaemon: accept() failed errno=\(err)")
+                    if err == EBADF || err == EINVAL || err == ENOTSOCK {
+                        TrayLog.log("HookDaemon: accept() fatal — exiting loop")
+                        return
                     }
-                    return
+                    // Transient: brief backoff so we don't spin if the
+                    // condition repeats (e.g. EMFILE under fd exhaustion).
+                    usleep(50_000)
+                    continue
                 }
+                // Same close-on-exec story as the listen socket: SwiftTerm
+                // forks a shell when the user creates a new pane, and any
+                // accepted-but-not-yet-closed client fd would otherwise be
+                // inherited into that shell.
+                _ = fcntl(cfd, F_SETFD, FD_CLOEXEC)
                 self.ioQueue.async { [weak self] in
                     self?.readClient(fd: cfd)
                 }

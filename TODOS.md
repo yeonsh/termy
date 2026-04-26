@@ -5,20 +5,19 @@ Not v1 scope. Revisit after v1 ships and real users surface real priorities.
 
 ## v1.1 candidates
 
-### Codex support
-- **What:** Extend HookDaemon to handle Codex's hook event set.
-- **Why:** Codex users exist; "CC-only" limits reach.
-- **Pros:** Doubles addressable audience overnight.
-- **Cons:** Codex's hook set (`SessionStart`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`) has no Notification or error events. Codex panes can only reliably produce THINKING/WAITING. ERRORED requires a fallback (pty exit code or screen-scrape).
-- **Context:** Verified during /office-hours — Codex's Notification event does not exist, so parity with CC needs additional signals. See design doc premise 5.
-- **Depends on:** CC path being stable in v1.
-
-### Screen-scraping fallback for agents without hooks
-- **What:** Optional per-pane stdout parser that detects state transitions via output patterns.
-- **Why:** Unlocks support for any CLI agent (Aider, Gemini CLI, homegrown tools), not just CC/Codex.
-- **Pros:** Product reach expands significantly. "Works with every LLM CLI" is a better tagline than "works with Claude Code."
-- **Cons:** Fragile. Pattern-per-agent. Breaks when the agent's output format changes.
-- **Context:** /office-hours explicitly rejected this for v1 in favor of hooks-first. Revisit if hook-first proves too restrictive.
+### Codex support — SHIPPED on branch `codex-support` (2026-04-26)
+Both Codex hooks (via `~/.codex/config.toml` + TOMLKit) and the
+foreground-process watcher (synthetic `SessionStart`/`SessionEnd`) landed.
+PermissionRequest drives THINK→WAIT; Codex `SessionStart` is a hard reset
+to IDLE; the fg-process watcher closes the missing-`SessionEnd` gap.
+Open follow-ups:
+- ERR inference from `Stop.stopReason` + `PostToolUse.tool_response`
+- 0.124.0 hook regression (issue #19199) — version warning at install
+- THINK timeout guard for drift correction
+- Live integration smoke test (real codex CLI in CI)
+- "Works with every LLM CLI" reach — fg-process watcher already covers
+  start/end; THINK/WAIT/IDLE for hook-less agents would still need
+  bespoke heuristics
 
 ### Separate LaunchAgent daemon
 - **What:** Move HookDaemon out of termy.app into `~/Library/LaunchAgents/app.termy.daemon.plist`.
@@ -40,6 +39,26 @@ Not v1 scope. Revisit after v1 ships and real users surface real priorities.
 - **Pros:** Free, zero-effort, native.
 - **Cons:** None for v1; just a config checkbox.
 - **Context:** Move to v1 if remembered early; otherwise land in v1.1 first release bump.
+
+### Disambiguate same-name projects in the pane filter
+- **What:** Two panes whose worktree basenames collide (e.g. `~/code/api`
+  and `~/other/api`) are bucketed under one `.project("api")` filter and
+  paint with the same accent color. They should be treated as separate
+  projects.
+- **Why:** The bug is documented in `ProjectIdentity.derive` ("⚠️ NOT a
+  persistence key — basename collides...") but the live `projectId` in
+  `Pane` still uses the basename. `WorkspacePersistence` already keys on
+  `canonicalPath`, so there's a known split between persistence id (path)
+  and runtime id (basename).
+- **Pros:** Fixes a real misgrouping; restores 1:1 mapping between the
+  filter pill and a single repo.
+- **Cons:** Filter chip label needs disambiguation when basenames collide
+  (path suffix? parent dir? truncated absolute path?). Touches
+  `Pane.projectId`, `Workspace.orderedProjectIds`, `ProjectFilterBar`
+  display strings, and the chip accent key in `MissionControlView`.
+- **Context:** Use `ProjectIdentity.canonicalPath` (already exists) as the
+  filter key; derive a display label that stays "api" when unique and
+  expands (e.g. "api (other)") only when colliding.
 
 ### Per-project settings UI
 - **What:** Right-click a project in `⌘K` switcher → settings pane (override project id, custom cwd, pinned agents).

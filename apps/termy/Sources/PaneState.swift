@@ -19,6 +19,9 @@
 //   ERRORED   ──(UserPromptSubmit)──────▶ THINKING      (user retried in same pane)
 //   ERRORED   ──(Stop)───────────────────▶ WAITING       (recover-on-next-turn)
 //   ERRORED   ──(SessionStart)───────────▶ INIT          (fresh claude session)
+//   *         ──(PermissionRequest)─────▶ WAITING        (Codex; needsAttention=true)
+//   WAITING   ──(PostToolUse after PermissionRequest)▶ THINKING (Codex resumed)
+//   *(codex)  ──(SessionStart)───────────▶ IDLE          (hard reset; SessionEnd absent)
 //
 // Notification events do NOT change the `state` field — they toggle the
 // `needsAttention` overlay on the snapshot. The dock badge shows the union
@@ -49,10 +52,24 @@ struct PaneSnapshot: Sendable, Codable {
     /// Timestamp of the most recent event; used by HookDaemon to arm the
     /// WAITING → IDLE 30-second wall-clock timer.
     var enteredStateAt: Date
+    /// Which CLI agent is running in this pane. Set on the first hook event
+    /// (or by foreground-process detection) and sticky thereafter until a
+    /// new SessionStart from a different agent arrives.
+    var agentKind: AgentKind = .claude
+
+    private enum CodingKeys: String, CodingKey {
+        case paneId, projectId, state, needsAttention, notificationReason
+        case lastSessionId, lastCwd, lastPrompt, lastAssistantMessage
+        case updatedAt, enteredStateAt, agentKind
+    }
 }
 
 extension PaneSnapshot {
-    static func empty(paneId: String, projectId: String?) -> PaneSnapshot {
+    static func empty(
+        paneId: String,
+        projectId: String?,
+        agentKind: AgentKind = .claude
+    ) -> PaneSnapshot {
         let now = Date()
         return PaneSnapshot(
             paneId: paneId,
@@ -65,7 +82,8 @@ extension PaneSnapshot {
             lastPrompt: nil,
             lastAssistantMessage: nil,
             updatedAt: now,
-            enteredStateAt: now
+            enteredStateAt: now,
+            agentKind: agentKind
         )
     }
 }
@@ -77,6 +95,15 @@ enum PaneStateMachine {
     static func apply(_ event: HookEvent, to previous: PaneSnapshot) -> PaneSnapshot {
         var next = previous
         next.updatedAt = Date()
+
+        // Stamp the pane with whichever agent originated this event.
+        // Synthetic events (agent="termy") return nil here and leave the
+        // pane's existing kind untouched. A user switching from `claude`
+        // to `codex` in the same pane will flip kind on the first event
+        // from the new agent.
+        if let kind = event.agentKind {
+            next.agentKind = kind
+        }
 
         // If the session id changed for this pane, it's a different CC
         // invocation (user typed /clear or started a new claude). Reset.
@@ -97,13 +124,25 @@ enum PaneStateMachine {
 
         switch event.event {
         case .sessionStart:
-            // A fresh claude invocation has just started. For a pane that
-            // hasn't seen a turn yet (state == .initializing), promote it to
-            // IDLE so the mission-control bar shows a chip immediately —
-            // users expect to SEE claude is live, not discover it only after
-            // they submit a prompt. For a pane mid-work (resumed session),
-            // preserve whatever state it's in.
-            if previous.state == .initializing {
+            // A fresh agent invocation has just started.
+            //
+            // Codex panes: hard-reset to IDLE regardless of prior state.
+            // Codex has no SessionEnd hook event — Phase 4's foreground-
+            // process detector synthesizes one but can miss edges
+            // (rapid-fire `/exit` + relaunch, daemon restart). Treating
+            // every Codex SessionStart as a clean reset stops stale
+            // THINK/WAIT chips from surviving across sessions.
+            //
+            // Claude panes: only promote from .initializing. Mid-work
+            // sessions (resume after compact, etc.) keep their state so
+            // the dashboard doesn't flicker on every plugin handshake.
+            let resolvedKind = event.agentKind ?? previous.agentKind
+            if resolvedKind == .codex {
+                next.state = .idle
+                next.needsAttention = false
+                next.notificationReason = nil
+                next.enteredStateAt = next.updatedAt
+            } else if previous.state == .initializing {
                 next.state = .idle
                 next.enteredStateAt = next.updatedAt
             }
@@ -172,6 +211,17 @@ enum PaneStateMachine {
                 break
             }
 
+        case .permissionRequest:
+            // Codex's "blocked on user" signal — same semantic as Claude
+            // Code's Notification(reason: permission). Always flip to WAIT
+            // and raise needsAttention; the dock badge + dashboard chip
+            // need to reflect that the agent is stalled, regardless of
+            // what state we thought we were in (idle drift, missed Stop).
+            next.state = .waiting
+            next.needsAttention = true
+            next.notificationReason = "permission"
+            next.enteredStateAt = next.updatedAt
+
         case .preToolUse:
             // Most tool uses are Claude actively doing work — stay THINKING.
             // Exception: AskUserQuestion pauses Claude until the user picks an
@@ -193,6 +243,17 @@ enum PaneStateMachine {
             if event.meta.toolName == "AskUserQuestion",
                previous.state == .waiting,
                previous.notificationReason == "ask_user_question" {
+                next.state = .thinking
+                next.needsAttention = false
+                next.notificationReason = nil
+                next.enteredStateAt = next.updatedAt
+            } else if (event.agentKind ?? previous.agentKind) == .codex,
+                      previous.state == .waiting,
+                      previous.notificationReason == "permission" {
+                // Codex emits PermissionRequest before showing an approval
+                // prompt, then PostToolUse after the approved tool runs. No
+                // separate "approval accepted" event exists, so PostToolUse is
+                // the first reliable signal that Codex has resumed work.
                 next.state = .thinking
                 next.needsAttention = false
                 next.notificationReason = nil

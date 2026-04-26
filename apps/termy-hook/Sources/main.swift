@@ -1,8 +1,18 @@
 // termy-hook — tiny CLI invoked by Claude Code via ~/.claude/settings.json
-// hooks. Reads the hook event name from argv[1] and CC's JSON payload from
-// stdin, slims the payload, and writes ONE JSON line to the termy daemon's
-// Unix-domain socket at /tmp/termy-$UID.sock. Always exits 0 — must never
-// hang or fail CC.
+// hooks (or by Codex CLI via ~/.codex/config.toml hooks). Reads the hook
+// event name from argv and the agent's JSON payload from stdin, slims the
+// payload, and writes ONE JSON line to the termy daemon's Unix-domain
+// socket at /tmp/termy-$UID.sock. Always exits 0 — must never hang or fail
+// the calling agent.
+//
+// Usage forms:
+//   termy-hook SessionStart                        # Claude Code (default)
+//   termy-hook --agent codex PermissionRequest     # Codex CLI
+//   termy-hook --agent claude SessionEnd           # explicit, equivalent to default
+//
+// The `--agent` flag stamps the wire-level `agent` field so the daemon can
+// dispatch on AgentKind. Defaulting to "claude-code" preserves existing
+// CC installs without churn.
 
 import Foundation
 #if canImport(Darwin)
@@ -72,10 +82,35 @@ func coerceToString(_ value: Any) -> String {
     return String(describing: value).prefix(maxStringBytes).description
 }
 
-/// Connect + write + close, all under the deadline. Any failure is silent.
+/// Best-effort breadcrumb when send() can't deliver. Writes one line to
+/// /tmp/termy-hook-debug.log, rate-limited by the OS's append semantics
+/// (we don't ferry around state). Always silent on success.
+///
+/// Why this exists: send() used to fail invisibly (exit 0 either way),
+/// so a stalled HookDaemon presented as "the dashboard mysteriously stops
+/// updating" with no breadcrumb on either side of the socket. One log
+/// line per failure is enough to diagnose ECONNREFUSED next time without
+/// reaching for lsof.
+func logSendFailure(_ reason: String, errno errnoValue: Int32 = 0) {
+    let ts = ISO8601DateFormatter().string(from: Date())
+    let pid = getpid()
+    let suffix = errnoValue != 0 ? " errno=\(errnoValue)" : ""
+    let line = "[\(ts)] termy-hook[\(pid)]: \(reason)\(suffix)\n"
+    guard let data = line.data(using: .utf8) else { return }
+    let fd = open("/tmp/termy-hook-debug.log", O_WRONLY | O_APPEND | O_CREAT, 0o600)
+    guard fd >= 0 else { return }
+    defer { close(fd) }
+    _ = data.withUnsafeBytes { write(fd, $0.baseAddress, data.count) }
+}
+
+/// Connect + write + close, all under the deadline. Failures are logged
+/// to /tmp/termy-hook-debug.log but never raised — the hook always exits 0.
 func send(_ line: Data, to path: String) {
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    guard fd >= 0 else { return }
+    guard fd >= 0 else {
+        logSendFailure("socket() failed", errno: errno)
+        return
+    }
     defer { close(fd) }
 
     // Non-blocking so we can enforce a write deadline via select().
@@ -85,7 +120,10 @@ func send(_ line: Data, to path: String) {
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
     let bytes = path.utf8CString
-    guard bytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { return }
+    guard bytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else {
+        logSendFailure("socket path too long: \(path)")
+        return
+    }
     withUnsafeMutablePointer(to: &addr.sun_path) { dest in
         dest.withMemoryRebound(to: CChar.self, capacity: bytes.count) { dst in
             _ = bytes.withUnsafeBufferPointer { src in
@@ -103,6 +141,10 @@ func send(_ line: Data, to path: String) {
         }
     }
     if connectResult != 0 && errno != EINPROGRESS {
+        // ECONNREFUSED on a bound socket means the daemon's accept loop
+        // has stopped servicing connections. ENOENT means the daemon
+        // isn't running. Either way, leave a trail.
+        logSendFailure("connect(\(path)) failed", errno: errno)
         return
     }
     if connectResult != 0 {
@@ -114,12 +156,16 @@ func send(_ line: Data, to path: String) {
             tv_usec: Int32((writeDeadline - floor(writeDeadline)) * 1_000_000)
         )
         if select(fd + 1, nil, &writeSet, nil, &tv) <= 0 {
+            logSendFailure("connect select timeout/err")
             return
         }
         var soErr: Int32 = 0
         var errLen = socklen_t(MemoryLayout<Int32>.size)
         _ = getsockopt(fd, SOL_SOCKET, SO_ERROR, &soErr, &errLen)
-        if soErr != 0 { return }
+        if soErr != 0 {
+            logSendFailure("connect SO_ERROR", errno: soErr)
+            return
+        }
     }
 
     // Write. Loop until all bytes sent or deadline hit.
@@ -162,12 +208,11 @@ func fdSet(_ fd: Int32, _ set: UnsafeMutablePointer<fd_set>) {
 
 // MARK: - main
 
-let arguments = CommandLine.arguments
-guard arguments.count >= 2 else {
-    // No event name; bail silently (CC shouldn't ever call us this way).
+guard let parsed = HookCLI.parse(CommandLine.arguments) else {
+    // No event name; bail silently (the calling agent shouldn't invoke us this way).
     exit(0)
 }
-let eventName = arguments[1]
+let eventName = parsed.event
 
 // Read stdin with a tight timeout so we never block CC.
 let stdinData: Data = {
@@ -196,7 +241,7 @@ var payload: [String: Any] = [
     "pane_id": paneId as Any? ?? NSNull(),
     "project_id": projectId as Any? ?? NSNull(),
     "ts": Date().timeIntervalSince1970,
-    "agent": "claude-code",
+    "agent": parsed.agent,
     "meta": meta
 ]
 

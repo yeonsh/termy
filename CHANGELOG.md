@@ -4,6 +4,21 @@ All notable changes to termy. Each section heading's version must match the
 `CFBundleShortVersionString` at release time — `scripts/render-release-notes.py`
 extracts the matching section into the Sparkle appcast `<description>`.
 
+## Unreleased
+
+- Codex CLI support: termy now reads Codex's hook events alongside Claude
+  Code's, so panes running `codex` get the same live IDLE / THINK / WAIT
+  chips and macOS notifications. `PermissionRequest` is the THINK→WAIT
+  trigger (Codex's equivalent of CC's permission notification).
+- Codex install path: <kbd>termy</kbd> menu → *Codex Hooks…* writes to
+  `~/.codex/config.toml` with the same non-destructive merge contract as
+  the Claude Code installer (marker-tagged blocks, backup before write,
+  user blocks preserved).
+- Foreground-process detection: 1 Hz watcher synthesizes
+  `SessionStart` / `SessionEnd` when `claude` or `codex` enters or leaves
+  the foreground PG of a pane's shell. Closes Codex's missing
+  `SessionEnd` event and resets the chip when the user types `/exit`.
+
 ## 0.1.4 — 2026-04-25
 
 - App icon: drop the small blue pill that sat below the underscore in

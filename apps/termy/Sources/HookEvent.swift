@@ -24,6 +24,7 @@ enum HookEventKind: String, Codable {
     case stopFailure          = "StopFailure"
     case subagentStop         = "SubagentStop"
     case notification         = "Notification"
+    case permissionRequest    = "PermissionRequest" // Codex-only WAIT trigger
     case ptyExit              = "PtyExit" // synthetic from PtyController on pty EOF
 }
 
@@ -33,8 +34,16 @@ struct HookEvent: Codable {
     let paneId: String?          // from $TERMY_PANE_ID
     let projectId: String?       // from $TERMY_PROJECT_ID
     let ts: Double               // unix seconds (sub-second resolution on synthetic events)
-    let agent: String            // "claude-code" for hook-originated; "termy" for synthetic
+    /// Wire label for the source. "claude-code" / "codex" for hook-originated
+    /// events, "termy" for synthetic ones (PtyExit, fg-process synthesis).
+    /// Use `agentKind` for typed dispatch — `nil` means "synthetic, inherit
+    /// the pane's existing kind".
+    let agent: String
     let meta: Meta
+
+    /// Typed view of `agent`. nil for synthetic events; the daemon should
+    /// keep the pane's prior `agentKind` in that case.
+    var agentKind: AgentKind? { AgentKind.from(rawAgent: agent) }
 
     enum CodingKeys: String, CodingKey {
         case event

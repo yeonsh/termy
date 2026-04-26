@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             FullDiskAccess.promptIfNeeded()
             HookInstaller.promptIfNeeded()
+            CodexHookInstaller.promptIfNeeded()
         }
 
         // Instantiating SPUStandardUpdaterController on first access starts
@@ -218,6 +219,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         HookInstaller.showPromptFromMenu()
     }
 
+    @IBAction func openCodexHookInstallerPrompt(_ sender: Any?) {
+        CodexHookInstaller.showPromptFromMenu()
+    }
+
     @IBAction func useLightAppearance(_ sender: Any?) {
         AppAppearancePreference.light.apply()
     }
@@ -309,6 +314,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             keyEquivalent: ""
         )
         hookInstaller.target = self
+        let codexInstaller = menu.addItem(
+            withTitle: "Codex Hooks…",
+            action: #selector(AppDelegate.openCodexHookInstallerPrompt(_:)),
+            keyEquivalent: ""
+        )
+        codexInstaller.target = self
         menu.addItem(.separator())
         let servicesItem = menu.addItem(withTitle: "Services", action: nil, keyEquivalent: "")
         let servicesMenu = NSMenu(title: "Services")

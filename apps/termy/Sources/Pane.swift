@@ -222,6 +222,26 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
             environment: envArray,
             execName: nil
         )
+
+        // Register with the foreground-process watcher so synthetic
+        // SessionStart / SessionEnd events fire when the user runs
+        // `claude` / `codex` and exits back to the shell. SwiftTerm
+        // populates `process.shellPid` / `process.childfd` synchronously
+        // inside startProcess, so reading them right after is safe.
+        let masterFd = terminal.process.childfd
+        let shellPid = terminal.process.shellPid
+        let paneId = self.paneId
+        let projectId = self.projectId
+        if masterFd >= 0, shellPid > 0 {
+            Task.detached {
+                await ForegroundProcessWatcher.shared.register(
+                    paneId: paneId,
+                    masterFd: masterFd,
+                    shellPid: shellPid,
+                    projectId: projectId
+                )
+            }
+        }
     }
 
     func focusTerminal() {
@@ -330,6 +350,7 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
                     projectId: projectId,
                     exitCode: code
                 )
+                await ForegroundProcessWatcher.shared.unregister(paneId: paneId)
             }
             self.headWatcher?.stop()
             self.onShellExited?(code)

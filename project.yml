@@ -23,6 +23,9 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     exactVersion: "2.6.4"
+  TOMLKit:
+    url: https://github.com/LebJe/TOMLKit
+    from: "0.6.0"
 
 targets:
   termy-hook:
@@ -42,6 +45,10 @@ targets:
     platform: macOS
     sources:
       - path: apps/termy-tests/Sources
+      # Compile shared termy-hook helpers into the test bundle so we can
+      # XCTest them without spawning the binary. Keep this list narrow —
+      # only files free of `import Foundation`-heavy CLI side effects.
+      - path: apps/termy-hook/Sources/HookCLI.swift
     dependencies:
       - target: termy
     settings:
@@ -62,6 +69,7 @@ targets:
       - package: SwiftTerm
         product: SwiftTerm
       - package: Sparkle
+      - package: TOMLKit
       - target: termy-hook
         copy:
           destination: resources

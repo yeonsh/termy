@@ -29,9 +29,10 @@ already finished? You end up Cmd-Tabbing through windows, scanning panes, and
 missing the one that was waiting on you five minutes ago.
 
 **termy pulls that state out of the panes and into a glanceable dashboard.**
-Every running agent gets a chip at the bottom of the window with its live
-status — `IDLE`, `THINK`, or `WAIT`. When something goes `WAIT`, macOS
-notifies you — even if termy isn't focused. One keystroke takes you there.
+Every running agent — Claude Code or Codex CLI — gets a chip at the bottom
+of the window with its live status: `IDLE`, `THINK`, or `WAIT`. When
+something goes `WAIT`, macOS notifies you — even if termy isn't focused.
+One keystroke takes you there.
 
 ## Projects, not tabs
 
@@ -133,6 +134,29 @@ is surgical, and the previous file is backed up to
 - **`termy-hook`** always exits `0` and write-timeouts after 100 ms — it
   cannot stall Claude Code even if termy isn't running.
 
+### Codex CLI hooks
+
+Codex CLI is supported via the same `termy-hook` binary and an analogous
+TOML installer that writes to `~/.codex/config.toml`. If termy detects a
+Codex install (it probes `~/.codex` and the common Homebrew / npm / cargo /
+mise / asdf install paths), it will offer to install the integration on
+first launch; otherwise opt in any time via <kbd>termy</kbd> menu →
+*Codex Hooks…*
+
+Mappings (per `developers.openai.com/codex/hooks`):
+
+| Codex event | Pane state |
+|---|---|
+| `SessionStart` | hard reset to `IDLE` |
+| `PreToolUse` / `PostToolUse` | `THINK` |
+| **`PermissionRequest`** | **`WAIT`** + macOS notification |
+| `Stop` | `IDLE` after 30 s |
+
+Codex has no native `SessionEnd` hook; termy synthesizes one by watching
+the foreground process group of each pane's PTY (`tcgetpgrp` + libproc).
+Once `codex` leaves the foreground (`/exit`, Ctrl-C), the chip resets to
+neutral `INIT` automatically — even though no hook fired.
+
 ## Keyboard cheatsheet
 
 | | |
@@ -153,12 +177,14 @@ is surgical, and the previous file is backed up to
 
 ```
 Claude Code ──hook──▶ termy-hook (CLI) ──unix socket──▶ HookDaemon (in-app actor)
-                                                              │
-                                                              ▼
-                                                       PaneStateMachine
-                                                              │
-                                                              ▼
-                                               MissionControlView + Notifier
+   Codex CLI ──hook──▶ termy-hook --agent codex ──┘                   │
+                                                                       │
+                                                              ┌────────┴────────┐
+                                                              ▼                 ▼
+                                                       PaneStateMachine    fg-process watcher
+                                                              │              (synthetic
+                                                              ▼               SessionStart/End)
+                                                MissionControlView + Notifier
 ```
 
 - **SwiftTerm** renders the PTY and owns the child shell lifecycle.

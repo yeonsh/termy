@@ -29,3 +29,4 @@ apps/*/*.entitlements
 
 # Sparkle CLI tools — installed by scripts/setup-sparkle.sh, per-developer.
 scripts/vendor/
+.gitnexus
