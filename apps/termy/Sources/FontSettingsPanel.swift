@@ -27,11 +27,9 @@ final class FontSettingsPanel: NSPanel {
     private var primaryPopUp: NSPopUpButton!
     private var sizePopUp: NSPopUpButton!
     private var cjkPopUp: NSPopUpButton!
-    private var cjkScalePopUp: NSPopUpButton!
     private var previewLabel: NSTextField!
 
     private static let sizeChoices: [CGFloat] = [10, 11, 12, 13, 14, 15, 16, 18, 20, 24]
-    private static let cjkScaleChoices: [CGFloat] = [0.80, 0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.15, 1.20]
 
     init() {
         super.init(
@@ -138,19 +136,6 @@ final class FontSettingsPanel: NSPanel {
         cjkPopUp.target = self
         cjkPopUp.action = #selector(cjkChanged(_:))
 
-        cjkScalePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
-        cjkScalePopUp.translatesAutoresizingMaskIntoConstraints = false
-        for scale in Self.cjkScaleChoices {
-            // Display as "100%" rather than "1.00" — easier to read than a
-            // raw multiplier, and matches the Display preferences pattern.
-            let title = String(format: "%.0f%%", Double(scale * 100))
-            cjkScalePopUp.addItem(withTitle: title)
-            cjkScalePopUp.lastItem?.representedObject = scale
-        }
-        cjkScalePopUp.target = self
-        cjkScalePopUp.action = #selector(cjkScaleChanged(_:))
-        cjkScalePopUp.widthAnchor.constraint(equalToConstant: 86).isActive = true
-
         let primaryLabel = makeFieldLabel("Primary")
         let cjkLabel = makeFieldLabel("CJK fallback")
 
@@ -159,14 +144,9 @@ final class FontSettingsPanel: NSPanel {
         primaryRow.spacing = 8
         primaryRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let cjkRow = NSStackView(views: [cjkPopUp, cjkScalePopUp])
-        cjkRow.orientation = .horizontal
-        cjkRow.spacing = 8
-        cjkRow.translatesAutoresizingMaskIntoConstraints = false
-
         let grid = NSGridView(views: [
             [primaryLabel, primaryRow],
-            [cjkLabel, cjkRow]
+            [cjkLabel, cjkPopUp]
         ])
         grid.translatesAutoresizingMaskIntoConstraints = false
         grid.rowSpacing = 12
@@ -289,29 +269,6 @@ final class FontSettingsPanel: NSPanel {
             cjkPopUp.selectItem(at: 0)
         }
 
-        let scale = preference.cjkFallbackScale
-        if let item = cjkScalePopUp.itemArray.first(where: {
-            guard let stored = $0.representedObject as? CGFloat else { return false }
-            return abs(stored - scale) < 0.001
-        }) {
-            cjkScalePopUp.select(item)
-        } else {
-            // Defensive: a hand-edited plist could store an off-grid value.
-            // Snap to the closest choice for display; preference clamp keeps
-            // the actual stored value in-range.
-            let closest = Self.cjkScaleChoices.min(by: { abs($0 - scale) < abs($1 - scale) })
-                ?? TerminalFontPreference.defaultCJKFallbackScale
-            if let item = cjkScalePopUp.itemArray.first(where: {
-                guard let stored = $0.representedObject as? CGFloat else { return false }
-                return abs(stored - closest) < 0.001
-            }) {
-                cjkScalePopUp.select(item)
-            }
-        }
-        // The scale is meaningless when no explicit fallback is set (Core
-        // Text picks the cascade and the matrix never runs), so dim it.
-        cjkScalePopUp.isEnabled = !cjk.isEmpty
-
         refreshPreview()
     }
 
@@ -337,8 +294,7 @@ final class FontSettingsPanel: NSPanel {
         preference.update(
             primaryName: name,
             pointSize: preference.pointSize,
-            cjkFallbackName: preference.cjkFallbackName,
-            cjkFallbackScale: preference.cjkFallbackScale
+            cjkFallbackName: preference.cjkFallbackName
         )
         refreshPreview()
     }
@@ -348,8 +304,7 @@ final class FontSettingsPanel: NSPanel {
         preference.update(
             primaryName: preference.primaryFontName,
             pointSize: size,
-            cjkFallbackName: preference.cjkFallbackName,
-            cjkFallbackScale: preference.cjkFallbackScale
+            cjkFallbackName: preference.cjkFallbackName
         )
         refreshPreview()
     }
@@ -359,20 +314,7 @@ final class FontSettingsPanel: NSPanel {
         preference.update(
             primaryName: preference.primaryFontName,
             pointSize: preference.pointSize,
-            cjkFallbackName: name,
-            cjkFallbackScale: preference.cjkFallbackScale
-        )
-        cjkScalePopUp.isEnabled = !name.isEmpty
-        refreshPreview()
-    }
-
-    @objc private func cjkScaleChanged(_ sender: NSPopUpButton) {
-        guard let scale = sender.selectedItem?.representedObject as? CGFloat else { return }
-        preference.update(
-            primaryName: preference.primaryFontName,
-            pointSize: preference.pointSize,
-            cjkFallbackName: preference.cjkFallbackName,
-            cjkFallbackScale: scale
+            cjkFallbackName: name
         )
         refreshPreview()
     }
@@ -381,8 +323,7 @@ final class FontSettingsPanel: NSPanel {
         preference.update(
             primaryName: "",
             pointSize: TerminalFontPreference.defaultPointSize,
-            cjkFallbackName: TerminalFontPreference.systemCJKFallback,
-            cjkFallbackScale: TerminalFontPreference.defaultCJKFallbackScale
+            cjkFallbackName: TerminalFontPreference.systemCJKFallback
         )
         syncFromPreference()
     }
