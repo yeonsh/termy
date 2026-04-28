@@ -16,6 +16,13 @@ import CoreText
 import SwiftTerm
 
 final class TermyTerminalView: LocalProcessTerminalView {
+    /// SwiftTerm's `TerminalOptions.default.scrollback` is 500 lines, which
+    /// truncates a single `codex` reasoning dump. Bumped to match iTerm2 /
+    /// Alacritty's default; applied per-instance via `changeScrollback`
+    /// because `LocalProcessTerminalView` doesn't expose an options-injection
+    /// initializer.
+    private static let scrollbackLines = 10_000
+
     /// Set by Pane after construction — used to attribute PTY-byte pings
     /// to the right snapshot inside HookDaemon. nil before assignment.
     var paneId: String?
@@ -64,6 +71,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
+        terminal.changeScrollback(Self.scrollbackLines)
         installLinkClickMonitor()
         installSelectionClearMonitor()
         installControlKeyRetargetMonitor()
@@ -71,6 +79,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
 
     public required init?(coder: NSCoder) {
         super.init(coder: coder)
+        terminal.changeScrollback(Self.scrollbackLines)
         installLinkClickMonitor()
         installSelectionClearMonitor()
         installControlKeyRetargetMonitor()
