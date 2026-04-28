@@ -75,6 +75,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
         installLinkClickMonitor()
         installSelectionClearMonitor()
         installControlKeyRetargetMonitor()
+        installShiftReturnMonitor()
     }
 
     public required init?(coder: NSCoder) {
@@ -83,6 +84,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
         installLinkClickMonitor()
         installSelectionClearMonitor()
         installControlKeyRetargetMonitor()
+        installShiftReturnMonitor()
     }
 
     deinit {
@@ -97,6 +99,9 @@ final class TermyTerminalView: LocalProcessTerminalView {
         }
         if let controlKeyRetargetMonitor {
             NSEvent.removeMonitor(controlKeyRetargetMonitor)
+        }
+        if let shiftReturnMonitor {
+            NSEvent.removeMonitor(shiftReturnMonitor)
         }
     }
 
@@ -367,6 +372,56 @@ final class TermyTerminalView: LocalProcessTerminalView {
             }
             return result
         }
+    }
+
+    /// Without the kitty keyboard protocol's `disambiguate` flag,
+    /// SwiftTerm's encoder emits plain `\r` for both Enter and Shift+Enter
+    /// (`KittyKeyboardEncoder.swift:583` legacy path; only Shift+Tab gets
+    /// special-cased there). Codex CLI pushes the kitty flags on startup, so
+    /// it correctly receives `CSI 13;2u` for Shift+Enter; Claude Code CLI
+    /// (Ink/Node) does NOT push kitty flags and instead relies on the host
+    /// terminal having a user-level keymap that turns Shift+Enter into a
+    /// distinguishable byte sequence — what `claude /terminal-setup` sets up
+    /// in iTerm2 / Terminal.app. Termy has no such keymap, so Shift+Enter
+    /// inside Claude Code lands as plain Enter and submits the prompt.
+    ///
+    /// Fix: when kitty `disambiguate` is off, intercept Shift+Return at the
+    /// monitor level (SwiftTerm's `keyDown` is `public` but not `open` — same
+    /// constraint as the Ctrl/selection monitors) and send `ESC + CR`, the
+    /// same bytes macOS emits for Option+Enter and that Claude Code already
+    /// documents as its multiline shortcut. In zsh/bash readline, Meta+CR
+    /// runs `accept-line` identically to plain CR, so this doesn't regress
+    /// shell submission. Gating on "no disambiguate flag" leaves Codex's
+    /// `CSI 13;2u` path untouched.
+    nonisolated(unsafe) private var shiftReturnMonitor: Any?
+
+    private func installShiftReturnMonitor() {
+        shiftReturnMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            guard event.window === self.window else { return event }
+            guard self.window?.firstResponder === self else { return event }
+            // Let IME finish composing — Shift+Enter on most macOS IMEs
+            // commits the syllable and shouldn't be eaten before the commit.
+            guard !self.hasMarkedText() else { return event }
+            guard Self.isShiftReturn(event) else { return event }
+            // SwiftTerm's encoder already emits CSI 13;2u when disambiguate
+            // is on (Codex's flag set), so don't double-handle.
+            guard !self.terminal.keyboardEnhancementFlags.contains(.disambiguate) else {
+                return event
+            }
+            self.send(txt: "\u{1B}\r")
+            return nil
+        }
+    }
+
+    nonisolated static func isShiftReturn(_ event: NSEvent) -> Bool {
+        let isReturnKey = Int(event.keyCode) == kVK_Return
+            || Int(event.keyCode) == kVK_ANSI_KeypadEnter
+        guard isReturnKey else { return false }
+        let mods = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .numericPad, .function])
+        return mods == .shift
     }
 
     /// When any kitty keyboard flag is active, SwiftTerm's `insertText` path

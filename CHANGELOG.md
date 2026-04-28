@@ -6,6 +6,8 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+- Shift+Enter now inserts a newline inside Claude Code (and other CLIs that don't push the kitty keyboard `disambiguate` flag). Termy intercepts Shift+Return when the kitty flag is off and sends `ESC + CR` — the same byte sequence as macOS Option+Enter, which Claude Code already documents as its multiline shortcut. Codex CLI's existing kitty path (`CSI 13;2u`) is unchanged.
+
 ## 0.1.6 — 2026-04-28
 
 - Codex: replace 8s fake-WAIT heuristic with two-stage POSSIBLY_WAITING → WAITING(.promotedFromPossible). Reasoning-model silence (GPT-5/o-series) no longer triggers spurious WAIT chips or sounds; PTY byte arrival reverts the silent interim state. Total silence-to-sound is now ~20s.

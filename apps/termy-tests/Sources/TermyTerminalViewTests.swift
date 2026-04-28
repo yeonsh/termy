@@ -1,4 +1,6 @@
 import XCTest
+import AppKit
+import Carbon.HIToolbox
 @testable import termy
 import SwiftTerm
 
@@ -132,6 +134,90 @@ final class TermyTerminalViewTests: XCTestCase {
     func test_needsASCIIRetargeting_forEmptyCharacters() {
         XCTAssertTrue(
             TermyTerminalView.needsASCIIRetargeting(charactersIgnoringModifiers: "")
+        )
+    }
+
+    // MARK: - Shift+Return interception
+
+    private func keyEvent(keyCode: Int, modifiers: NSEvent.ModifierFlags) -> NSEvent {
+        // characters/charactersIgnoringModifiers don't matter for the predicate
+        // — it switches on keyCode + modifierFlags only.
+        return NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: UInt16(keyCode))!
+    }
+
+    func test_isShiftReturn_recognizesShiftReturn() {
+        XCTAssertTrue(
+            TermyTerminalView.isShiftReturn(
+                keyEvent(keyCode: kVK_Return, modifiers: .shift)
+            )
+        )
+    }
+
+    func test_isShiftReturn_recognizesShiftKeypadEnter() {
+        XCTAssertTrue(
+            TermyTerminalView.isShiftReturn(
+                keyEvent(keyCode: kVK_ANSI_KeypadEnter, modifiers: [.shift, .numericPad])
+            )
+        )
+    }
+
+    /// Plain Enter must fall through so SwiftTerm's encoder sends the legacy
+    /// CR — submitting a prompt should still work.
+    func test_isShiftReturn_skipsPlainReturn() {
+        XCTAssertFalse(
+            TermyTerminalView.isShiftReturn(
+                keyEvent(keyCode: kVK_Return, modifiers: [])
+            )
+        )
+    }
+
+    /// Caps lock is a meaningless modifier for Return — must not block the
+    /// Shift-only match.
+    func test_isShiftReturn_ignoresCapsLockBit() {
+        XCTAssertTrue(
+            TermyTerminalView.isShiftReturn(
+                keyEvent(keyCode: kVK_Return, modifiers: [.shift, .capsLock])
+            )
+        )
+    }
+
+    /// Cmd+Shift+Return / Ctrl+Shift+Return / Opt+Shift+Return are reserved
+    /// for app-level shortcuts (window splits, etc.) and TUI hotkeys — must
+    /// not be eaten by the Shift+Return path.
+    func test_isShiftReturn_skipsWhenOtherModifiersPresent() {
+        let combos: [NSEvent.ModifierFlags] = [
+            [.shift, .command],
+            [.shift, .control],
+            [.shift, .option],
+            [.command],
+            [.control],
+        ]
+        for mods in combos {
+            XCTAssertFalse(
+                TermyTerminalView.isShiftReturn(
+                    keyEvent(keyCode: kVK_Return, modifiers: mods)
+                ),
+                "should skip \(mods.rawValue)"
+            )
+        }
+    }
+
+    /// Shift+letter must not match — only Return/KeypadEnter physical keys.
+    func test_isShiftReturn_skipsNonReturnKey() {
+        XCTAssertFalse(
+            TermyTerminalView.isShiftReturn(
+                keyEvent(keyCode: kVK_ANSI_A, modifiers: .shift)
+            )
         )
     }
 }
