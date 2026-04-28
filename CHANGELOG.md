@@ -6,6 +6,9 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.1.7 — 2026-04-28
+
+- Drag-and-drop file paths into the terminal. Drop one or more files from Finder onto a pane and termy injects the absolute paths as typed text — backslash-escaped so unquoted shell context (zsh prompt) parses each as a single argument. TUI clients (Claude Code, Codex) receive the same text into their input fields, mirroring the drag-from-Finder UX iTerm2 / Terminal.app provide. Multiple files are space-separated.
 - Shift+Enter now inserts a newline inside Claude Code (and other CLIs that don't push the kitty keyboard `disambiguate` flag). Termy intercepts Shift+Return when the kitty flag is off and sends `ESC + CR` — the same byte sequence as macOS Option+Enter, which Claude Code already documents as its multiline shortcut. Codex CLI's existing kitty path (`CSI 13;2u`) is unchanged.
 
 ## 0.1.6 — 2026-04-28
