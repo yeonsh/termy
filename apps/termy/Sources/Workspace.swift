@@ -130,6 +130,32 @@ struct PaneFocusHistory {
     }
 }
 
+struct FilterNavigationHistory {
+    private var filters: [WorkspaceFilter] = []
+
+    mutating func markVisited(_ filter: WorkspaceFilter) {
+        filters.removeAll { $0 == filter }
+        filters.append(filter)
+    }
+
+    mutating func popMostRecentValid(in options: [WorkspaceFilter]) -> WorkspaceFilter? {
+        while let last = filters.popLast() {
+            if options.contains(last) {
+                return last
+            }
+        }
+        return nil
+    }
+
+    mutating func remove(_ filter: WorkspaceFilter) {
+        filters.removeAll { $0 == filter }
+    }
+
+    mutating func filterToRestore(in options: [WorkspaceFilter]) -> WorkspaceFilter? {
+        popMostRecentValid(in: options) ?? options.first
+    }
+}
+
 final class Workspace: NSView, NSSplitViewDelegate {
     /// Source of truth for pane layout: ordered rows of ordered panes. A
     /// column split appends to the focused pane's row; a row split inserts a
