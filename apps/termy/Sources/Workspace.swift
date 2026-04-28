@@ -423,9 +423,20 @@ final class Workspace: NSView, NSSplitViewDelegate {
         }
 
         if wasFocused {
-            // If the current filter no longer has any panes, fall back to .all.
+            // If the current filter no longer has any panes, restore the
+            // most recently visited still-valid filter (the project the
+            // user was on before this one). Falls back to filterOptions.first
+            // — which is `.all` when multiple projects remain, or the only
+            // remaining project — and finally `.all` if nothing is left.
             if visiblePanes.isEmpty {
-                filter = .all
+                let target = filterHistory.filterToRestore(in: filterOptions) ?? .all
+                // suppressFilterHistoryPush prevents `filter`'s didSet from
+                // pushing the dying filter back onto history. Safe even though
+                // didSet fires onFilterChanged?() because that callback is
+                // wired to UI refresh — it does not mutate `filter`.
+                suppressFilterHistoryPush = true
+                filter = target
+                suppressFilterHistoryPush = false
             } else {
                 relayout()
             }
