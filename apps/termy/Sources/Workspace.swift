@@ -163,11 +163,18 @@ final class Workspace: NSView, NSSplitViewDelegate {
     private(set) var rows: [[Pane]] = []
     private var paneCreationOrder: [Pane] = []
     private var focusHistory = PaneFocusHistory()
+    private var filterHistory = FilterNavigationHistory()
+    /// Set during the close-fallback path so the dying filter doesn't get
+    /// pushed back onto `filterHistory` by the `filter` didSet.
+    private var suppressFilterHistoryPush = false
     var panes: [Pane] { paneCreationOrder }
     private(set) var focusedPane: Pane?
     var filter: WorkspaceFilter = .all {
         didSet {
             guard oldValue != filter else { return }
+            if !suppressFilterHistoryPush {
+                filterHistory.markVisited(oldValue)
+            }
             // A filter change implicitly exits "single-pane focus" — if we
             // kept maximizedPane set, relayout() would still short-circuit to
             // [maximizedPane] and the user would see one pane under ALL.
