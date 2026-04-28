@@ -427,13 +427,16 @@ final class Workspace: NSView, NSSplitViewDelegate {
             // most recently visited still-valid filter (the project the
             // user was on before this one). Falls back to filterOptions.first
             // — which is `.all` when multiple projects remain, or the only
-            // remaining project — and finally `.all` if nothing is left.
+            // remaining project. The `?? .all` tail is defensive; it's
+            // unreachable while panes remain (the `panes.isEmpty` early
+            // return at the top of this method handles the no-panes case).
             if visiblePanes.isEmpty {
                 let target = filterHistory.filterToRestore(in: filterOptions) ?? .all
                 // suppressFilterHistoryPush prevents `filter`'s didSet from
-                // pushing the dying filter back onto history. Safe even though
-                // didSet fires onFilterChanged?() because that callback is
-                // wired to UI refresh — it does not mutate `filter`.
+                // pushing the dying filter back onto history. Invariant:
+                // callers reachable from `onFilterChanged?()` must not
+                // assign to `filter`, otherwise that nested set is also
+                // silently suppressed.
                 suppressFilterHistoryPush = true
                 filter = target
                 suppressFilterHistoryPush = false
@@ -464,11 +467,15 @@ final class Workspace: NSView, NSSplitViewDelegate {
         if maximizedPane === pane { maximizedPane = nil }
         parkedPaneFrames.removeValue(forKey: ObjectIdentifier(pane))
         focusHistory.remove(pane.paneId)
+        let removedProjectId = pane.projectId
         paneCreationOrder.removeAll { $0 === pane }
         for r in 0..<rows.count {
             rows[r].removeAll { $0 === pane }
         }
         rows.removeAll { $0.isEmpty }
+        if !paneCreationOrder.contains(where: { $0.projectId == removedProjectId }) {
+            filterHistory.remove(.project(removedProjectId))
+        }
     }
 
     /// Invoked when a pane's projectId drifted (user `cd`d to another
