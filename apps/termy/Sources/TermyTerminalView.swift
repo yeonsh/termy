@@ -76,6 +76,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
         installSelectionClearMonitor()
         installControlKeyRetargetMonitor()
         installShiftReturnMonitor()
+        registerForDraggedTypes([.fileURL])
     }
 
     public required init?(coder: NSCoder) {
@@ -85,6 +86,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
         installSelectionClearMonitor()
         installControlKeyRetargetMonitor()
         installShiftReturnMonitor()
+        registerForDraggedTypes([.fileURL])
     }
 
     deinit {
@@ -569,5 +571,65 @@ final class TermyTerminalView: LocalProcessTerminalView {
         default:
             return false
         }
+    }
+
+    // MARK: - Drag and Drop
+    //
+    // Accept file drops onto the terminal and inject the dropped paths as
+    // typed text — same UX iTerm2 / Terminal.app provide. Neither termy nor
+    // SwiftTerm registers for any dragged types out of the box, so without
+    // this the view silently rejects drags (no copy cursor, no drop). Paths
+    // are backslash-escaped so unquoted shell context (zsh prompt) parses
+    // them as a single argument; TUI clients (Claude, Codex) just see the
+    // escaped text inserted into their input field, which is the same thing
+    // those clients already document handling for drag-from-Finder.
+
+    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        return Self.canAcceptFileDrop(from: sender.draggingPasteboard) ? .copy : []
+    }
+
+    public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        return Self.canAcceptFileDrop(from: sender.draggingPasteboard) ? .copy : []
+    }
+
+    public override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        return Self.canAcceptFileDrop(from: sender.draggingPasteboard)
+    }
+
+    public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let pb = sender.draggingPasteboard
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        guard let urls = pb.readObjects(forClasses: [NSURL.self], options: options) as? [URL],
+              !urls.isEmpty else {
+            return false
+        }
+        let escaped = urls.map { Self.shellEscape($0.path) }.joined(separator: " ")
+        send(txt: escaped)
+        return true
+    }
+
+    nonisolated private static func canAcceptFileDrop(from pasteboard: NSPasteboard) -> Bool {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        return pasteboard.canReadObject(forClasses: [NSURL.self], options: options)
+    }
+
+    /// Backslash-escape characters that the shell would otherwise treat
+    /// specially in unquoted context. Matches the set iTerm2/Terminal.app use
+    /// for drag-and-drop, which keeps the inserted text legible (no wrapping
+    /// quotes) while staying safe under zsh/bash word splitting.
+    nonisolated static func shellEscape(_ path: String) -> String {
+        var result = ""
+        result.reserveCapacity(path.count)
+        for ch in path {
+            switch ch {
+            case " ", "\t", "\n", "\\", "'", "\"", "$", "`", "&", "|", ";",
+                 "(", ")", "<", ">", "*", "?", "[", "]", "{", "}", "~", "!", "#":
+                result.append("\\")
+                result.append(ch)
+            default:
+                result.append(ch)
+            }
+        }
+        return result
     }
 }
