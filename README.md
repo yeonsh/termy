@@ -4,10 +4,10 @@
 
 <h1 align="center">termy</h1>
 
-<p align="center"><strong>Mission control for Claude Code.</strong></p>
+<p align="center"><strong>Mission control for Claude Code and Codex CLI.</strong></p>
 
 <p align="center">
-  A native macOS terminal built for running many Claude Code agents at once —<br/>
+  A native macOS terminal built for running many coding agents at once —<br/>
   so you always know which one is blocked, working, or waiting on you.
 </p>
 
@@ -23,10 +23,11 @@
 
 ## Why termy
 
-Running N Claude Code agents in a stock terminal turns into tab roulette:
-which session is blocked on a permission prompt, which is mid-tool, which
-already finished? You end up Cmd-Tabbing through windows, scanning panes, and
-missing the one that was waiting on you five minutes ago.
+Running N coding agents — Claude Code, Codex CLI, or a mix — in a stock
+terminal turns into tab roulette: which session is blocked on a permission
+prompt, which is mid-tool, which already finished? You end up Cmd-Tabbing
+through windows, scanning panes, and missing the one that was waiting on
+you five minutes ago.
 
 **termy pulls that state out of the panes and into a glanceable dashboard.**
 Every running agent — Claude Code or Codex CLI — gets a chip at the bottom
@@ -63,8 +64,9 @@ Picking one restores that project's saved pane grid.
 
 ## A dashboard for every agent
 
-The strip along the bottom of the window is one chip per running Claude
-Code. Each chip shows **project / branch** and a live state:
+The strip along the bottom of the window is one chip per running agent —
+Claude Code or Codex CLI, mixed freely. Each chip shows **project / branch**
+and a live state:
 
 <p align="center">
   <img src="docs/screenshots/dashboard-0.png" width="760" alt="Dashboard row showing WAIT, WAIT, THINK, and IDLE states" />
@@ -157,6 +159,25 @@ the foreground process group of each pane's PTY (`tcgetpgrp` + libproc).
 Once `codex` leaves the foreground (`/exit`, Ctrl-C), the chip resets to
 neutral `INIT` automatically — even though no hook fired.
 
+#### Caveat: Codex hooks don't cover every state transition
+
+Claude Code exposes a complete state-tracking surface: `Notification` fires
+the moment Claude stops to ask for input, and `Stop` fires when the agent
+finishes a turn. Codex's hook surface is narrower. There's no
+`Notification`-equivalent — `PermissionRequest` fires only for explicit
+permission asks, not the general "I'm waiting on you" pauses that reasoning
+models (GPT-5, o-series) lean on. Result: a Codex pane can sit silent at a
+`>` prompt with no hook ever firing.
+
+termy fills the gap with a two-stage silence detector: ~8 s of PTY quiet
+moves the chip to a silent `POSSIBLY_WAITING` (visual only, no sound), and
+~12 s of further quiet promotes it to `WAITING` (chip + macOS notification).
+Any byte from the PTY reverts the silent state instantly. The trade-off:
+Codex `WAIT` lands ~20 s after the agent actually paused rather than
+instantly, and the false-positive rate isn't zero. If Codex ships a
+`Notification`-equivalent in future, termy will switch to it and drop the
+heuristic.
+
 ## Keyboard cheatsheet
 
 | | |
@@ -210,9 +231,9 @@ The core loop is working end-to-end:
 
 ## Not in v1
 
-See `TODOS.md` for deferred work — Codex hook support, screen-scraping
-fallback for non-hook agents, separate LaunchAgent daemon, user-editable hook
-config, per-project settings UI.
+See `TODOS.md` for deferred work — screen-scraping fallback for non-hook
+agents, separate LaunchAgent daemon, user-editable hook config, per-project
+settings UI.
 
 ## Internals
 

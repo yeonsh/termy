@@ -626,6 +626,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         nextDash.target = self
         nextDash.keyEquivalentModifierMask = [.command, .option]
 
+        // ⌘⌥G — single-handed alternative to ⌘⌥] for the same action,
+        // pairing with ⌘G (next WAITING) on the same key under different
+        // modifiers: ⌘G subset (waiting only), ⌘⌥G superset (any chip).
+        let nextDashG = menu.addItem(
+            withTitle: "Next Dashboard Item (G)",
+            action: #selector(AppDelegate.cycleDashboardNext(_:)),
+            keyEquivalent: "g"
+        )
+        nextDashG.target = self
+        nextDashG.keyEquivalentModifierMask = [.command, .option]
+
         // ⌘G — jump to the next WAITING pane. The attention-routing shortcut:
         // when multiple agents are blocked waiting for input, one tap cycles
         // through them without the user having to eyeball the bar.

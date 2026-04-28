@@ -6,7 +6,10 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.1.6 — 2026-04-28
+
 - Codex: replace 8s fake-WAIT heuristic with two-stage POSSIBLY_WAITING → WAITING(.promotedFromPossible). Reasoning-model silence (GPT-5/o-series) no longer triggers spurious WAIT chips or sounds; PTY byte arrival reverts the silent interim state. Total silence-to-sound is now ~20s.
+- ⌘⌥G now jumps to the next dashboard chip — single-handed alternative to ⌘⌥], pairing with ⌘G (next WAITING) under different modifiers. Listed in the ⌘/ shortcuts overlay.
 
 ## 0.1.5 — 2026-04-26
 

@@ -46,6 +46,7 @@ final class KeyboardShortcutsPanel: NSPanel {
                 description: "Focus pane in direction"
             ),
             Shortcut(combos: [["⌘", "G"]], description: "Jump to next WAITING pane"),
+            Shortcut(combos: [["⌘", "⌥", "G"]], description: "Jump to next dashboard item"),
             Shortcut(combos: [["⌘", "⌥", "1–9"]], description: "Jump to dashboard item N")
         ]),
         Section(title: "Projects", entries: [
