@@ -35,11 +35,20 @@ final class TerminalFontPreference {
         static let primaryName = "termy.terminalFont.primaryName"
         static let pointSize = "termy.terminalFont.pointSize"
         static let cjkFallbackName = "termy.terminalFont.cjkFallbackName"
+        static let cjkFallbackScale = "termy.terminalFont.cjkFallbackScale"
     }
 
     static let defaultPointSize: CGFloat = 14
     static let minPointSize: CGFloat = 9
     static let maxPointSize: CGFloat = 36
+
+    /// Scale applied to CJK fallback glyphs relative to the primary font's
+    /// point size. 1.0 = same size. Wider range (0.7–1.3) is permissive but
+    /// realistic UX values cluster in 0.85–1.15 — beyond that the fallback's
+    /// baseline drifts noticeably from the ASCII grid.
+    static let defaultCJKFallbackScale: CGFloat = 1.0
+    static let minCJKFallbackScale: CGFloat = 0.7
+    static let maxCJKFallbackScale: CGFloat = 1.3
 
     /// Names tried in order until one resolves. Mirrors the legacy
     /// TermyTypography fallback chain so existing installs see no change
@@ -93,6 +102,26 @@ final class TerminalFontPreference {
                 defaults.removeObject(forKey: Keys.cjkFallbackName)
             } else {
                 defaults.set(trimmed, forKey: Keys.cjkFallbackName)
+            }
+        }
+    }
+
+    /// Multiplicative scale applied to fallback glyphs. Stored as a CGFloat;
+    /// missing/invalid values resolve to 1.0 so existing installs see no
+    /// change. Clamped on read AND write so a hand-edited plist can't push
+    /// the cascade matrix into territory that breaks the cell grid.
+    var cjkFallbackScale: CGFloat {
+        get {
+            let stored = defaults.object(forKey: Keys.cjkFallbackScale) as? Double
+            guard let stored, stored > 0 else { return Self.defaultCJKFallbackScale }
+            return CGFloat(min(max(stored, Double(Self.minCJKFallbackScale)), Double(Self.maxCJKFallbackScale)))
+        }
+        set {
+            let clamped = min(max(newValue, Self.minCJKFallbackScale), Self.maxCJKFallbackScale)
+            if abs(clamped - Self.defaultCJKFallbackScale) < 0.001 {
+                defaults.removeObject(forKey: Keys.cjkFallbackScale)
+            } else {
+                defaults.set(Double(clamped), forKey: Keys.cjkFallbackScale)
             }
         }
     }
@@ -153,16 +182,34 @@ final class TerminalFontPreference {
         // a typo'd name silently produces no fallback rather than warning,
         // and we'd rather skip the cascade entry than confuse the user.
         guard NSFont(name: name, size: 12) != nil else { return nil }
-        return NSFontDescriptor(fontAttributes: [.name: name])
+
+        var attributes: [NSFontDescriptor.AttributeName: Any] = [.name: name]
+        let scale = cjkFallbackScale
+        if abs(scale - Self.defaultCJKFallbackScale) > 0.001 {
+            // Apply scale via affine matrix on the cascade descriptor — Core
+            // Text honors the matrix per cascade entry when looking up glyphs
+            // the primary font lacks. Cell metrics still come from the
+            // primary's W advance + ascent/descent (see TermyTerminalView's
+            // cellPosition), so this only retunes glyph rendering size, not
+            // the grid step.
+            attributes[.matrix] = AffineTransform(scaleByX: scale, byY: scale)
+        }
+        return NSFontDescriptor(fontAttributes: attributes)
     }
 
     // MARK: - Mutation
 
-    /// Apply a new triple atomically and notify listeners.
-    func update(primaryName: String, pointSize: CGFloat, cjkFallbackName: String) {
+    /// Apply a new tuple atomically and notify listeners.
+    func update(
+        primaryName: String,
+        pointSize: CGFloat,
+        cjkFallbackName: String,
+        cjkFallbackScale: CGFloat
+    ) {
         self.primaryFontName = primaryName
         self.pointSize = pointSize
         self.cjkFallbackName = cjkFallbackName
+        self.cjkFallbackScale = cjkFallbackScale
         NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
 
