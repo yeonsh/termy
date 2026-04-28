@@ -422,27 +422,29 @@ final class Workspace: NSView, NSSplitViewDelegate {
             return true
         }
 
+        // If the current filter no longer has any panes, restore the most
+        // recently visited still-valid filter (the project the user was on
+        // before this one). This runs regardless of `wasFocused` because a
+        // background pane that exits last in its project (e.g., a Codex pane
+        // calling `exit` while the user types in another pane) leaves the
+        // filter equally stranded as a foregrounded close. Falls back to
+        // filterOptions.first — `.all` when multiple projects remain, or the
+        // sole remaining project. The `?? .all` tail is defensive; it's
+        // unreachable while panes remain.
+        if visiblePanes.isEmpty {
+            let target = filterHistory.filterToRestore(in: filterOptions) ?? .all
+            // suppressFilterHistoryPush prevents `filter`'s didSet from
+            // pushing the dying filter back onto history. Invariant: callers
+            // reachable from `onFilterChanged?()` must not assign to `filter`,
+            // otherwise that nested set is also silently suppressed.
+            suppressFilterHistoryPush = true
+            filter = target
+            suppressFilterHistoryPush = false
+        } else {
+            relayout()
+        }
+
         if wasFocused {
-            // If the current filter no longer has any panes, restore the
-            // most recently visited still-valid filter (the project the
-            // user was on before this one). Falls back to filterOptions.first
-            // — which is `.all` when multiple projects remain, or the only
-            // remaining project. The `?? .all` tail is defensive; it's
-            // unreachable while panes remain (the `panes.isEmpty` early
-            // return at the top of this method handles the no-panes case).
-            if visiblePanes.isEmpty {
-                let target = filterHistory.filterToRestore(in: filterOptions) ?? .all
-                // suppressFilterHistoryPush prevents `filter`'s didSet from
-                // pushing the dying filter back onto history. Invariant:
-                // callers reachable from `onFilterChanged?()` must not
-                // assign to `filter`, otherwise that nested set is also
-                // silently suppressed.
-                suppressFilterHistoryPush = true
-                filter = target
-                suppressFilterHistoryPush = false
-            } else {
-                relayout()
-            }
             let fallbackPaneId = focusHistory.mostRecent(in: visiblePanes.map(\.paneId))
             focusedPane = visiblePanes.first { $0.paneId == fallbackPaneId } ?? visiblePanes.first
             if let focusedPane {
@@ -450,8 +452,6 @@ final class Workspace: NSView, NSSplitViewDelegate {
             }
             updateActivePaneAppearance()
             focusedPane?.focusTerminal()
-        } else {
-            relayout()
         }
         onPanesChanged?()
         return false
