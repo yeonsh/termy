@@ -195,6 +195,14 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         missionControlModel.setLivePaneIds(orderedIds)
         Notifier.shared.pruneWaitingPanes(livePaneIds: Set(orderedIds))
         if workspace.panes.isEmpty {
+            // Pre-emptively kick the autosave flush so the disk write is
+            // already in flight (often complete) by the time
+            // `applicationWillTerminate` blocks on it. Without this, the
+            // WillTerminate semaphore wait stalls window finalization and
+            // the close visibly lags.
+            if let autosaver {
+                Task { await autosaver.flushSync() }
+            }
             window?.performClose(nil)
         }
     }

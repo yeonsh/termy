@@ -83,8 +83,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func applicationWillTerminate(_ notification: Notification) {
         // Flush pending workspace autosave, then stop the hook daemon. Both
         // are async; block briefly so the process doesn't exit mid-write.
-        // 2s total cap — atomic temp-rename means a lost flush at worst
-        // regresses the layout by one debounce interval, not a corrupt file.
+        // 0.5s cap — `MainWindowController` pre-emptively kicks `flushSync`
+        // when the last pane closes, so by the time we get here the disk
+        // write is usually already in flight or done. Atomic temp-rename
+        // means a lost flush at worst regresses layout by one debounce
+        // interval, not a corrupt file. The 2s budget that used to live
+        // here visibly stalled the window-close finalization.
         let sem = DispatchSemaphore(value: 0)
         let autosaver = mainWindowController?.autosaver
         Task { @MainActor in
@@ -94,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             await HookDaemon.shared.stop()
             sem.signal()
         }
-        _ = sem.wait(timeout: .now() + 2.0)
+        _ = sem.wait(timeout: .now() + 0.5)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

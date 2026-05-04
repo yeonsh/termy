@@ -28,6 +28,11 @@ final class WorkspaceAutosaver {
     private weak var workspace: Workspace?
     private let debounceNanos: UInt64
     private var pendingTask: Task<Void, Never>?
+    /// Tracks the currently running `flushSync` so a pre-emptive flush from
+    /// `MainWindowController` (kicked when the last pane closes) and the
+    /// shutdown flush in `applicationWillTerminate` coalesce into one save
+    /// instead of writing the same snapshot twice.
+    private var inFlightFlush: Task<Void, Never>?
 
     init(
         persistence: WorkspacePersistence,
@@ -51,12 +56,24 @@ final class WorkspaceAutosaver {
         }
     }
 
-    /// Synchronous flush for `applicationWillTerminate` — cancels any
-    /// pending debounce and writes the current snapshot before returning.
+    /// Synchronous flush for shutdown — cancels any pending debounce and
+    /// writes the current snapshot before returning. If a flush is already
+    /// in flight (e.g. `MainWindowController` pre-emptively started one when
+    /// the last pane closed), join that task instead of starting a second
+    /// redundant write.
     func flushSync() async {
+        if let inFlight = inFlightFlush {
+            await inFlight.value
+            return
+        }
         pendingTask?.cancel()
         pendingTask = nil
-        await performSave()
+        let task = Task { @MainActor in
+            await self.performSave()
+        }
+        inFlightFlush = task
+        await task.value
+        inFlightFlush = nil
     }
 
     // MARK: - Save pipeline
