@@ -108,17 +108,19 @@ enum PaneStyling {
 
     private static let darkTheme = TermyTheme(
         variant: .dark,
+        // Slots are interleaved across the hue wheel — consecutive panes
+        // should look distinct, not "two adjacent shades of green."
         accentPalette: [
-            rgb(134, 239, 172), // mint
-            rgb(125, 211, 252), // sky
-            rgb(196, 181, 253), // violet
-            rgb(249, 168, 212), // pink
-            rgb(252, 165, 165), // coral
-            rgb(253, 186, 116), // peach
-            rgb(253, 224,  71), // butter
-            rgb(190, 242, 100), // lime
-            rgb(103, 232, 249), // cyan
-            rgb(253, 164, 175)  // rose
+            rgb( 52, 211, 153), // emerald
+            rgb(232, 121, 249), // fuchsia
+            rgb(252, 211,  77), // amber
+            rgb(129, 140, 248), // indigo
+            rgb(251, 113, 133), // rose
+            rgb( 34, 211, 238), // cyan
+            rgb(251, 146,  60), // orange
+            rgb(167, 139, 250), // violet
+            rgb(163, 230,  53), // lime
+            rgb( 56, 189, 248)  // sky
         ],
         windowBackgroundColor: rgb(10, 12, 15),
         contentBackgroundColor: rgb(10, 12, 15),
@@ -134,7 +136,11 @@ enum PaneStyling {
         terminalCaretColor: rgb(255, 255, 255),
         panelBackgroundColor: rgb(36, 36, 36),
         panelBorderColor: rgba(255, 255, 255, 0.12),
-        headerTintAlpha: 0.65,
+        // Lower than the previous 0.65 — the new accent palette is more
+        // saturated, so the same alpha read as overpoweringly heavy on the
+        // header strip. 0.5 keeps the project tint identifiable without
+        // crushing the rest of the pane.
+        headerTintAlpha: 0.5,
         terminalANSIColors: [
             rgb(23, 24, 30),
             rgb(220, 95, 93),
@@ -157,17 +163,20 @@ enum PaneStyling {
 
     private static let lightTheme = TermyTheme(
         variant: .light,
+        // Same hue order as the dark palette so a project that's mint in
+        // dark mode reads as mint in light mode. Tailwind 500/600 family
+        // for enough contrast on the off-white pane bg.
         accentPalette: [
-            rgb(74, 222, 128),  // mint
-            rgb(56, 189, 248),  // sky
-            rgb(129, 140, 248), // indigo
-            rgb(244, 114, 182), // pink
-            rgb(248, 113, 113), // coral
-            rgb(251, 146, 60),  // orange
-            rgb(234, 179, 8),   // amber
-            rgb(132, 204, 22),  // lime
-            rgb(45, 212, 191),  // teal
-            rgb(251, 113, 133)  // rose
+            rgb( 16, 185, 129), // emerald
+            rgb(217,  70, 239), // fuchsia
+            rgb(245, 158,  11), // amber
+            rgb( 99, 102, 241), // indigo
+            rgb(244,  63,  94), // rose
+            rgb( 20, 184, 166), // teal
+            rgb(249, 115,  22), // orange
+            rgb(139,  92, 246), // violet
+            rgb(101, 163,  13), // lime
+            rgb( 14, 165, 233)  // sky
         ],
         windowBackgroundColor: rgb(240, 243, 247),
         contentBackgroundColor: rgb(240, 243, 247),
