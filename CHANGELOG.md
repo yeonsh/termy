@@ -6,6 +6,14 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.1.8 — 2026-05-04
+
+- Pane caret unifies to a single mono color (white in dark mode, black in light mode) instead of taking the per-project accent. Multi-pane windows feel calmer and the caret stays legible regardless of the focus-border color.
+- Refreshed per-project accent palette to a jewel-tone set with broader hue spread. The prior pastel/Tailwind-300 family read as washed out once the alpha-blended header tint and pill fills muted them further; consecutive panes now contrast strongly. Dark `headerTintAlpha` drops 0.65 → 0.5 so the more saturated colors don't crush the pane behind them.
+- Mission-control dashboard skips re-renders when only timestamps changed. Hook events that just stamped `updatedAt` / `lastPtyActivityAt` were forcing a full SwiftUI re-measure of the chip strip on every PTY chunk, pegging the main thread on 9-pane windows; the dashboard diff now ignores fields the chips don't render. Mission-control bar height changes are also de-bounced against equal values to break a measurement-probe feedback loop.
+- CMD+click on a path no longer pops a "해당 프로그램을 실행할 수 없습니다" alert. SwiftTerm's link detector matches paths like `./src/main.swift`, but `NSWorkspace.shared.open` on a scheme-less URL fails loudly — common reproducer was an incidental trackpad tap landing while CMD was held for ⌘+TAB. The opener now no-ops on path matches and only routes URLs whose scheme NSWorkspace can actually handle.
+- Closing the last pane no longer stalls visibly. The shutdown autosave that ran inside `applicationWillTerminate` blocked the main thread for up to 2s; the flush now starts the moment the workspace empties, so by the time the app terminates the disk write is in flight (often complete) and the WillTerminate budget shrinks to 0.5s.
+
 ## 0.1.7 — 2026-04-28
 
 - Drag-and-drop file paths into the terminal. Drop one or more files from Finder onto a pane and termy injects the absolute paths as typed text — backslash-escaped so unquoted shell context (zsh prompt) parses each as a single argument. TUI clients (Claude Code, Codex) receive the same text into their input fields, mirroring the drag-from-Finder UX iTerm2 / Terminal.app provide. Multiple files are space-separated.
