@@ -220,4 +220,55 @@ final class TermyTerminalViewTests: XCTestCase {
             )
         )
     }
+
+    // MARK: - CMD+click URL gating
+    //
+    // SwiftTerm's `.implicit` link detection matches rooted/relative paths
+    // (`./src/main.swift`, `/usr/local/bin`, …) in addition to schemed URLs.
+    // `URL(string:)` parses those as scheme-less relative URLs, and
+    // `NSWorkspace.shared.open` of a scheme-less URL surfaces the
+    // LaunchServices "해당 프로그램을 실행할 수 없습니다" alert. Reproducer:
+    // any incidental CMD+leftMouseUp over path-shaped text — including the
+    // stray trackpad tap that can fire while CMD is held for ⌘+TAB. Gate the
+    // opener on a routable scheme so the alert can't trigger.
+
+    func test_openableURL_acceptsHTTPSScheme() {
+        XCTAssertNotNil(TermyTerminalView.openableURL(from: "https://example.com"))
+    }
+
+    func test_openableURL_acceptsHTTPScheme() {
+        XCTAssertNotNil(TermyTerminalView.openableURL(from: "http://example.com/path?q=1"))
+    }
+
+    func test_openableURL_acceptsMailtoScheme() {
+        XCTAssertNotNil(TermyTerminalView.openableURL(from: "mailto:user@example.com"))
+    }
+
+    func test_openableURL_acceptsFileScheme() {
+        XCTAssertNotNil(TermyTerminalView.openableURL(from: "file:///Users/ysh/notes.md"))
+    }
+
+    func test_openableURL_rejectsRelativePath() {
+        XCTAssertNil(TermyTerminalView.openableURL(from: "./src/main.swift"))
+    }
+
+    func test_openableURL_rejectsAbsolutePath() {
+        XCTAssertNil(TermyTerminalView.openableURL(from: "/usr/local/bin"))
+    }
+
+    func test_openableURL_rejectsParentRelativePath() {
+        XCTAssertNil(TermyTerminalView.openableURL(from: "../foo/bar"))
+    }
+
+    func test_openableURL_rejectsBareFilename() {
+        XCTAssertNil(TermyTerminalView.openableURL(from: "main.swift"))
+    }
+
+    func test_openableURL_rejectsHomeRelativePath() {
+        XCTAssertNil(TermyTerminalView.openableURL(from: "~/Documents/foo"))
+    }
+
+    func test_openableURL_rejectsEmpty() {
+        XCTAssertNil(TermyTerminalView.openableURL(from: ""))
+    }
 }

@@ -239,12 +239,38 @@ final class TermyTerminalView: LocalProcessTerminalView {
         }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        let url = URL(string: trimmed)
-            ?? trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
-                .flatMap { URL(string: $0) }
-        guard let url else { return false }
+        guard let url = Self.openableURL(from: trimmed) else { return false }
         NSWorkspace.shared.open(url)
         return true
+    }
+
+    /// SwiftTerm's `.implicit` link detection happily matches rooted/relative
+    /// paths (`./src/main.swift`, `/usr/local/bin`, `~/Documents/foo`) in
+    /// addition to schemed URLs. `URL(string:)` parses those as scheme-less
+    /// relative URLs; passing one to `NSWorkspace.shared.open` surfaces the
+    /// LaunchServices "해당 프로그램을 실행할 수 없습니다" alert because the
+    /// system can't route a path with no scheme. The same alert fires from
+    /// any incidental CMD+leftMouseUp over path-shaped text — including the
+    /// stray trackpad tap that can land while CMD is held for ⌘+TAB while a
+    /// path is selected. Restrict the opener to URLs whose scheme NSWorkspace
+    /// can actually route, so a path match silently no-ops instead of
+    /// bubbling up as a system error dialog.
+    nonisolated static func openableURL(from text: String) -> URL? {
+        // Mirrors SwiftTerm's `ghosttyImplicitLinkRegex` URL-scheme branch
+        // (Terminal.swift:6194) so anything its detector would flag as a
+        // schemed URL stays openable here.
+        let allowedSchemes: Set<String> = [
+            "http", "https", "mailto", "file", "ftp", "ssh",
+            "tel", "magnet", "ipfs", "ipns", "gemini", "gopher",
+            "news", "git"
+        ]
+        let candidate = URL(string: text)
+            ?? text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+                .flatMap { URL(string: $0) }
+        guard let url = candidate, let scheme = url.scheme?.lowercased() else {
+            return nil
+        }
+        return allowedSchemes.contains(scheme) ? url : nil
     }
 
     /// Mirrors SwiftTerm's internal `calculateMouseHit` — cell width from the
