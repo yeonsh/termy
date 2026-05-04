@@ -138,7 +138,14 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
                 self?.focusPane(byId: paneId)
             },
             onBarHeightChange: { [weak self] height in
-                self?.missionControlHeight?.constant = height
+                // Constraint.constant assignment always invalidates parent
+                // layout — even when the value didn't change. Combined with
+                // the SwiftUI measurement probe that drives the height,
+                // an unconditional assign here can establish a feedback
+                // loop where each layout pass re-stamps the same value.
+                guard let constraint = self?.missionControlHeight,
+                      abs(constraint.constant - height) > 0.5 else { return }
+                constraint.constant = height
             }
         )
         let host = NSHostingView(rootView: view)

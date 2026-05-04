@@ -135,6 +135,46 @@ final class MissionControlModel {
             if oa != ob { return oa < ob }
             return a.paneId < b.paneId
         }
-        items = Array(sorted.prefix(Self.maxDashboardItems))
+        let next = Array(sorted.prefix(Self.maxDashboardItems))
+        // @Observable invalidates on every assignment, regardless of value
+        // equality. Most hook events stamp `updatedAt`/`lastPtyActivityAt`
+        // without changing what the dashboard actually renders, so reusing
+        // a synthesized PaneSnapshot Equatable here would still flip on
+        // every event — and a flip costs an entire SwiftUI re-measure
+        // (CenteredFlow × ViewThatFits's 4 variants + measurement probe),
+        // which is what was pegging the main thread on 9-pane windows.
+        // Compare only the fields the chips actually read.
+        if !Self.haveSameDashboardShape(items, next) {
+            items = next
+        }
+    }
+
+    /// Compares two `items` arrays using the subset of `PaneSnapshot`
+    /// fields that the dashboard actually renders. Excludes timestamps
+    /// (`updatedAt`, `enteredStateAt`, `lastPtyActivityAt`) and identity
+    /// fields the chip view never reads (`lastSessionId`, `lastPrompt`,
+    /// `lastAssistantMessage`) so timestamp-only updates don't trigger a
+    /// SwiftUI re-measure. Internal so unit tests can verify which fields
+    /// participate.
+    nonisolated static func haveSameDashboardShape(
+        _ a: [PaneSnapshot],
+        _ b: [PaneSnapshot]
+    ) -> Bool {
+        guard a.count == b.count else { return false }
+        for i in a.indices where !sameDashboardShape(a[i], b[i]) {
+            return false
+        }
+        return true
+    }
+
+    nonisolated static func sameDashboardShape(_ a: PaneSnapshot, _ b: PaneSnapshot) -> Bool {
+        a.paneId == b.paneId
+            && a.projectId == b.projectId
+            && a.state == b.state
+            && a.needsAttention == b.needsAttention
+            && a.notificationReason == b.notificationReason
+            && a.waitSource == b.waitSource
+            && a.lastCwd == b.lastCwd
+            && a.agentKind == b.agentKind
     }
 }
