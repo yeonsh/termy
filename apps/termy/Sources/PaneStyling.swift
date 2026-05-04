@@ -21,6 +21,7 @@ struct TermyTheme {
     let paneBackgroundColor: NSColor
     let terminalForegroundColor: NSColor
     let terminalSelectionBackgroundColor: NSColor
+    let terminalCaretColor: NSColor
     let panelBackgroundColor: NSColor
     let panelBorderColor: NSColor
     let headerTintAlpha: CGFloat
@@ -80,7 +81,7 @@ enum PaneStyling {
                 paneOpacity: 1.0,
                 borderWidth: 2.5,
                 borderColor: accent.withAlphaComponent(theme.variant == .dark ? 0.95 : 0.85),
-                caretColor: accent
+                caretColor: theme.terminalCaretColor
             )
         }
 
@@ -130,6 +131,7 @@ enum PaneStyling {
         // of blending. Use the pre-blended opaque result (pane bg mixed with
         // the intended overlay at 34%).
         terminalSelectionBackgroundColor: rgb(39, 54, 84),
+        terminalCaretColor: rgb(255, 255, 255),
         panelBackgroundColor: rgb(36, 36, 36),
         panelBorderColor: rgba(255, 255, 255, 0.12),
         headerTintAlpha: 0.65,
@@ -176,6 +178,7 @@ enum PaneStyling {
         // premultiplied RGB, and `rgba(80, 137, 231, 0.24)` would paint as
         // `rgb(19, 33, 55)` — near-black text on near-black selection.
         terminalSelectionBackgroundColor: rgb(209, 224, 248),
+        terminalCaretColor: rgb(0, 0, 0),
         panelBackgroundColor: rgb(248, 249, 251),
         panelBorderColor: rgba(23, 28, 36, 0.10),
         headerTintAlpha: 0.24,
