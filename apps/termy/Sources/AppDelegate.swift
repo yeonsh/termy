@@ -178,6 +178,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         activeController?.showFontSettings(sender)
     }
 
+    @IBAction func increaseFontSize(_ sender: Any?) {
+        activeController?.increaseFontSize(sender)
+    }
+
+    @IBAction func decreaseFontSize(_ sender: Any?) {
+        activeController?.decreaseFontSize(sender)
+    }
+
     @IBAction func selectFilter0(_ sender: Any?) { activeController?.selectAllFilter() }
     @IBAction func selectFilter1(_ sender: Any?) { activeController?.selectProjectFilter(at: 0) }
     @IBAction func selectFilter2(_ sender: Any?) { activeController?.selectProjectFilter(at: 1) }
@@ -435,6 +443,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         )
         toggle.target = self
         toggle.keyEquivalentModifierMask = [.command]
+
+        menu.addItem(.separator())
+
+        // ⌘+ / ⌘- — terminal font size. keyEquivalent "+" with [.command]
+        // matches the "+" character (produced by ⌘⇧= on US layouts) and
+        // displays as ⌘+ in the menu, mirroring Safari/Chrome's zoom chord.
+        let biggerFont = menu.addItem(
+            withTitle: "Increase Font Size",
+            action: #selector(AppDelegate.increaseFontSize(_:)),
+            keyEquivalent: "+"
+        )
+        biggerFont.target = self
+        biggerFont.keyEquivalentModifierMask = [.command]
+
+        let smallerFont = menu.addItem(
+            withTitle: "Decrease Font Size",
+            action: #selector(AppDelegate.decreaseFontSize(_:)),
+            keyEquivalent: "-"
+        )
+        smallerFont.target = self
+        smallerFont.keyEquivalentModifierMask = [.command]
 
         menu.addItem(.separator())
 

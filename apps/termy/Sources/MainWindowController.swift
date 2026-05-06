@@ -256,6 +256,27 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         panel.toggle(over: window)
     }
 
+    /// ⌘+ / ⌘- — bump the terminal font size by 1pt. The preference setter
+    /// clamps to [minPointSize, maxPointSize], so we don't guard the bounds
+    /// here. `update(...)` posts the change notification that every Pane
+    /// listens for, so all live terminals re-render at the new size.
+    @IBAction func increaseFontSize(_ sender: Any?) {
+        adjustFontSize(by: 1)
+    }
+
+    @IBAction func decreaseFontSize(_ sender: Any?) {
+        adjustFontSize(by: -1)
+    }
+
+    private func adjustFontSize(by delta: CGFloat) {
+        let pref = TerminalFontPreference.shared
+        pref.update(
+            primaryName: pref.primaryFontName,
+            pointSize: pref.pointSize + delta,
+            cjkFallbackName: pref.cjkFallbackName
+        )
+    }
+
     /// ⌘K — open the fuzzy project switcher, or toggle-close it if the user
     /// hit ⌘K reflexively on an already-open empty palette. Silently no-ops
     /// if autosave init failed (can't show a project list without persistence).

@@ -56,7 +56,8 @@ final class KeyboardShortcutsPanel: NSPanel {
             Shortcut(combos: [["⌘", "1–9"]], description: "Jump to project filter N")
         ]),
         Section(title: "Appearance", entries: [
-            Shortcut(combos: [["⌘", "⇧", "T"]], description: "Cycle theme (System → Light → Dark)")
+            Shortcut(combos: [["⌘", "⇧", "T"]], description: "Cycle theme (System → Light → Dark)"),
+            Shortcut(combos: [["⌘", "+"], ["⌘", "−"]], description: "Increase / decrease terminal font size")
         ]),
         Section(title: "Window", entries: [
             Shortcut(combos: [["⌘", "M"]], description: "Minimize"),
