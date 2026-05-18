@@ -141,6 +141,7 @@ struct MissionControlView: View {
                 .frame(width: 1, height: 16)
 
             KeyHint(combos: [["⌘", "T"]], label: "New pane")
+            KeyHint(combos: [["⌘", "N"]], label: "New window")
             KeyHint(combos: [["⌘", "G"]], label: "Next waiting")
             KeyHint(combos: [["⌘", "/"]], label: "Shortcuts")
         }
