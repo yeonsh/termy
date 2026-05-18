@@ -62,6 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         Notifier.shared.onFocusPane = { [weak controller] paneId in
             controller?.focusPane(byId: paneId)
         }
+        // Single funnel for pane-state updates: HookDaemon → the shared
+        // MissionControlModel → Notifier. Wired once, app-wide.
+        MissionControlModel.shared.onSnapshotUpdate = { snapshot in
+            Notifier.shared.handle(snapshot)
+        }
         Notifier.shared.start()
 
         // First-run: nudge the user to grant Full Disk Access so they don't

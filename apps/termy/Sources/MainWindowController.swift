@@ -26,7 +26,8 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     /// Stable identity for this window — keys the shared `MissionControlModel`
     /// pane registry and the session record.
     let windowId = UUID()
-    private let missionControlModel = MissionControlModel()
+    /// Shared app-wide dashboard model — every window observes the same one.
+    private var missionControlModel: MissionControlModel { .shared }
     private var missionControlHost: NSHostingView<MissionControlView>?
     /// Debounced on-disk workspace saver. Exposed so `AppDelegate` can
     /// `flushSync()` before the process exits; otherwise private.
@@ -42,11 +43,26 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     /// Top-row project filter. Strong ref so we can rebuild it when
     /// the pane set changes.
     private var filterBar: ProjectFilterBar?
+
+    /// Set by `WindowManager` when this controller is registered. Used to
+    /// route cross-window pane focus.
+    weak var windowManager: WindowManager?
+
     private var rootContentView: AppearanceAwareView? {
         window?.contentView as? AppearanceAwareView
     }
 
-    init() {
+    /// Convenience for callers that want a default-placed, freshly-seeded
+    /// window. `WindowManager` uses the designated init directly.
+    convenience init() {
+        self.init(initialFrame: nil, sessionLayout: nil)
+    }
+
+    /// - Parameters:
+    ///   - initialFrame: window frame to apply; `nil` centers the window.
+    ///   - sessionLayout: when present, the window replays this saved pane
+    ///     layout instead of seeding a single HOME pane.
+    init(initialFrame: NSRect?, sessionLayout: WindowRecord?) {
         let window = TermyWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -55,7 +71,11 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         )
         window.title = "termy"
         window.minSize = NSSize(width: 800, height: 480)
-        window.center()
+        if let initialFrame {
+            window.setFrame(initialFrame, display: false)
+        } else {
+            window.center()
+        }
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.tabbingMode = .disallowed
@@ -97,15 +117,12 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
             // `cd` drifted the pane's cwd — persist the new location.
             self?.autosaver?.requestSave()
         }
-        // Single funnel for pane-state updates: HookDaemon → MissionControlModel
-        // → Notifier. AsyncStream only supports one `for await`, so Notifier
-        // receives events via this forward instead of subscribing directly.
-        missionControlModel.onSnapshotUpdate = { snap in
-            Notifier.shared.handle(snap)
+        // Seed the first pane, or replay a saved layout for a restored window.
+        if let sessionLayout {
+            applySessionLayout(sessionLayout)
+        } else {
+            workspace.addPane()
         }
-
-        // Seed the first pane using HOME.
-        workspace.addPane()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
@@ -210,10 +227,76 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         }
     }
 
-    /// Dashboard-click routing: find the pane by id, focus it (auto-switches
-    /// filter if needed).
+    /// Dashboard-click / banner-tap routing. Delegates to `WindowManager` so
+    /// a pane in another window brings that window forward. Falls back to a
+    /// local focus when this controller isn't registered (single-window).
     func focusPane(byId paneId: String) {
-        _ = workspace.focusPane(byId: paneId)
+        if let windowManager {
+            windowManager.focusPane(byId: paneId)
+        } else {
+            _ = workspace.focusPane(byId: paneId)
+        }
+    }
+
+    /// Focus a pane known to live in *this* window's workspace. Called by
+    /// `WindowManager.focusPane(byId:)` after fronting the window — never
+    /// re-routes, so it can't recurse.
+    @discardableResult
+    func focusLocalPane(byId paneId: String) -> Bool {
+        workspace.focusPane(byId: paneId)
+    }
+
+    /// True when this window's workspace owns the pane.
+    func containsPane(id paneId: String) -> Bool {
+        workspace.panes.contains { $0.paneId == paneId }
+    }
+
+    /// Snapshot this window's restorable state. Returns nil for a paneless
+    /// window (nothing worth restoring).
+    func sessionWindowRecord() -> WindowRecord? {
+        guard let window, !workspace.panes.isEmpty else { return nil }
+        let rows: [[PaneRecord]] = workspace.rows.map { row in
+            row.map { PaneRecord(cwd: $0.currentCwd) }
+        }
+        if rows.flatMap({ $0 }).isEmpty { return nil }
+        let filterProjectId: String?
+        switch workspace.filter {
+        case .all: filterProjectId = nil
+        case .project(let id): filterProjectId = id
+        }
+        let focusedIndex = workspace.focusedPane.flatMap { focused in
+            workspace.panes.firstIndex { $0 === focused }
+        }
+        return WindowRecord(
+            frame: FrameRecord(window.frame),
+            rows: rows,
+            filterProjectId: filterProjectId,
+            focusedPaneIndex: focusedIndex
+        )
+    }
+
+    /// Rebuild this window's panes from a saved `WindowRecord`. Mirrors the
+    /// row/column replay used by the ⌘K project switcher: the first pane of
+    /// each saved row goes in with `.row` axis, the rest with `.column`.
+    private func applySessionLayout(_ record: WindowRecord) {
+        for savedRow in record.rows {
+            for (colIdx, paneRec) in savedRow.enumerated() {
+                let axis: SplitAxis = (colIdx == 0) ? .row : .column
+                workspace.addPane(cwd: paneRec.cwd, splitAxis: axis)
+            }
+        }
+        // Defensive: an empty saved record would leave a paneless window.
+        if workspace.panes.isEmpty {
+            workspace.addPane()
+            return
+        }
+        if let projectId = record.filterProjectId {
+            workspace.filter = .project(projectId)
+        }
+        if let idx = record.focusedPaneIndex,
+           idx >= 0, idx < workspace.panes.count {
+            workspace.focus(pane: workspace.panes[idx])
+        }
     }
 
     // MARK: - Menu validation
@@ -434,6 +517,13 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     // MARK: - Window delegate
 
     func windowDidResize(_ notification: Notification) {}
+
+    /// Deregister from the app-wide window/dashboard registries when this
+    /// window closes. `removeWindow` is idempotent, so a close triggered by
+    /// the last-pane path and an explicit ⌘⇧W both land here safely.
+    func windowWillClose(_ notification: Notification) {
+        windowManager?.removeWindow(self)
+    }
 }
 
 // MARK: - Focus direction
