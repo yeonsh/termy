@@ -6,6 +6,12 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.0 — 2026-05-18
+
+- Multi-window support. ⌘N opens an independent new window — its own pane grid, project filter, and split behaviour — cascaded off the front window so it doesn't land exactly on top. ⌘T now adds a pane to the current window (⌘N did this previously; the ⌘/ shortcut overlay and the dashboard's empty-state hint legend reflect the new mapping). The use case is spreading agent work across multiple monitors.
+- The mission-control dashboard aggregates every window. Each window's bottom bar shows the pane chips for all open windows, not just its own. Clicking a chip — or tapping a WAITING notification banner — brings the owning window forward and focuses the right pane, wherever it lives.
+- Full session restore. Quit with several windows open at different sizes and positions, relaunch, and they all come back: window frames, pane layouts, and project filters. A frame that would land off-screen (a monitor was unplugged) is clamped back onto a visible display. The session file is schema-versioned and written atomically, with the same quarantine-on-corruption handling as the per-project workspace store.
+
 ## 0.1.8 — 2026-05-04
 
 - Pane caret unifies to a single mono color (white in dark mode, black in light mode) instead of taking the per-project accent. Multi-pane windows feel calmer and the caret stays legible regardless of the focus-border color.
