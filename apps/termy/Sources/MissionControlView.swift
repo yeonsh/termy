@@ -545,7 +545,14 @@ private struct DashboardShortcutHintMonitor: NSViewRepresentable {
                 NotificationCenter.default.removeObserver(appResignObserver)
                 self.appResignObserver = nil
             }
-            setVisible(false)
+            // Deliberately does NOT call `setVisible(false)`. `uninstall()`
+            // runs only from `dismantleNSView` — while SwiftUI is tearing down
+            // the host view's graph. Mutating the enclosing view's `@State`
+            // (`showsDashboardShortcutHints`) then re-enters a `StoredLocation`
+            // mid-destruction and trips Swift's exclusivity checker (crash on
+            // closing a non-last window). The hint state is moot anyway: the
+            // whole subtree, that `@State`, and the overlay are being
+            // destroyed. Live hiding still happens via the monitors above.
         }
 
         private func handleFlagsChanged(_ event: NSEvent) {
