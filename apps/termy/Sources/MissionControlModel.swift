@@ -35,16 +35,19 @@ final class MissionControlModel {
     /// basename when no header has fired yet (e.g. on very first render).
     private(set) var labelsByPaneId: [String: PaneDisplayLabel] = [:]
 
-    /// Known pane IDs that the window controller thinks exist. Lets us filter
-    /// out snapshots for panes that were closed (daemon hasn't dropped them
-    /// from its map, but we don't want zombie items on the bar).
-    private var livePaneIds: Set<String> = []
+    /// Union of every registered window's pane IDs. Drives chip filtering.
+    private(set) var livePaneIds: Set<String> = []
 
-    /// Stable ordering — position on the bar is fixed by pane creation order.
-    /// Sourced from `Workspace.panes` (a creation-order array) via
-    /// `setLivePaneIds`, so a new pane always gets appended on the right and
-    /// existing chips never shuffle on state change.
-    private var paneOrder: [String: Int] = [:]
+    /// Global chip position: window-registration order, then pane order
+    /// within each window. Flattened from `paneIdsByWindow` on every change.
+    private(set) var paneOrder: [String: Int] = [:]
+
+    /// Window registration order — windows appear on the bar in the order
+    /// they were first registered.
+    private var windowOrder: [UUID] = []
+
+    /// Per-window ordered pane IDs, keyed by `MainWindowController.windowId`.
+    private var paneIdsByWindow: [UUID: [String]] = [:]
 
     /// Raw snapshot map keyed by paneId, overwritten on each DaemonUpdate.
     private var snapshotsById: [String: PaneSnapshot] = [:]
@@ -60,21 +63,50 @@ final class MissionControlModel {
     /// silently split events).
     var onSnapshotUpdate: ((PaneSnapshot) -> Void)?
 
-    init() {
-        pumpTask = Task { [weak self] in
-            await self?.pumpUpdates()
+    /// Single app-wide instance. Every window's `MissionControlView`
+    /// observes this one model, and it is the sole consumer of
+    /// `HookDaemon.shared.updates` (an AsyncStream allows only one).
+    static let shared = MissionControlModel()
+
+    /// `startPump: false` is used by unit tests so a throwaway model does
+    /// not race the shared instance for `HookDaemon.updates` events.
+    init(startPump: Bool = true) {
+        if startPump {
+            pumpTask = Task { [weak self] in
+                await self?.pumpUpdates()
+            }
         }
     }
 
-    /// Called by the window controller whenever a pane is added or removed.
-    /// `orderedIds` is the workspace's pane list in creation order — used to
-    /// assign stable positions on the dashboard bar.
-    func setLivePaneIds(_ orderedIds: [String]) {
-        livePaneIds = Set(orderedIds)
+    /// Register (or replace) one window's ordered pane list. Called by each
+    /// `MainWindowController` whenever its workspace pane set changes.
+    /// `windowId` is `MainWindowController.windowId`.
+    func setLivePaneIds(_ orderedIds: [String], forWindow windowId: UUID) {
+        if !windowOrder.contains(windowId) {
+            windowOrder.append(windowId)
+        }
+        paneIdsByWindow[windowId] = orderedIds
+        rebuildGlobalOrder()
+    }
+
+    /// Drop a window's panes from the dashboard when its window closes.
+    func removeWindow(_ windowId: UUID) {
+        windowOrder.removeAll { $0 == windowId }
+        paneIdsByWindow.removeValue(forKey: windowId)
+        rebuildGlobalOrder()
+    }
+
+    /// Flatten every window's pane list into the global `livePaneIds` /
+    /// `paneOrder`, then drop stale labels and recompute the chips.
+    private func rebuildGlobalOrder() {
+        var flat: [String] = []
+        for windowId in windowOrder {
+            flat.append(contentsOf: paneIdsByWindow[windowId] ?? [])
+        }
+        livePaneIds = Set(flat)
         paneOrder = Dictionary(
-            uniqueKeysWithValues: orderedIds.enumerated().map { ($1, $0) }
+            uniqueKeysWithValues: flat.enumerated().map { ($1, $0) }
         )
-        // Drop labels for panes that no longer exist.
         labelsByPaneId = labelsByPaneId.filter { livePaneIds.contains($0.key) }
         recomputeItems()
     }
@@ -119,8 +151,8 @@ final class MissionControlModel {
 
     /// Hard cap on dashboard items. Beyond this, the UI can't render chips
     /// legibly even at maximum compression — older items (creation order)
-    /// win, newer ones are hidden from the bar. 32 also matches the outer
-    /// per-window pane limit we expect in practice.
+    /// win, newer ones are hidden from the bar. With multi-window this is a
+    /// global cap across every window's panes combined.
     static let maxDashboardItems = 32
 
     private func recomputeItems() {

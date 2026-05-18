@@ -23,6 +23,9 @@ final class TermyWindow: NSWindow {
 
 final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWindowDelegate {
     private let workspace = Workspace()
+    /// Stable identity for this window — keys the shared `MissionControlModel`
+    /// pane registry and the session record.
+    let windowId = UUID()
     private let missionControlModel = MissionControlModel()
     private var missionControlHost: NSHostingView<MissionControlView>?
     /// Debounced on-disk workspace saver. Exposed so `AppDelegate` can
@@ -192,7 +195,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     private func onPanesChanged() {
         filterBar?.rebuild()
         let orderedIds = workspace.panes.map(\.paneId)
-        missionControlModel.setLivePaneIds(orderedIds)
+        missionControlModel.setLivePaneIds(orderedIds, forWindow: windowId)
         Notifier.shared.pruneWaitingPanes(livePaneIds: Set(orderedIds))
         if workspace.panes.isEmpty {
             // Pre-emptively kick the autosave flush so the disk write is
