@@ -31,7 +31,7 @@ final class KeyboardShortcutsPanel: NSPanel {
 
     static let sections: [Section] = [
         Section(title: "Panes", entries: [
-            Shortcut(combos: [["⌘", "N"]], description: "New pane"),
+            Shortcut(combos: [["⌘", "T"]], description: "New pane"),
             Shortcut(combos: [["⌘", "D"]], description: "Split horizontally (add to same row)"),
             Shortcut(combos: [["⌘", "⇧", "D"]], description: "Split vertically (new row)"),
             Shortcut(combos: [["⌘", "W"]], description: "Close focused pane"),
@@ -60,6 +60,7 @@ final class KeyboardShortcutsPanel: NSPanel {
             Shortcut(combos: [["⌘", "+"], ["⌘", "−"]], description: "Increase / decrease terminal font size")
         ]),
         Section(title: "Window", entries: [
+            Shortcut(combos: [["⌘", "N"]], description: "New window"),
             Shortcut(combos: [["⌘", "M"]], description: "Minimize"),
             Shortcut(combos: [["⌘", "⇧", "W"]], description: "Close window"),
             Shortcut(combos: [["⌘", "Q"]], description: "Quit termy")

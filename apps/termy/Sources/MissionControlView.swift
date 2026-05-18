@@ -140,7 +140,7 @@ struct MissionControlView: View {
                 .fill(Color(nsColor: .separatorColor).opacity(0.6))
                 .frame(width: 1, height: 16)
 
-            KeyHint(combos: [["⌘", "N"]], label: "New pane")
+            KeyHint(combos: [["⌘", "T"]], label: "New pane")
             KeyHint(combos: [["⌘", "G"]], label: "Next waiting")
             KeyHint(combos: [["⌘", "/"]], label: "Shortcuts")
         }
