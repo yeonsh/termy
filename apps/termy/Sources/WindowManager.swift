@@ -10,8 +10,34 @@ import AppKit
 @MainActor
 final class WindowManager {
     private(set) var controllers: [MainWindowController] = []
+    private let sessionPersistence: SessionPersistence?
+    private(set) var sessionAutosaver: SessionAutosaver?
 
-    init() {}
+    init() {
+        // Persistence init can fail if app-support is unwritable — session
+        // restore/save then silently degrades to no-op (best-effort feature).
+        self.sessionPersistence = try? SessionPersistence()
+        self.sessionAutosaver = nil
+        if let sessionPersistence {
+            self.sessionAutosaver = SessionAutosaver(
+                persistence: sessionPersistence,
+                windowManager: self
+            )
+        }
+    }
+
+    /// Restore saved windows. Returns true if at least one window opened.
+    func restoreSessionWindows() async -> Bool {
+        guard let sessionPersistence else { return false }
+        guard case .loaded(let record) = await sessionPersistence.load(),
+              !record.windows.isEmpty else {
+            return false
+        }
+        for windowRecord in record.windows {
+            restoreWindow(from: windowRecord)
+        }
+        return true
+    }
 
     // MARK: - Window creation
 
@@ -26,6 +52,7 @@ final class WindowManager {
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        sessionAutosaver?.requestSave()
         return controller
     }
 
@@ -51,6 +78,10 @@ final class WindowManager {
     func removeWindow(_ controller: MainWindowController) {
         controllers.removeAll { $0 === controller }
         MissionControlModel.shared.removeWindow(controller.windowId)
+        // The closed window's panes are gone — drop any WAITING entries for
+        // panes that no longer exist anywhere.
+        Notifier.shared.pruneWaitingPanes(livePaneIds: MissionControlModel.shared.livePaneIds)
+        sessionAutosaver?.requestSave()
     }
 
     // MARK: - Cross-window routing

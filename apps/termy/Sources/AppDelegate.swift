@@ -37,7 +37,7 @@ enum TermyApp {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
-    private var mainWindowController: MainWindowController?
+    private let windowManager = WindowManager()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -50,17 +50,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             await HookDaemon.shared.start()
         }
 
-        let controller = MainWindowController()
-        mainWindowController = controller
-        controller.showWindow(nil)
-        controller.window?.makeKeyAndOrderFront(nil)
-        controller.window?.center()
-        NSApp.activate(ignoringOtherApps: true)
-
-        // WAITING notifications — route banner taps back through the window
-        // controller so the clicked pane becomes focused.
-        Notifier.shared.onFocusPane = { [weak controller] paneId in
-            controller?.focusPane(byId: paneId)
+        // WAITING notifications — route banner taps through WindowManager so
+        // the clicked pane's window comes forward and the pane is focused.
+        Notifier.shared.onFocusPane = { [weak self] paneId in
+            self?.windowManager.focusPane(byId: paneId)
         }
         // Single funnel for pane-state updates: HookDaemon → the shared
         // MissionControlModel → Notifier. Wired once, app-wide.
@@ -68,6 +61,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             Notifier.shared.handle(snapshot)
         }
         Notifier.shared.start()
+
+        // Restore the saved multi-window session, or open one fresh window
+        // when there is nothing to restore.
+        Task { @MainActor in
+            let restored = await self.windowManager.restoreSessionWindows()
+            if !restored {
+                self.windowManager.newWindow()
+            }
+        }
 
         // First-run: nudge the user to grant Full Disk Access so they don't
         // eat 5+ TCC prompts from child processes. Deferred a tick so the
@@ -95,11 +97,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // interval, not a corrupt file. The 2s budget that used to live
         // here visibly stalled the window-close finalization.
         let sem = DispatchSemaphore(value: 0)
-        let autosaver = mainWindowController?.autosaver
+        let controllers = windowManager.controllers
+        let sessionAutosaver = windowManager.sessionAutosaver
         Task { @MainActor in
-            if let autosaver {
-                await autosaver.flushSync()
+            for controller in controllers {
+                await controller.autosaver?.flushSync()
             }
+            await sessionAutosaver?.flushSync()
             await HookDaemon.shared.stop()
             sem.signal()
         }
@@ -116,7 +120,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if let winCtrl = NSApp.keyWindow?.windowController as? MainWindowController {
             return winCtrl
         }
-        return mainWindowController
+        return windowManager.controllers.first
+    }
+
+    @IBAction func newWindow(_ sender: Any?) {
+        windowManager.newWindow()
     }
 
     @IBAction func newPane(_ sender: Any?) {
@@ -255,7 +263,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @IBAction func cycleAppearance(_ sender: Any?) {
         let next = selectedAppearancePreference.next
         next.apply()
-        AppearanceBanner.shared.show(next, over: NSApp.keyWindow ?? mainWindowController?.window)
+        AppearanceBanner.shared.show(
+            next,
+            over: NSApp.keyWindow ?? windowManager.controllers.first?.window
+        )
     }
 
     private var selectedAppearancePreference: AppAppearancePreference {
@@ -372,10 +383,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func makeFileMenu() -> NSMenuItem {
         let item = NSMenuItem()
         let menu = NSMenu(title: "File")
+        let newWindow = menu.addItem(
+            withTitle: "New Window",
+            action: #selector(AppDelegate.newWindow(_:)),
+            keyEquivalent: "n"
+        )
+        newWindow.target = self
+        newWindow.keyEquivalentModifierMask = [.command]
+
         let newPane = menu.addItem(
             withTitle: "New Pane",
             action: #selector(AppDelegate.newPane(_:)),
-            keyEquivalent: "n"
+            keyEquivalent: "t"
         )
         newPane.target = self
         newPane.keyEquivalentModifierMask = [.command]

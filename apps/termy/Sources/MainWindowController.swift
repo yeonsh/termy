@@ -110,12 +110,14 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         workspace.onPanesChanged = { [weak self] in
             self?.onPanesChanged()
             self?.autosaver?.requestSave()
+            self?.windowManager?.sessionAutosaver?.requestSave()
         }
         workspace.onFilterChanged = { [weak self] in self?.filterBar?.rebuild() }
         workspace.onPaneHeaderChanged = { [weak self] paneId, project, branch in
             self?.missionControlModel.setLabel(paneId: paneId, project: project, branch: branch)
             // `cd` drifted the pane's cwd — persist the new location.
             self?.autosaver?.requestSave()
+            self?.windowManager?.sessionAutosaver?.requestSave()
         }
         // Seed the first pane, or replay a saved layout for a restored window.
         if let sessionLayout {
@@ -516,7 +518,13 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
 
     // MARK: - Window delegate
 
-    func windowDidResize(_ notification: Notification) {}
+    func windowDidResize(_ notification: Notification) {
+        windowManager?.sessionAutosaver?.requestSave()
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        windowManager?.sessionAutosaver?.requestSave()
+    }
 
     /// Deregister from the app-wide window/dashboard registries when this
     /// window closes. `removeWindow` is idempotent, so a close triggered by
