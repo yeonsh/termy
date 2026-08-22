@@ -54,11 +54,22 @@ fi
 echo "==> gh auth check"
 gh auth status >/dev/null
 
-echo "==> create GitHub release $TAG (DMG upload)"
-gh release create "$TAG" "$DMG" \
-    --repo "$GITHUB_REPO" \
-    --title "termy ${VERSION}" \
-    --notes-file "$NOTES_FILE"
+if gh release view "$TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
+    echo "==> release $TAG already exists — updating notes + clobbering DMG"
+    gh release edit "$TAG" \
+        --repo "$GITHUB_REPO" \
+        --title "termy ${VERSION}" \
+        --notes-file "$NOTES_FILE"
+    gh release upload "$TAG" "$DMG" \
+        --repo "$GITHUB_REPO" \
+        --clobber
+else
+    echo "==> create GitHub release $TAG (DMG upload)"
+    gh release create "$TAG" "$DMG" \
+        --repo "$GITHUB_REPO" \
+        --title "termy ${VERSION}" \
+        --notes-file "$NOTES_FILE"
+fi
 
 echo "==> publish appcast to Pages repo at $PAGES"
 cp "$APPCAST" "$PAGES/appcast.xml"
