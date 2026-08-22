@@ -6,6 +6,10 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.1 — 2026-08-22
+
+- New app icon. The mark moves from a near-black tile to a light one — white/off-white gradient, deep-green glyph, and the three brand pills (teal, amber, pink) re-mixed at full opacity so they stay saturated against paper instead of washing out. The dark tile disappeared into the Dock on dark wallpapers and read as a featureless square at 16pt; the light version keeps its silhouette at every size.
+
 ## 0.2.0 — 2026-05-18
 
 - Multi-window support. ⌘N opens an independent new window — its own pane grid, project filter, and split behaviour — cascaded off the front window so it doesn't land exactly on top. ⌘T now adds a pane to the current window (⌘N did this previously; the ⌘/ shortcut overlay and the dashboard's empty-state hint legend reflect the new mapping). The use case is spreading agent work across multiple monitors.
