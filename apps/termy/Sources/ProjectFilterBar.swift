@@ -40,6 +40,9 @@ final class ProjectFilterBar: NSView {
         scrollView.contentInsets = .init()
         scrollView.documentView = stripView
         stripView.frame = NSRect(x: 0, y: 0, width: 0, height: 28)
+        stripView.onReorder = { [weak self] from, to in
+            self?.reorderProject(from: from, to: to)
+        }
 
         addSubview(scrollView)
         NSLayoutConstraint.activate([
@@ -103,11 +106,25 @@ final class ProjectFilterBar: NSView {
         }
 
         stripView.setButtons(buttons)
+        stripView.firstMovableIndex = projectChipOffset
         stripView.viewportHeight = bounds.height > 0 ? bounds.height : 28
 
         DispatchQueue.main.async { [weak self] in
             self?.scrollSelectedButtonIntoView(index: selectedIndex)
         }
+    }
+
+    /// Chip index of the first project filter. The ALL chip, when present,
+    /// occupies index 0 and is not a project — the strip reports drag indices
+    /// in chip space, so they shift by this to address the project list.
+    private var projectChipOffset: Int {
+        options.first?.isAll == true ? 1 : 0
+    }
+
+    private func reorderProject(from: Int, to: Int) {
+        guard let ws = workspace else { return }
+        let offset = projectChipOffset
+        ws.moveProject(from: from - offset, to: to - offset)
     }
 
     @objc private func buttonClicked(_ sender: NSButton) {
@@ -324,6 +341,21 @@ private final class FilterStripView: NSView {
     /// clip them down to a hair-width sliver at the rounded corners.
     private var underlines: [NSView] = []
 
+    /// Index of the first chip the user may drag. Chips before it — the ALL
+    /// filter, when present — stay pinned to the leading edge.
+    var firstMovableIndex = 0
+    /// Reports a settled reorder as (from, to) indices into `buttons`.
+    var onReorder: ((Int, Int) -> Void)?
+    /// Non-nil only while a chip is being dragged. Doubles as the flag that
+    /// suspends `layout()`.
+    private var draggingButton: NSButton?
+    /// Bumped on every `setButtons`. A drag captures the value it started
+    /// with so it can tell that the chips underneath it were replaced.
+    private var buttonsGeneration = 0
+    /// Pointer travel that separates a filter click from a reorder drag.
+    private static let dragThreshold: CGFloat = 4
+    private static let dragSettleDuration: TimeInterval = 0.14
+
     override var isFlipped: Bool { true }
 
     // The strip is the deepest hit-test target between the chips, so this
@@ -332,6 +364,10 @@ private final class FilterStripView: NSView {
     override var mouseDownCanMoveWindow: Bool { true }
 
     func setButtons(_ newButtons: [NSButton]) {
+        buttonsGeneration &+= 1
+        // Drop the drag's hold on `layout()` right away; the tracking loop
+        // notices the generation bump on its next tick and unwinds the rest.
+        draggingButton = nil
         buttons.forEach { $0.removeFromSuperview() }
         underlines.forEach { $0.removeFromSuperview() }
         buttons = newButtons
@@ -356,37 +392,21 @@ private final class FilterStripView: NSView {
 
     override func layout() {
         super.layout()
-        let widths = ProjectFilterLayout.buttonWidths(
-            naturalWidths: naturalButtonWidths,
-            spacing: spacing,
-            viewportWidth: viewportWidth
-        )
-        let totalWidth = widths.reduce(CGFloat(0), +)
-            + CGFloat(max(0, widths.count - 1)) * spacing
-        var x = ProjectFilterLayout.leadingInset(
-            contentWidth: totalWidth,
-            viewportWidth: viewportWidth
-        )
-        let stackHeight = Self.buttonHeight + Self.underlineGap + Self.underlineHeight
-        let y = max(0, floor((viewportHeight - stackHeight) / 2))
+        // A drag owns every chip frame until it settles; re-running the
+        // slot layout mid-drag would yank the chip out from under the cursor.
+        guard draggingButton == nil else { return }
+
+        let widths = laidOutWidths()
+        var x = contentStartX(widths: widths)
+        let y = chipY()
 
         for (index, button) in buttons.enumerated() {
             let width = widths[index]
-            button.frame = NSRect(x: x, y: y, width: width, height: Self.buttonHeight)
+            let frame = NSRect(x: x, y: y, width: width, height: Self.buttonHeight)
+            button.frame = frame
 
             let underline = underlines[index]
-            // Strip is `isFlipped = true`, so larger y = visually lower.
-            // Sit the bar `underlineGap` below the chip so it reads as its
-            // own indicator, not a stripe of the chip fill. The bar is 80%
-            // of the chip width, centered — narrower than the chip so it
-            // reads as an accent tick, not a second border.
-            let underlineWidth = floor(width * 0.8)
-            underline.frame = NSRect(
-                x: x + floor((width - underlineWidth) / 2),
-                y: y + Self.buttonHeight + Self.underlineGap,
-                width: underlineWidth,
-                height: Self.underlineHeight
-            )
+            underline.frame = underlineFrame(chipFrame: frame)
             if let chip = button as? FilterChipButton, let color = chip.activeUnderlineColor {
                 underline.layer?.backgroundColor = color.cgColor
                 underline.isHidden = false
@@ -397,18 +417,277 @@ private final class FilterStripView: NSView {
             x += width + spacing
         }
 
-        updateDocumentFrame(totalWidth: totalWidth)
+        updateDocumentFrame(totalWidth: contentWidth(of: widths))
     }
 
-    override var intrinsicContentSize: NSSize {
-        let widths = ProjectFilterLayout.buttonWidths(
+    // MARK: - Slot geometry
+
+    private func laidOutWidths() -> [CGFloat] {
+        ProjectFilterLayout.buttonWidths(
             naturalWidths: naturalButtonWidths,
             spacing: spacing,
             viewportWidth: viewportWidth
         )
-        let totalWidth = widths.reduce(CGFloat(0), +)
-            + CGFloat(max(0, widths.count - 1)) * spacing
-        return NSSize(width: totalWidth, height: viewportHeight)
+    }
+
+    private func contentWidth(of widths: [CGFloat]) -> CGFloat {
+        widths.reduce(CGFloat(0), +) + CGFloat(max(0, widths.count - 1)) * spacing
+    }
+
+    private func contentStartX(widths: [CGFloat]) -> CGFloat {
+        ProjectFilterLayout.leadingInset(
+            contentWidth: contentWidth(of: widths),
+            viewportWidth: viewportWidth
+        )
+    }
+
+    private func chipY() -> CGFloat {
+        let stackHeight = Self.buttonHeight + Self.underlineGap + Self.underlineHeight
+        return max(0, floor((viewportHeight - stackHeight) / 2))
+    }
+
+    /// Strip is `isFlipped = true`, so larger y = visually lower. Sit the bar
+    /// `underlineGap` below the chip so it reads as its own indicator, not a
+    /// stripe of the chip fill. The bar is 80% of the chip width, centered —
+    /// narrower than the chip so it reads as an accent tick, not a second
+    /// border.
+    private func underlineFrame(chipFrame: NSRect) -> NSRect {
+        let underlineWidth = floor(chipFrame.width * 0.8)
+        return NSRect(
+            x: chipFrame.minX + floor((chipFrame.width - underlineWidth) / 2),
+            y: chipFrame.minY + Self.buttonHeight + Self.underlineGap,
+            width: underlineWidth,
+            height: Self.underlineHeight
+        )
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: contentWidth(of: laidOutWidths()), height: viewportHeight)
+    }
+
+    // MARK: - Drag to reorder
+
+    /// Owns the whole mouse-down..mouse-up cycle for a chip. Below the drag
+    /// threshold it forwards a plain click, so a tap still switches filters;
+    /// past it the chip detaches and the rest of the strip opens a slot.
+    /// Tracking the events ourselves (rather than letting NSButton handle
+    /// mouseDown) is what keeps those two gestures from eating each other.
+    func handleMouseDown(on button: NSButton, with event: NSEvent) {
+        guard let window,
+              let index = buttons.firstIndex(where: { $0 === button })
+        else { return }
+
+        // `min` keeps the range valid if a stale `firstMovableIndex` outruns a
+        // freshly shortened chip list.
+        let movable = min(firstMovableIndex, buttons.count)..<buttons.count
+        guard movable.contains(index), movable.count > 1 else {
+            button.performClick(nil)
+            return
+        }
+
+        let widths = buttons.map(\.frame.width)
+        let downInStrip = convert(event.locationInWindow, from: nil)
+        let grabOffsetX = downInStrip.x - button.frame.minX
+        let generation = buttonsGeneration
+        var order = Array(buttons.indices)
+        var started = false
+        var location = event.locationInWindow
+
+        // Timeout ticks drive edge auto-scroll while the pointer sits still
+        // against the end of a strip that's wider than its viewport.
+        window.trackEvents(
+            matching: [.leftMouseDragged, .leftMouseUp],
+            timeout: 1.0 / 60.0,
+            mode: .eventTracking
+        ) { trackedEvent, stop in
+            if let trackedEvent {
+                location = trackedEvent.locationInWindow
+            }
+
+            // An agent state change (pane opened, `cd`, header relabel) can
+            // rebuild the strip mid-drag, which replaces every chip. The
+            // indices we captured no longer address the same buttons, so
+            // abandon rather than reorder — or index — by stale index. This
+            // has to come before the mouse-up branch, which does both.
+            guard generation == self.buttonsGeneration else {
+                stop.pointee = true
+                self.cancelDrag(wasDragging: started)
+                return
+            }
+
+            if trackedEvent?.type == .leftMouseUp {
+                stop.pointee = true
+                if started {
+                    self.finishDrag(index: index, order: order, widths: widths)
+                } else {
+                    button.performClick(nil)
+                }
+                return
+            }
+
+            if !started {
+                let travel = abs(self.convert(location, from: nil).x - downInStrip.x)
+                guard travel > Self.dragThreshold else { return }
+                started = true
+                self.beginDrag(button: button, at: index)
+            }
+
+            self.autoscroll(towards: location)
+            order = self.updateDrag(
+                index: index,
+                pointerX: self.convert(location, from: nil).x,
+                grabOffsetX: grabOffsetX,
+                order: order,
+                widths: widths
+            )
+        }
+    }
+
+    private func beginDrag(button: NSButton, at index: Int) {
+        draggingButton = button
+        // Lift the chip and its underline above the siblings they slide past.
+        // No layer shadow here: the chip clips its title to the pill with
+        // `masksToBounds`, which would clip the shadow away too, and turning
+        // the mask off lets a truncated label bleed past the chip's edges.
+        addSubview(button, positioned: .above, relativeTo: nil)
+        addSubview(underlines[index], positioned: .above, relativeTo: nil)
+        button.alphaValue = 0.9
+        NSCursor.closedHand.push()
+    }
+
+    /// Abandon an in-flight drag without reordering, restoring the chips to
+    /// whatever the current layout says.
+    private func cancelDrag(wasDragging: Bool) {
+        guard wasDragging else { return }
+        draggingButton?.alphaValue = 1
+        draggingButton = nil
+        NSCursor.pop()
+        needsLayout = true
+    }
+
+    /// Follows the pointer with the dragged chip and, when its center crosses
+    /// a neighbour's, slides the rest into the arrangement that would result.
+    /// Returns the (possibly new) chip order.
+    private func updateDrag(
+        index: Int,
+        pointerX: CGFloat,
+        grabOffsetX: CGFloat,
+        order: [Int],
+        widths: [CGFloat]
+    ) -> [Int] {
+        let startX = contentStartX(widths: widths)
+        let width = widths[index]
+
+        // The dragged chip stays inside the movable span: it can't be pushed
+        // ahead of a pinned chip, nor past the trailing edge of the strip.
+        let pinnedWidth = widths[0..<firstMovableIndex]
+            .reduce(CGFloat(0)) { $0 + $1 + spacing }
+        let lowerBound = startX + pinnedWidth
+        let upperBound = startX + contentWidth(of: widths) - width
+        let x = min(max(pointerX - grabOffsetX, lowerBound), max(lowerBound, upperBound))
+
+        let frame = NSRect(x: x, y: chipY(), width: width, height: Self.buttonHeight)
+        buttons[index].frame = frame
+        underlines[index].frame = underlineFrame(chipFrame: frame)
+
+        let others = order.filter { $0 != index }
+        var origins: [CGFloat] = []
+        var slotX = startX
+        for other in others {
+            origins.append(slotX)
+            slotX += widths[other] + spacing
+        }
+        let insertion = ProjectOrder.insertionIndex(
+            draggedCenterX: frame.midX,
+            otherOrigins: origins,
+            otherWidths: others.map { widths[$0] },
+            firstMovable: firstMovableIndex
+        )
+
+        var reordered = others
+        reordered.insert(index, at: insertion)
+        guard reordered != order else { return order }
+
+        layoutSlots(order: reordered, widths: widths, skipping: index, animated: true)
+        return reordered
+    }
+
+    private func finishDrag(index: Int, order: [Int], widths: [CGFloat]) {
+        buttons[index].alphaValue = 1
+        NSCursor.pop()
+
+        let destination = order.firstIndex(of: index) ?? index
+        // Let the chip settle into its slot before handing the new order up —
+        // the callback rebuilds the whole strip, which would cut the animation.
+        // `draggingButton` stays set until then so `layout()` doesn't reclaim
+        // the frames mid-settle.
+        layoutSlots(order: order, widths: widths, skipping: nil, animated: true) {
+            self.draggingButton = nil
+            guard destination != index else { return }
+            self.onReorder?(index, destination)
+        }
+    }
+
+    private func layoutSlots(
+        order: [Int],
+        widths: [CGFloat],
+        skipping: Int?,
+        animated: Bool,
+        completion: (() -> Void)? = nil
+    ) {
+        var x = contentStartX(widths: widths)
+        let y = chipY()
+        var targets: [(index: Int, frame: NSRect)] = []
+        for index in order {
+            let width = widths[index]
+            if index != skipping {
+                targets.append((index, NSRect(x: x, y: y, width: width, height: Self.buttonHeight)))
+            }
+            x += width + spacing
+        }
+
+        guard animated else {
+            for target in targets {
+                buttons[target.index].frame = target.frame
+                underlines[target.index].frame = underlineFrame(chipFrame: target.frame)
+            }
+            completion?()
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = Self.dragSettleDuration
+            ctx.allowsImplicitAnimation = true
+            for target in targets {
+                buttons[target.index].animator().frame = target.frame
+                underlines[target.index].animator().frame = underlineFrame(chipFrame: target.frame)
+            }
+        }, completionHandler: completion)
+    }
+
+    /// Scrolls the strip when the pointer nears a viewport edge, so a chip can
+    /// be dragged past the chips currently scrolled out of sight.
+    private func autoscroll(towards locationInWindow: NSPoint) {
+        guard let scrollView = enclosingScrollView else { return }
+        let clip = scrollView.contentView
+        let point = clip.convert(locationInWindow, from: nil)
+        let edge: CGFloat = 24
+        let step: CGFloat = 8
+
+        let delta: CGFloat
+        if point.x < clip.bounds.minX + edge {
+            delta = -step
+        } else if point.x > clip.bounds.maxX - edge {
+            delta = step
+        } else {
+            return
+        }
+
+        let maxOriginX = max(0, frame.width - clip.bounds.width)
+        let originX = min(max(0, clip.bounds.origin.x + delta), maxOriginX)
+        guard abs(originX - clip.bounds.origin.x) > 0.01 else { return }
+        clip.scroll(to: NSPoint(x: originX, y: clip.bounds.origin.y))
+        scrollView.reflectScrolledClipView(clip)
     }
 
     private func updateDocumentFrame(totalWidth: CGFloat? = nil) {
@@ -456,6 +735,17 @@ private final class FilterChipButton: NSButton {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    // Hand the gesture to the strip, which owns click-vs-reorder-drag for the
+    // whole row. Letting NSButton run its own mouse-down tracking here would
+    // swallow the drag before the strip ever sees it.
+    override func mouseDown(with event: NSEvent) {
+        guard let strip = superview as? FilterStripView else {
+            super.mouseDown(with: event)
+            return
+        }
+        strip.handleMouseDown(on: self, with: event)
+    }
 
     override func layout() {
         super.layout()

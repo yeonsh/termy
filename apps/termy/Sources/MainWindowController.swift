@@ -273,7 +273,8 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
             frame: FrameRecord(window.frame),
             rows: rows,
             filterProjectId: filterProjectId,
-            focusedPaneIndex: focusedIndex
+            focusedPaneIndex: focusedIndex,
+            projectOrder: workspace.knownProjectIds
         )
     }
 
@@ -291,6 +292,11 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         if workspace.panes.isEmpty {
             workspace.addPane()
             return
+        }
+        // Restore the chip arrangement before the filter so the bar rebuilds
+        // once, already in the user's order.
+        if let projectOrder = record.projectOrder {
+            workspace.applyProjectOrder(projectOrder)
         }
         if let projectId = record.filterProjectId {
             workspace.filter = .project(projectId)

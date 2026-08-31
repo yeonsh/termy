@@ -33,17 +33,24 @@ struct WindowRecord: Codable, Equatable {
     /// Index of the focused pane into the flattened `rows` (creation order).
     /// `nil` when the window had no focused pane.
     var focusedPaneIndex: Int?
+    /// Project ids in the order the user dragged the titlebar chips into.
+    /// `nil` on sessions saved before drag-reorder existed — restore then
+    /// falls back to discovery order. Optional rather than a schema bump so
+    /// older builds keep reading the file.
+    var projectOrder: [String]?
 
     init(
         frame: FrameRecord,
         rows: [[PaneRecord]],
         filterProjectId: String? = nil,
-        focusedPaneIndex: Int? = nil
+        focusedPaneIndex: Int? = nil,
+        projectOrder: [String]? = nil
     ) {
         self.frame = frame
         self.rows = rows
         self.filterProjectId = filterProjectId
         self.focusedPaneIndex = focusedPaneIndex
+        self.projectOrder = projectOrder
     }
 }
 

@@ -56,6 +56,63 @@ enum WorkspaceFilterOptions {
     }
 }
 
+/// Index math behind drag-to-reorder of the titlebar project chips. The
+/// user's arrangement is stored as a plain id list and layered over the
+/// discovery order (first-pane-opened) rather than replacing it, so a
+/// project the user never dragged still shows up, and one whose last pane
+/// closed drops out on its own.
+enum ProjectOrder {
+    /// Display order for `discovered`, honoring the user's arrangement.
+    /// Ids in `preferred` come first in that order; anything the user has
+    /// not placed follows in discovery order. Stale and duplicate entries
+    /// in `preferred` are ignored.
+    static func effective(discovered: [String], preferred: [String]) -> [String] {
+        let live = Set(discovered)
+        var placed: [String] = []
+        var seen = Set<String>()
+        for id in preferred where live.contains(id) && seen.insert(id).inserted {
+            placed.append(id)
+        }
+        return placed + discovered.filter { !seen.contains($0) }
+    }
+
+    /// `ids` with the element at `from` lifted out and reinserted so it ends
+    /// up at index `to`. `to` is clamped into range; an out-of-range `from`
+    /// leaves the order untouched.
+    static func moving(_ ids: [String], from: Int, to: Int) -> [String] {
+        guard ids.indices.contains(from) else { return ids }
+        var out = ids
+        let moved = out.remove(at: from)
+        let destination = min(max(to, 0), out.count)
+        out.insert(moved, at: destination)
+        return out
+    }
+
+    /// Slot a dragged chip should drop into, given where its center sits and
+    /// how the remaining chips are laid out. `otherOrigins`/`otherWidths` are
+    /// the other chips in strip order, positioned as if the dragged chip were
+    /// already gone; the result is an insertion index into that list. It never
+    /// goes below `firstMovable`, which is what keeps a pinned leading chip
+    /// (the ALL filter) from being displaced.
+    static func insertionIndex(
+        draggedCenterX: CGFloat,
+        otherOrigins: [CGFloat],
+        otherWidths: [CGFloat],
+        firstMovable: Int
+    ) -> Int {
+        var insertion = firstMovable
+        for position in otherOrigins.indices {
+            guard position < otherWidths.count else { break }
+            // Passing a neighbour's midpoint is what claims its slot — the
+            // same threshold AppKit's own reordering uses.
+            if otherOrigins[position] + otherWidths[position] / 2 < draggedCenterX {
+                insertion = position + 1
+            }
+        }
+        return min(max(insertion, firstMovable), otherOrigins.count)
+    }
+}
+
 enum SplitAxis {
     case column
     case row
@@ -162,6 +219,9 @@ final class Workspace: NSView, NSSplitViewDelegate {
     /// fresh row immediately after it.
     private(set) var rows: [[Pane]] = []
     private var paneCreationOrder: [Pane] = []
+    /// Project ids the user arranged by dragging the titlebar chips. Layered
+    /// over the discovery order by `knownProjectIds`; see `ProjectOrder`.
+    private var preferredProjectOrder: [String] = []
     private var focusHistory = PaneFocusHistory()
     private var filterHistory = FilterNavigationHistory()
     /// Set during the close-fallback path so the dying filter doesn't get
@@ -258,16 +318,49 @@ final class Workspace: NSView, NSSplitViewDelegate {
 
     // MARK: - Filter helpers
 
-    /// Sorted, unique list of project ids currently represented by an open
-    /// pane. Used by the toolbar to build filter segments. Order is by
-    /// first-pane-opened so segments don't reshuffle when user opens more.
+    /// Unique list of project ids currently represented by an open pane, in
+    /// the order the user dragged the titlebar chips into. Projects the user
+    /// never placed follow in first-pane-opened order, so opening a new one
+    /// doesn't reshuffle the chips. This single order drives the filter bar,
+    /// the ⌘1–9 numbering, and the ALL view's project clusters.
     var knownProjectIds: [String] {
+        ProjectOrder.effective(
+            discovered: discoveredProjectIds,
+            preferred: preferredProjectOrder
+        )
+    }
+
+    /// Project ids in first-pane-opened order, before the user's arrangement
+    /// is layered on top.
+    private var discoveredProjectIds: [String] {
         var seen = Set<String>()
         var out: [String] = []
         for pane in panes where seen.insert(pane.projectId).inserted {
             out.append(pane.projectId)
         }
         return out
+    }
+
+    /// Move the project chip at `from` to `to` within `knownProjectIds`.
+    /// Both indices address the project list — the leading ALL chip is not a
+    /// project and never participates.
+    func moveProject(from: Int, to: Int) {
+        let current = knownProjectIds
+        let reordered = ProjectOrder.moving(current, from: from, to: to)
+        guard reordered != current else { return }
+        preferredProjectOrder = reordered
+        // Cluster order in the ALL view reads straight off knownProjectIds.
+        relayout()
+        onPanesChanged?()
+    }
+
+    /// Restore a saved arrangement. Ids no longer backed by a pane are
+    /// harmless — `knownProjectIds` filters them out.
+    func applyProjectOrder(_ order: [String]) {
+        guard preferredProjectOrder != order else { return }
+        preferredProjectOrder = order
+        relayout()
+        onPanesChanged?()
     }
 
     private func isVisible(_ pane: Pane) -> Bool {
@@ -475,6 +568,9 @@ final class Workspace: NSView, NSSplitViewDelegate {
         rows.removeAll { $0.isEmpty }
         if !paneCreationOrder.contains(where: { $0.projectId == removedProjectId }) {
             filterHistory.remove(.project(removedProjectId))
+            // Drop the dead id so a project reopened later lands at the end
+            // rather than silently reclaiming its old slot.
+            preferredProjectOrder.removeAll { $0 == removedProjectId }
         }
     }
 
