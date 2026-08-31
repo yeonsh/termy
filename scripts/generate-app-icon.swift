@@ -30,8 +30,8 @@ func drawIcon(size: CGFloat) -> NSImage {
     ctx.clip()
 
     let colors = [
-        NSColor(calibratedRed: 1.00, green: 1.00, blue: 1.00, alpha: 1).cgColor,
-        NSColor(calibratedRed: 0.93, green: 0.94, blue: 0.96, alpha: 1).cgColor,
+        NSColor(calibratedRed: 0.08, green: 0.09, blue: 0.11, alpha: 1).cgColor,
+        NSColor(calibratedRed: 0.02, green: 0.02, blue: 0.03, alpha: 1).cgColor,
     ]
     let gradient = CGGradient(
         colorsSpace: CGColorSpaceCreateDeviceRGB(),
@@ -57,7 +57,7 @@ func drawIcon(size: CGFloat) -> NSImage {
     paragraph.alignment = .center
     let attrs: [NSAttributedString.Key: Any] = [
         .font: font,
-        .foregroundColor: NSColor(calibratedRed: 0.13, green: 0.66, blue: 0.36, alpha: 1),
+        .foregroundColor: NSColor(calibratedRed: 0.56, green: 0.93, blue: 0.62, alpha: 1),
         .paragraphStyle: paragraph,
         .kern: -size * 0.01,
     ]
@@ -85,11 +85,11 @@ func drawEyebrows(in ctx: CGContext, size: CGFloat) {
         let fillAlpha: CGFloat
     }
 
-    // Deepened from the near-black palette so the brand hues stay saturated
-    // against the white background instead of washing out toward the paper.
-    let teal = NSColor(calibratedRed: 0.10, green: 0.62, blue: 0.67, alpha: 1)
-    let yellow = NSColor(calibratedRed: 0.90, green: 0.70, blue: 0.10, alpha: 1)
-    let pink = NSColor(calibratedRed: 0.90, green: 0.24, blue: 0.46, alpha: 1)
+    let teal = NSColor(calibratedRed: 0.28, green: 0.78, blue: 0.82, alpha: 1)
+    // Yellow hue washes out at 0.58 alpha on near-black — without the alpha
+    // bump it reads as olive/mustard next to the cyan and magenta pills.
+    let yellow = NSColor(calibratedRed: 1.00, green: 0.92, blue: 0.45, alpha: 1)
+    let pink = NSColor(calibratedRed: 1.00, green: 0.44, blue: 0.62, alpha: 1)
 
     let pillHeight = size * 0.048
     let pillSpacing = size * 0.035
@@ -98,9 +98,9 @@ func drawEyebrows(in ctx: CGContext, size: CGFloat) {
     let chipWidth = size * 0.20
 
     let pills: [Pill] = [
-        Pill(color: teal, width: chipWidth, fillAlpha: 0.90),
-        Pill(color: yellow, width: chipWidth, fillAlpha: 0.90),
-        Pill(color: pink, width: chipWidth, fillAlpha: 0.90),
+        Pill(color: teal, width: chipWidth, fillAlpha: 0.58),
+        Pill(color: yellow, width: chipWidth, fillAlpha: 0.85),
+        Pill(color: pink, width: chipWidth, fillAlpha: 0.58),
     ]
     let totalWidth = pills.reduce(CGFloat(0)) { $0 + $1.width }
         + CGFloat(max(0, pills.count - 1)) * pillSpacing
