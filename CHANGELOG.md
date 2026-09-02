@@ -6,6 +6,11 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.2 — 2026-09-02
+
+- Drag the titlebar project chips to reorder them. Project order used to be derived from the sequence the first pane of each project opened in, with no way to change it. A user-set order now layers on top of that: chips you've moved come first, projects you haven't touched follow in the derived order, and a project drops out on its own when its last pane closes. Opening a new project appends it instead of reshuffling what's already there. The same order drives the chip strip, the ⌘1–9 numbering, and the project clusters in the ALL view, so they never disagree. A drag under 4pt still reads as a plain filter switch, the strip auto-scrolls when the pointer reaches a viewport edge, and the ALL chip stays pinned first. The order survives a restart alongside the rest of the window record; session files written by older builds decode without one and fall back to the derived order.
+- App icon returns to the dark tile. 0.2.1 moved the mark onto a light/paper background; the near-black gradient with the mint-green glyph is back, byte-for-byte the artwork that shipped before 0.2.1.
+
 ## 0.2.1 — 2026-08-22
 
 - New app icon. The mark moves from a near-black tile to a light one — white/off-white gradient, deep-green glyph, and the three brand pills (teal, amber, pink) re-mixed at full opacity so they stay saturated against paper instead of washing out. The dark tile disappeared into the Dock on dark wallpapers and read as a featureless square at 16pt; the light version keeps its silhouette at every size.
