@@ -16,7 +16,20 @@ gh auth status             # logged in to github.com
 xcrun notarytool history --keychain-profile termy-notary | head  # creds work
 security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db
 # expect: Developer ID Application: Bdrive Inc. (4M7G2HXTMV) in *login*, not /Library/Keychains/System.keychain
+scripts/vendor/sparkle/bin/generate_keys --account termy -p
+# expect: the same string as SUPublicEDKey in project.yml (-p only reads, never generates)
 ```
+
+Check the Sparkle key every time, even though `dist.sh` also preflights it —
+`dist.sh` only verifies that `SUPublicEDKey` is present in the *built app*, which
+says nothing about whether the matching private key still exists in your
+keychain. The two credentials above fail very differently. Notary creds and the
+Developer ID identity are re-issuable in minutes; the Sparkle private key has no
+recovery path, and signing a release with a freshly generated one makes every
+installed copy silently ignore updates forever. If `generate_keys -p` prints
+nothing or a value that doesn't match `project.yml`, stop and read the
+loss-of-key section of [auto-update.md](./auto-update.md) before touching
+anything else.
 
 If the Developer ID identity is in System.keychain instead of login.keychain-db,
 `dist.sh` will demand the admin password ~10× during Sparkle.framework signing.
@@ -44,7 +57,7 @@ login) before cutting a release.
    git commit -am "termy 0.1.1"
    git tag -a v0.1.1 -m "termy 0.1.1"
    ```
-   Tag locally only — push happens last.
+   Tag locally only — it goes to the remote in step 5.
 
 4. **Build, sign, notarize, sign appcast**
    ```bash
@@ -56,7 +69,28 @@ login) before cutting a release.
    For local-only verification without notarization, `--skip-notarize` builds
    a signed-but-unstapled DMG.
 
-5. **Publish**
+5. **Push source**
+   ```bash
+   git push --follow-tags
+   ```
+   Must run *before* `publish.sh`. `publish.sh` calls `gh release create`
+   without `--target`, so when the tag isn't on the remote yet GitHub creates
+   one of its own at the current remote branch head — i.e. at the commit
+   *before* the version bump. The DMG and appcast are still correct, so users
+   are unaffected, but `git checkout v0.1.1` then yields a tree whose
+   `project.yml` says 0.1.0 and whose CHANGELOG has no 0.1.1 section, and the
+   release page's source archive is wrong the same way. Pushing first means
+   `gh release create` finds the tag and reuses it.
+
+   Recovering from a release tagged at the wrong commit takes a tag
+   force-push (`git push --force origin refs/tags/v0.1.1`), which is worth
+   avoiding on a public repo. Order is the cheaper fix.
+
+   This is the first step that leaves state on the remote. Everything before
+   it is local and can be undone with `git reset` + `git tag -d`; from here
+   on, correcting a mistake means cutting another release (see Rollback).
+
+6. **Publish**
    ```bash
    scripts/publish.sh
    ```
@@ -64,16 +98,14 @@ login) before cutting a release.
    - copies `appcast.xml` into `$PAGES_REPO_PATH` (default `../termy-updates`),
      commits, pushes — Cloudflare Pages redeploys termy.nugo.cc
 
-6. **Push source**
-   ```bash
-   git push --follow-tags
-   ```
-   Last on purpose: if `dist.sh` or `publish.sh` blows up mid-flow, only local
-   state is dirty.
-
 ## Post-flight verification
 
 ```bash
+# Tag points at the version-bump commit — the two SHAs must match.
+# A mismatch means step 5 ran after publish.sh and GitHub invented the tag.
+git ls-remote --tags origin v0.1.1 | cut -f1
+git rev-list -n1 v0.1.1
+
 # DMG is anonymously downloadable
 curl -ILs https://github.com/yeonsh/termy/releases/download/v0.1.1/termy-0.1.1.dmg | head -1
 # expect: HTTP/2 302  (redirect to S3 — that's success, not failure)
