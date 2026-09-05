@@ -76,10 +76,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // main window is on screen behind the alert instead of after it.
         // Hook installer runs after FDA so the user isn't stacked with two
         // modal dialogs at once.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            FullDiskAccess.promptIfNeeded()
-            HookInstaller.promptIfNeeded()
-            CodexHookInstaller.promptIfNeeded()
+        //
+        // Skipped when termy.app is merely the XCTest host: the installers
+        // would otherwise rewrite the user's real ~/.claude and ~/.codex to
+        // point at the DerivedData build every time the tests run.
+        if !TestHostDetector.isRunningUnderXCTest() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                FullDiskAccess.promptIfNeeded()
+                HookInstaller.promptIfNeeded()
+                CodexHookInstaller.promptIfNeeded()
+            }
         }
 
         // Instantiating SPUStandardUpdaterController on first access starts

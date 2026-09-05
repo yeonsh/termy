@@ -105,6 +105,372 @@ final class CodexHookInstallerTests: XCTestCase {
         }
     }
 
+    // MARK: - hooks.json
+
+    func test_jsonInstall_preservesExistingHooksAndWritesTermyBlocks() {
+        var settings: [String: Any] = [
+            "hooks": [
+                "SessionStart": [[
+                    "hooks": [[
+                        "type": "command",
+                        "command": "/usr/local/bin/omx session-start"
+                    ]]
+                ]]
+            ],
+            "other": "kept"
+        ]
+
+        CodexHookInstaller.applyInstall(toHooksJSON: &settings, hookPath: path)
+
+        XCTAssertEqual(settings["other"] as? String, "kept")
+        let hooks = settings["hooks"] as? [String: Any]
+        let sessionStart = hooks?["SessionStart"] as? [[String: Any]]
+        XCTAssertEqual(sessionStart?.count, 2)
+        XCTAssertEqual(
+            ((sessionStart?[0]["hooks"] as? [[String: Any]])?[0]["command"] as? String),
+            "/usr/local/bin/omx session-start"
+        )
+        XCTAssertEqual(sessionStart?[1][CodexHookInstaller.markerKey] as? Bool, true)
+        XCTAssertEqual(CodexHookInstaller.findInstalledPath(inHooksJSON: settings), path)
+    }
+
+    func test_jsonInstall_reappliedDoesNotDuplicate() {
+        var settings: [String: Any] = [:]
+
+        CodexHookInstaller.applyInstall(toHooksJSON: &settings, hookPath: path)
+        CodexHookInstaller.applyInstall(toHooksJSON: &settings, hookPath: "/new/path/termy-hook")
+
+        let hooks = settings["hooks"] as? [String: Any]
+        for event in CodexHookInstaller.allEvents {
+            let blocks = hooks?[event] as? [[String: Any]]
+            XCTAssertEqual(blocks?.count, 1, event)
+            let cmd = (blocks?[0]["hooks"] as? [[String: Any]])?[0]["command"] as? String
+            XCTAssertEqual(cmd, "\"/new/path/termy-hook\" --agent codex \(event)")
+        }
+    }
+
+    func test_jsonUninstall_removesTermyBlocksPreservesUserBlocks() {
+        var settings: [String: Any] = [
+            "hooks": [
+                "Stop": [[
+                    "hooks": [[
+                        "type": "command",
+                        "command": "echo stop"
+                    ]]
+                ]]
+            ]
+        ]
+        CodexHookInstaller.applyInstall(toHooksJSON: &settings, hookPath: path)
+
+        CodexHookInstaller.applyUninstall(fromHooksJSON: &settings)
+
+        let hooks = settings["hooks"] as? [String: Any]
+        let stop = hooks?["Stop"] as? [[String: Any]]
+        XCTAssertEqual(stop?.count, 1)
+        XCTAssertEqual(
+            ((stop?[0]["hooks"] as? [[String: Any]])?[0]["command"] as? String),
+            "echo stop"
+        )
+        XCTAssertNil(hooks?["PermissionRequest"])
+    }
+
+    func test_installWhenHooksJSONExists_migratesTermyHooksOutOfToml() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let configURL = dir.appendingPathComponent("config.toml")
+        let hooksJSONURL = dir.appendingPathComponent("hooks.json")
+        try """
+            [features]
+            hooks = false
+
+            [hooks.state]
+            "config.toml:session_start:0:0" = { status = "trusted" }
+
+            [[hooks.SessionStart]]
+            _termy_managed = true
+                [[hooks.SessionStart.hooks]]
+                type = "command"
+                command = "\\"/old/path/termy-hook\\" --agent codex SessionStart"
+            """.write(to: configURL, atomically: true, encoding: .utf8)
+        try """
+            {
+              "hooks": {
+                "SessionStart": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "/usr/local/bin/omx session-start"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+            """.write(to: hooksJSONURL, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            CodexHookInstaller.currentState(
+                configURL: configURL,
+                hooksJSONURL: hooksJSONURL,
+                hookPath: path
+            ),
+            .installedNeedsMigration(existingPath: "/old/path/termy-hook")
+        )
+
+        try CodexHookInstaller.install(
+            configURL: configURL,
+            hooksJSONURL: hooksJSONURL,
+            hookPath: path
+        )
+
+        let config = try TOMLTable(string: String(contentsOf: configURL, encoding: .utf8))
+        XCTAssertEqual(config["features"]?.table?["hooks"]?.bool, true)
+        XCTAssertNotNil(config["hooks"]?.table?["state"])
+        XCTAssertNil(config["hooks"]?.table?["SessionStart"])
+
+        let data = try Data(contentsOf: hooksJSONURL)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let hooks = json["hooks"] as? [String: Any]
+        let sessionStart = hooks?["SessionStart"] as? [[String: Any]]
+        XCTAssertEqual(sessionStart?.count, 2)
+        XCTAssertEqual(CodexHookInstaller.findInstalledPath(inHooksJSON: json), path)
+        XCTAssertEqual(
+            CodexHookInstaller.currentState(
+                configURL: configURL,
+                hooksJSONURL: hooksJSONURL,
+                hookPath: path
+            ),
+            .installedCurrent
+        )
+    }
+
+    func test_installWhenHooksJSONMalformed_leavesFilesUnchanged() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let configURL = dir.appendingPathComponent("config.toml")
+        let hooksJSONURL = dir.appendingPathComponent("hooks.json")
+        let originalConfig = """
+            [features]
+            hooks = true
+            """
+        let originalJSON = "{ malformed"
+        try originalConfig.write(to: configURL, atomically: true, encoding: .utf8)
+        try originalJSON.write(to: hooksJSONURL, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(
+            try CodexHookInstaller.install(
+                configURL: configURL,
+                hooksJSONURL: hooksJSONURL,
+                hookPath: path
+            )
+        )
+        XCTAssertEqual(try String(contentsOf: configURL, encoding: .utf8), originalConfig)
+        XCTAssertEqual(try String(contentsOf: hooksJSONURL, encoding: .utf8), originalJSON)
+    }
+
+    func test_installWhenHooksJSONShapeMalformed_leavesFilesUnchanged() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let configURL = dir.appendingPathComponent("config.toml")
+        let hooksJSONURL = dir.appendingPathComponent("hooks.json")
+        let originalConfig = """
+            [features]
+            hooks = true
+            """
+        let originalJSON = """
+            {
+              "hooks": {
+                "Stop": "not an array"
+              }
+            }
+            """
+        try originalConfig.write(to: configURL, atomically: true, encoding: .utf8)
+        try originalJSON.write(to: hooksJSONURL, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(
+            try CodexHookInstaller.install(
+                configURL: configURL,
+                hooksJSONURL: hooksJSONURL,
+                hookPath: path
+            )
+        )
+        XCTAssertEqual(try String(contentsOf: configURL, encoding: .utf8), originalConfig)
+        XCTAssertEqual(try String(contentsOf: hooksJSONURL, encoding: .utf8), originalJSON)
+    }
+
+    func test_uninstallWhenHooksJSONExists_removesJsonAndTomlTermyBlocks() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let configURL = dir.appendingPathComponent("config.toml")
+        let hooksJSONURL = dir.appendingPathComponent("hooks.json")
+        let config = TOMLTable()
+        CodexHookInstaller.applyInstall(to: config, hookPath: path)
+        try config.convert(to: .toml).write(to: configURL, atomically: true, encoding: .utf8)
+        var json: [String: Any] = [:]
+        CodexHookInstaller.applyInstall(toHooksJSON: &json, hookPath: path)
+        let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted])
+        try data.write(to: hooksJSONURL)
+
+        try CodexHookInstaller.uninstall(configURL: configURL, hooksJSONURL: hooksJSONURL)
+
+        let reparsed = try TOMLTable(string: String(contentsOf: configURL, encoding: .utf8))
+        XCTAssertNil(reparsed["hooks"])
+        let reloaded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: hooksJSONURL)) as? [String: Any]
+        )
+        XCTAssertNil(CodexHookInstaller.findInstalledPath(inHooksJSON: reloaded))
+        XCTAssertNotNil(reloaded["hooks"] as? [String: Any])
+    }
+
+    func test_reinstallAfterJsonUninstall_remainsValid() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let configURL = dir.appendingPathComponent("config.toml")
+        let hooksJSONURL = dir.appendingPathComponent("hooks.json")
+        try #"{ "hooks": {} }"#.write(to: hooksJSONURL, atomically: true, encoding: .utf8)
+
+        try CodexHookInstaller.install(
+            configURL: configURL,
+            hooksJSONURL: hooksJSONURL,
+            hookPath: path
+        )
+        try CodexHookInstaller.uninstall(configURL: configURL, hooksJSONURL: hooksJSONURL)
+        try CodexHookInstaller.install(
+            configURL: configURL,
+            hooksJSONURL: hooksJSONURL,
+            hookPath: path
+        )
+
+        let reloaded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: hooksJSONURL)) as? [String: Any]
+        )
+        XCTAssertEqual(CodexHookInstaller.findInstalledPath(inHooksJSON: reloaded), path)
+    }
+
+    // MARK: - Deprecated [features].codex_hooks left behind by older writers
+
+    /// termy 0.2.2 and `omx setup` both write `codex_hooks = true`. When the
+    /// hook path already matches, an early-return "installed, current" would
+    /// leave Codex warning on every launch, so this must be its own state.
+    func test_currentState_tomlHooksCurrentWithDeprecatedFlag_needsFeatureFlagMigration() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let configURL = dir.appendingPathComponent("config.toml")
+        let hooksJSONURL = dir.appendingPathComponent("hooks.json")
+        try deprecatedFlagTomlWithTermyHooks.write(to: configURL, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            CodexHookInstaller.currentState(
+                configURL: configURL,
+                hooksJSONURL: hooksJSONURL,
+                hookPath: path
+            ),
+            .installedNeedsFeatureFlagMigration
+        )
+    }
+
+    func test_currentState_jsonHooksCurrentWithDeprecatedFlag_needsFeatureFlagMigration() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let configURL = dir.appendingPathComponent("config.toml")
+        let hooksJSONURL = dir.appendingPathComponent("hooks.json")
+        try """
+            [features]
+            codex_hooks = true
+            hooks = true
+            """.write(to: configURL, atomically: true, encoding: .utf8)
+        try writeTermyHooksJSON(to: hooksJSONURL)
+
+        XCTAssertEqual(
+            CodexHookInstaller.currentState(
+                configURL: configURL,
+                hooksJSONURL: hooksJSONURL,
+                hookPath: path
+            ),
+            .installedNeedsFeatureFlagMigration
+        )
+    }
+
+    func test_installFromDeprecatedFlagState_toml_removesFlagAndBecomesCurrent() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let configURL = dir.appendingPathComponent("config.toml")
+        let hooksJSONURL = dir.appendingPathComponent("hooks.json")
+        try deprecatedFlagTomlWithTermyHooks.write(to: configURL, atomically: true, encoding: .utf8)
+
+        try CodexHookInstaller.install(
+            configURL: configURL,
+            hooksJSONURL: hooksJSONURL,
+            hookPath: path
+        )
+
+        let config = try TOMLTable(string: String(contentsOf: configURL, encoding: .utf8))
+        XCTAssertNil(config["features"]?.table?["codex_hooks"])
+        XCTAssertEqual(config["features"]?.table?["hooks"]?.bool, true)
+        XCTAssertEqual(
+            CodexHookInstaller.currentState(
+                configURL: configURL,
+                hooksJSONURL: hooksJSONURL,
+                hookPath: path
+            ),
+            .installedCurrent
+        )
+    }
+
+    func test_installFromDeprecatedFlagState_json_removesFlagAndBecomesCurrent() throws {
+        let dir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let configURL = dir.appendingPathComponent("config.toml")
+        let hooksJSONURL = dir.appendingPathComponent("hooks.json")
+        try """
+            [features]
+            codex_hooks = true
+            """.write(to: configURL, atomically: true, encoding: .utf8)
+        try writeTermyHooksJSON(to: hooksJSONURL)
+
+        try CodexHookInstaller.install(
+            configURL: configURL,
+            hooksJSONURL: hooksJSONURL,
+            hookPath: path
+        )
+
+        let config = try TOMLTable(string: String(contentsOf: configURL, encoding: .utf8))
+        XCTAssertNil(config["features"]?.table?["codex_hooks"])
+        XCTAssertEqual(config["features"]?.table?["hooks"]?.bool, true)
+        XCTAssertEqual(
+            CodexHookInstaller.currentState(
+                configURL: configURL,
+                hooksJSONURL: hooksJSONURL,
+                hookPath: path
+            ),
+            .installedCurrent
+        )
+    }
+
+    /// config.toml as left by an older writer: current termy hook path plus
+    /// the deprecated feature alias next to the canonical flag.
+    private var deprecatedFlagTomlWithTermyHooks: String {
+        """
+        [features]
+        codex_hooks = true
+        hooks = true
+
+        [[hooks.SessionStart]]
+        _termy_managed = true
+            [[hooks.SessionStart.hooks]]
+            type = "command"
+            command = "\\"\(path)\\" --agent codex SessionStart"
+        """
+    }
+
+    private func writeTermyHooksJSON(to url: URL) throws {
+        var json: [String: Any] = [:]
+        CodexHookInstaller.applyInstall(toHooksJSON: &json, hookPath: path)
+        let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted])
+        try data.write(to: url)
+    }
+
     // MARK: - Uninstall
 
     func test_uninstall_removesTermyBlocks_preservesUserBlocks() {
@@ -242,5 +608,12 @@ final class CodexHookInstallerTests: XCTestCase {
         for event in CodexHookInstaller.allEvents {
             XCTAssertEqual(reparsed["hooks"]?.table?[event]?.array?.count, 1, event)
         }
+    }
+
+    private func makeTemporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
     }
 }

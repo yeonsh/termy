@@ -1,8 +1,9 @@
 // CodexHookInstaller.swift
 //
-// Mirror of HookInstaller for the Codex CLI. Codex stores its hook
-// configuration in TOML at ~/.codex/config.toml (or repo-local
-// .codex/config.toml). The schema, per developers.openai.com/codex/hooks:
+// Mirror of HookInstaller for the Codex CLI. Codex can load hooks from
+// ~/.codex/hooks.json or inline TOML tables in ~/.codex/config.toml. If both
+// are present in the same layer, Codex warns, so termy prefers hooks.json when
+// that file already exists and keeps TOML as the fallback for older installs.
 //
 //   [features]
 //   hooks = true
@@ -23,12 +24,15 @@
 //   so dev builds and the shipped /Applications copy both work.
 // - Silent re-registration when stale: if our marker exists but points at
 //   a different path, rewrite without asking (the user already opted in).
+//   The same applies when the deprecated `[features].codex_hooks` alias is
+//   present: Codex warns on every launch until it is gone, and other tools
+//   (termy 0.2.2, `omx setup`) keep writing it.
 //
 // Codex differs from Claude Code in two ways that matter here:
-//   1. TOML, not JSON. We use TOMLKit (toml++ wrapper) for parsing /
-//      serializing. round-tripping a TOMLTable preserves structure but
-//      does NOT preserve user comments — see the hand-edit warning in the
-//      install prompt.
+//   1. TOML support is still needed for users without hooks.json. We use
+//      TOMLKit (toml++ wrapper) for parsing / serializing config.toml.
+//      Round-tripping a TOMLTable preserves structure but does NOT preserve
+//      user comments — see the hand-edit warning in the install prompt.
 //   2. There's no SessionEnd event. We don't register one; the foreground-
 //      process detector synthesizes it.
 
@@ -69,12 +73,24 @@ enum CodexHookInstaller {
             .appendingPathComponent(".codex/config.toml")
     }
 
+    static var hooksJSONURL: URL {
+        URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".codex/hooks.json")
+    }
+
     // MARK: - State
 
     enum State: Equatable {
         case notInstalled
         case installedCurrent
         case installedStale(existingPath: String)
+        case installedNeedsMigration(existingPath: String)
+        /// Hook path is current but `[features].codex_hooks` is still in
+        /// config.toml. Codex deprecated it in favor of `[features].hooks`
+        /// and warns at every launch while the alias is present. termy 0.2.2
+        /// and `omx setup` both write the alias, so this can reappear on a
+        /// config that was already migrated once.
+        case installedNeedsFeatureFlagMigration
         /// Parse failure on ~/.codex/config.toml. We refuse to auto-prompt or
         /// install when the user's config is malformed — overwriting it would
         /// destroy hand edits. Surface the message so the user can fix it.
@@ -83,9 +99,12 @@ enum CodexHookInstaller {
         static func == (lhs: State, rhs: State) -> Bool {
             switch (lhs, rhs) {
             case (.notInstalled, .notInstalled),
-                 (.installedCurrent, .installedCurrent):
+                 (.installedCurrent, .installedCurrent),
+                 (.installedNeedsFeatureFlagMigration, .installedNeedsFeatureFlagMigration):
                 return true
             case let (.installedStale(a), .installedStale(b)):
+                return a == b
+            case let (.installedNeedsMigration(a), .installedNeedsMigration(b)):
                 return a == b
             case let (.configError(a), .configError(b)):
                 return a == b
@@ -96,18 +115,74 @@ enum CodexHookInstaller {
     }
 
     static func currentState() -> State {
+        currentState(
+            configURL: configURL,
+            hooksJSONURL: hooksJSONURL,
+            hookPath: bundledHookURL.path
+        )
+    }
+
+    static func currentState(
+        configURL: URL,
+        hooksJSONURL: URL,
+        hookPath: String,
+        fileManager: FileManager = .default
+    ) -> State {
         let table: TOMLTable
         do {
-            table = try readConfig()
+            table = try readConfig(at: configURL, fileManager: fileManager)
         } catch {
             return .configError(message: error.localizedDescription)
         }
-        guard let existing = findInstalledPath(in: table) else {
+        let existingTomlPath = findInstalledPath(in: table)
+
+        if fileManager.fileExists(atPath: hooksJSONURL.path) {
+            do {
+                let hooksJSON = try readHooksJSON(at: hooksJSONURL)
+                if let existingTomlPath {
+                    return .installedNeedsMigration(existingPath: existingTomlPath)
+                }
+                guard let existingJSONPath = findInstalledPath(inHooksJSON: hooksJSON) else {
+                    return .notInstalled
+                }
+                return installedState(
+                    existingPath: existingJSONPath,
+                    hookPath: hookPath,
+                    config: table
+                )
+            } catch {
+                return .configError(message: error.localizedDescription)
+            }
+        }
+
+        guard let existingTomlPath else {
             return .notInstalled
         }
-        return existing == bundledHookURL.path
-            ? .installedCurrent
-            : .installedStale(existingPath: existing)
+        return installedState(
+            existingPath: existingTomlPath,
+            hookPath: hookPath,
+            config: table
+        )
+    }
+
+    /// Resolve the state once we know termy hooks are present. A matching
+    /// path is only "current" if config.toml is also free of the deprecated
+    /// feature alias; otherwise the launch-time repair would never run.
+    private static func installedState(
+        existingPath: String,
+        hookPath: String,
+        config: TOMLTable
+    ) -> State {
+        guard existingPath == hookPath else {
+            return .installedStale(existingPath: existingPath)
+        }
+        return hasDeprecatedHooksFeatureFlag(in: config)
+            ? .installedNeedsFeatureFlagMigration
+            : .installedCurrent
+    }
+
+    static func hasDeprecatedHooksFeatureFlag(in config: TOMLTable) -> Bool {
+        config["features"]?.table?["codex_hooks"] != nil
     }
 
     /// Walk the hooks tables and return the first termy-managed entry's
@@ -134,6 +209,26 @@ enum CodexHookInstaller {
         return nil
     }
 
+    /// Walk hooks.json and return the first termy-managed entry's executable
+    /// path, if any.
+    static func findInstalledPath(inHooksJSON settings: [String: Any]) -> String? {
+        guard let hooks = settings["hooks"] as? [String: Any] else { return nil }
+        for event in allEvents {
+            guard let blocks = hooks[event] as? [[String: Any]] else { continue }
+            for block in blocks where isTermyBlock(block) {
+                guard let inner = block["hooks"] as? [[String: Any]] else { continue }
+                for hook in inner {
+                    guard let cmd = hook["command"] as? String,
+                          let path = extractExecPath(from: cmd),
+                          path.hasSuffix("/termy-hook")
+                    else { continue }
+                    return path
+                }
+            }
+        }
+        return nil
+    }
+
     // MARK: - First-launch prompt
 
     @MainActor
@@ -141,9 +236,10 @@ enum CodexHookInstaller {
         switch currentState() {
         case .installedCurrent:
             return
-        case .installedStale:
-            // App path changed (likely moved). Silent rewrite — the user
-            // already opted in.
+        case .installedStale, .installedNeedsMigration, .installedNeedsFeatureFlagMigration:
+            // App path changed (likely moved), hooks still live in the old
+            // TOML layout, or the deprecated feature alias crept back in.
+            // Silent rewrite — the user already opted in.
             try? install()
         case .configError:
             // User's config has a syntax error. Never auto-prompt — we'd
@@ -178,8 +274,8 @@ enum CodexHookInstaller {
 
                 \(bundledHookURL.path)
 
-                Click Uninstall to remove the termy entries from \
-                ~/.codex/config.toml (your other config stays untouched).
+                Click Uninstall to remove the termy entries from Codex's \
+                hook configuration (your other hooks stay untouched).
                 """
             alert.alertStyle = .informational
             alert.addButton(withTitle: "OK")
@@ -202,12 +298,45 @@ enum CodexHookInstaller {
                 """
             alert.addButton(withTitle: "OK")
             alert.runModal()
+        case .installedNeedsMigration:
+            do {
+                try install()
+            } catch {
+                showError("Codex migration failed", error: error)
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = "Codex hooks migrated"
+            alert.informativeText = """
+                termy moved its Codex hooks into ~/.codex/hooks.json and \
+                removed its older inline TOML hook blocks. Run `/hooks` in \
+                Codex if the migrated hook definitions need review.
+                """
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        case .installedNeedsFeatureFlagMigration:
+            do {
+                try install()
+            } catch {
+                showError("Codex feature flag update failed", error: error)
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = "Codex feature flag updated"
+            alert.informativeText = """
+                Codex deprecated `[features].codex_hooks` in favor of \
+                `[features].hooks`. termy removed the old key from \
+                ~/.codex/config.toml and enabled `hooks = true`. Codex \
+                sessions started before this change still show the \
+                deprecation warning until restarted.
+                """
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
         case .configError(let msg):
             let alert = NSAlert()
-            alert.messageText = "Codex config can't be parsed"
+            alert.messageText = "Codex hook configuration can't be parsed"
             alert.informativeText = """
-                ~/.codex/config.toml has a syntax error and termy won't \
-                touch it until you fix it:
+                termy won't touch Codex hook configuration until you fix it:
 
                 \(msg)
 
@@ -228,19 +357,16 @@ enum CodexHookInstaller {
         alert.informativeText = """
             termy reads Codex's hook events to show live pane state \
             (WAITING / THINKING / IDLE). This adds a few entries to \
-            ~/.codex/config.toml pointing at:
+            Codex's hook configuration pointing at:
 
             \(bundledHookURL.path)
 
-            It also enables `hooks = true` under [features] if it \
-            isn't already on. Your existing config is preserved and the \
-            previous file is backed up before writing. You can uninstall \
-            anytime from the termy menu.
-
-            ⚠ TOML hand-edits and comments outside the termy-managed \
-            blocks survive the merge, but TOMLKit doesn't round-trip \
-            comments inside the blocks it rewrites. If you keep notes in \
-            this file, back it up first.
+            termy enables `hooks = true` under [features] if needed. If \
+            ~/.codex/hooks.json exists, termy writes there and removes only \
+            its older inline TOML hook blocks from ~/.codex/config.toml. \
+            Otherwise it uses ~/.codex/config.toml. Existing config files are \
+            backed up before writing, but TOML formatting and comments may \
+            change if config.toml is rewritten.
             """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Install")
@@ -274,22 +400,64 @@ enum CodexHookInstaller {
         guard FileManager.default.fileExists(atPath: bundledHookURL.path) else {
             throw CodexHookInstallerError.hookBinaryMissing(bundledHookURL.path)
         }
+        try install(
+            configURL: configURL,
+            hooksJSONURL: hooksJSONURL,
+            hookPath: bundledHookURL.path
+        )
+    }
+
+    static func install(
+        configURL: URL,
+        hooksJSONURL: URL,
+        hookPath: String,
+        fileManager: FileManager = .default
+    ) throws {
         // Parse first — fail closed if the user's config is malformed.
         // Backing up + writing on a parse failure would silently turn a
         // syntax error into "the file now contains only termy's blocks."
-        let table = try readConfig()
-        try backupIfExists()
-        applyInstall(to: table, hookPath: bundledHookURL.path)
-        try writeConfig(table)
+        let table = try readConfig(at: configURL, fileManager: fileManager)
+        if fileManager.fileExists(atPath: hooksJSONURL.path) {
+            var hooksJSON = try readHooksJSON(at: hooksJSONURL)
+            applyInstall(toHooksJSON: &hooksJSON, hookPath: hookPath)
+            applyUninstall(from: table)
+            enableHooksFeature(in: table)
+            try backupIfExists(configURL, fileManager: fileManager)
+            try backupIfExists(hooksJSONURL, fileManager: fileManager)
+            try writeHooksJSON(hooksJSON, to: hooksJSONURL, fileManager: fileManager)
+            try writeConfig(table, to: configURL, fileManager: fileManager)
+        } else {
+            try backupIfExists(configURL, fileManager: fileManager)
+            applyInstall(to: table, hookPath: hookPath)
+            try writeConfig(table, to: configURL, fileManager: fileManager)
+        }
     }
 
     static func uninstall() throws {
-        // Same fail-closed contract as install(). If the config can't be
+        try uninstall(configURL: configURL, hooksJSONURL: hooksJSONURL)
+    }
+
+    static func uninstall(
+        configURL: URL,
+        hooksJSONURL: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        // Same fail-closed contract as install(). If a hook config can't be
         // parsed, we have no idea what's safe to remove; surface the error.
-        let table = try readConfig()
-        try backupIfExists()
-        applyUninstall(from: table)
-        try writeConfig(table)
+        let table = try readConfig(at: configURL, fileManager: fileManager)
+        if fileManager.fileExists(atPath: hooksJSONURL.path) {
+            var hooksJSON = try readHooksJSON(at: hooksJSONURL)
+            applyUninstall(fromHooksJSON: &hooksJSON)
+            applyUninstall(from: table)
+            try backupIfExists(configURL, fileManager: fileManager)
+            try backupIfExists(hooksJSONURL, fileManager: fileManager)
+            try writeConfig(table, to: configURL, fileManager: fileManager)
+            try writeHooksJSON(hooksJSON, to: hooksJSONURL, fileManager: fileManager)
+        } else {
+            try backupIfExists(configURL, fileManager: fileManager)
+            applyUninstall(from: table)
+            try writeConfig(table, to: configURL, fileManager: fileManager)
+        }
     }
 
     // MARK: - Pure merge logic (testable)
@@ -303,11 +471,7 @@ enum CodexHookInstaller {
     /// it into a parent silently loses the mutation. Everything below
     /// builds inside-out and assigns top-down.
     static func applyInstall(to config: TOMLTable, hookPath: String) {
-        // [features] hooks = true — build fully, then assign.
-        let features = (config["features"]?.table) ?? TOMLTable()
-        features.remove(at: "codex_hooks")
-        features["hooks"] = true
-        config["features"] = features
+        enableHooksFeature(in: config)
 
         // Build the new hooks table fresh, carrying over any user blocks.
         let prior = config["hooks"]?.table ?? TOMLTable()
@@ -357,6 +521,20 @@ enum CodexHookInstaller {
         config["hooks"] = hooks
     }
 
+    /// Merge termy hook entries into hooks.json. Existing termy blocks are
+    /// replaced, user blocks and unrelated top-level keys are preserved.
+    static func applyInstall(toHooksJSON settings: inout [String: Any], hookPath: String) {
+        var hooks = (settings["hooks"] as? [String: Any]) ?? [:]
+        for event in allEvents {
+            hooks[event] = mergedJSONBlocks(
+                for: event,
+                hookPath: hookPath,
+                existing: hooks[event] as? [[String: Any]] ?? []
+            )
+        }
+        settings["hooks"] = hooks
+    }
+
     /// Remove termy-managed blocks. Empties out event arrays if no user
     /// blocks remain, and removes the `hooks` key entirely if every event
     /// is gone. `[features] hooks` is left alone — if the user had
@@ -396,6 +574,43 @@ enum CodexHookInstaller {
         }
     }
 
+    static func applyUninstall(fromHooksJSON settings: inout [String: Any]) {
+        guard var hooks = settings["hooks"] as? [String: Any] else { return }
+        for event in allEvents {
+            guard let blocks = hooks[event] as? [[String: Any]] else { continue }
+            let kept = blocks.filter { !isTermyBlock($0) }
+            if kept.isEmpty {
+                hooks.removeValue(forKey: event)
+            } else {
+                hooks[event] = kept
+            }
+        }
+        settings["hooks"] = hooks
+    }
+
+    private static func enableHooksFeature(in config: TOMLTable) {
+        let features = (config["features"]?.table) ?? TOMLTable()
+        features.remove(at: "codex_hooks")
+        features["hooks"] = true
+        config["features"] = features
+    }
+
+    private static func mergedJSONBlocks(
+        for event: String,
+        hookPath: String,
+        existing: [[String: Any]]
+    ) -> [[String: Any]] {
+        let userBlocks = existing.filter { !isTermyBlock($0) }
+        let termyBlock: [String: Any] = [
+            markerKey: true,
+            "hooks": [[
+                "type": "command",
+                "command": "\"\(hookPath)\" --agent codex \(event)"
+            ]]
+        ]
+        return userBlocks + [termyBlock]
+    }
+
     /// A block is ours if it carries our marker, or if its inner command
     /// references `termy-hook`. The command fallback catches blocks whose
     /// marker was stripped by a user hand-editing the config.
@@ -407,6 +622,17 @@ enum CodexHookInstaller {
                   let cmd = hook["command"]?.string
             else { continue }
             if cmd.contains("/termy-hook") { return true }
+        }
+        return false
+    }
+
+    static func isTermyBlock(_ block: [String: Any]) -> Bool {
+        if block[markerKey] as? Bool == true { return true }
+        guard let inner = block["hooks"] as? [[String: Any]] else { return false }
+        for hook in inner {
+            if let cmd = hook["command"] as? String, cmd.contains("/termy-hook") {
+                return true
+            }
         }
         return false
     }
@@ -428,9 +654,11 @@ enum CodexHookInstaller {
 
     // MARK: - File I/O
 
-    private static func readConfig() throws -> TOMLTable {
-        let url = configURL
-        guard FileManager.default.fileExists(atPath: url.path) else {
+    private static func readConfig(
+        at url: URL,
+        fileManager: FileManager = .default
+    ) throws -> TOMLTable {
+        guard fileManager.fileExists(atPath: url.path) else {
             return TOMLTable()
         }
         let data = try Data(contentsOf: url)
@@ -445,9 +673,12 @@ enum CodexHookInstaller {
         }
     }
 
-    private static func writeConfig(_ table: TOMLTable) throws {
-        let url = configURL
-        try FileManager.default.createDirectory(
+    private static func writeConfig(
+        _ table: TOMLTable,
+        to url: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        try fileManager.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
@@ -455,13 +686,68 @@ enum CodexHookInstaller {
         try toml.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    private static func backupIfExists() throws {
-        let url = configURL
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
+    private static func readHooksJSON(at url: URL) throws -> [String: Any] {
+        let data = try Data(contentsOf: url)
+        if data.isEmpty {
+            throw CodexHookInstallerError.hooksJSONInvalidShape("file is empty")
+        }
+        do {
+            guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw CodexHookInstallerError.hooksJSONRootInvalid
+            }
+            try validateHooksJSON(obj)
+            return obj
+        } catch let error as CodexHookInstallerError {
+            throw error
+        } catch {
+            throw CodexHookInstallerError.hooksJSONParseFailed(error)
+        }
+    }
+
+    private static func validateHooksJSON(_ settings: [String: Any]) throws {
+        guard let hooks = settings["hooks"] as? [String: Any] else {
+            throw CodexHookInstallerError.hooksJSONInvalidShape("missing object at key \"hooks\"")
+        }
+        for event in allEvents {
+            guard let value = hooks[event] else { continue }
+            guard let blocks = value as? [[String: Any]] else {
+                throw CodexHookInstallerError.hooksJSONInvalidShape("\"\(event)\" must be an array of objects")
+            }
+            for block in blocks {
+                guard block["hooks"] is [[String: Any]] else {
+                    throw CodexHookInstallerError.hooksJSONInvalidShape("\"\(event)\" block is missing a hooks array")
+                }
+            }
+        }
+    }
+
+    private static func writeHooksJSON(
+        _ settings: [String: Any],
+        to url: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        try fileManager.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let data = try JSONSerialization.data(
+            withJSONObject: settings,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        var output = data
+        output.append(0x0A)
+        try output.write(to: url, options: .atomic)
+    }
+
+    private static func backupIfExists(
+        _ url: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        guard fileManager.fileExists(atPath: url.path) else { return }
         let ts = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        let dest = url.appendingPathExtension("backup-\(ts)")
-        try? FileManager.default.copyItem(at: url, to: dest)
+        let dest = url.appendingPathExtension("backup-\(ts)-\(UUID().uuidString)")
+        try fileManager.copyItem(at: url, to: dest)
     }
 
     /// Heuristic: skip the first-launch Codex prompt for users who have no
@@ -516,6 +802,9 @@ enum CodexHookInstallerError: LocalizedError {
     case hookBinaryMissing(String)
     case configNotUTF8
     case configParseFailed(Error)
+    case hooksJSONParseFailed(Error)
+    case hooksJSONRootInvalid
+    case hooksJSONInvalidShape(String)
 
     var errorDescription: String? {
         switch self {
@@ -525,6 +814,12 @@ enum CodexHookInstallerError: LocalizedError {
             return "~/.codex/config.toml is not valid UTF-8. Move or fix the file and try again."
         case .configParseFailed(let underlying):
             return "~/.codex/config.toml failed to parse: \(underlying). Fix the syntax and try again."
+        case .hooksJSONParseFailed(let underlying):
+            return "~/.codex/hooks.json failed to parse: \(underlying). Fix the syntax and try again."
+        case .hooksJSONRootInvalid:
+            return "~/.codex/hooks.json must contain a JSON object. Fix the file and try again."
+        case .hooksJSONInvalidShape(let detail):
+            return "~/.codex/hooks.json has an unsupported hook shape (\(detail)). Fix the file and try again."
         }
     }
 }

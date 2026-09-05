@@ -168,10 +168,23 @@ Codex CLI is supported alongside Claude Code via the same `termy-hook`
 helper, dispatched on its `--agent codex` flag. Per
 `developers.openai.com/codex/hooks`:
 
-- **Config lives in `~/.codex/config.toml`** (TOML, not JSON), gated by
-  `[features] hooks = true`. The installer in `CodexHookInstaller.swift`
-  uses TOMLKit to merge our blocks non-destructively, marker-tagged
-  `_termy_managed = true` for surgical uninstall.
+- **Hooks use an existing `~/.codex/hooks.json`, otherwise
+  `~/.codex/config.toml`**, gated by `[features] hooks = true` in TOML.
+  The installer in `CodexHookInstaller.swift` moves termy's inline blocks
+  into an existing JSON hook file so integrations such as OMX share one
+  representation. Other hooks and trust settings are preserved; blocks
+  are marker-tagged `_termy_managed = true` for surgical uninstall.
+  Codex may require reviewing migrated hooks in `/hooks` because their
+  source path changes.
+- **Launch-time repair covers the feature flag, not just the hook path.**
+  `currentState()` reports `installedNeedsFeatureFlagMigration` when the
+  hook path is current but `[features].codex_hooks` is still present (termy
+  0.2.2 and `omx setup` both write it, and Codex warns at every start while
+  it exists). `promptIfNeeded()` rewrites silently; the menu explains what
+  changed. `AppDelegate` skips every launch prompt and installer under
+  XCTest (`TestHostDetector`) because the unit-test target loads termy.app
+  as its host and would otherwise re-point `~/.claude` and `~/.codex` at
+  DerivedData on every test run.
 - **Six events, no `SessionEnd` and no error event.** `PermissionRequest`
   takes the role of CC's `Notification(reason: permission)` and is the
   THINK→WAIT trigger. Codex has no in-band error hook, so termy infers
