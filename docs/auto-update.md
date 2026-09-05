@@ -108,18 +108,22 @@ gh auth status
    ```
    Produces `build/dist/termy-0.2.0.dmg` and `build/dist/appcast.xml`.
 
-4. Publish to GitHub + Cloudflare Pages:
-   ```bash
-   scripts/publish.sh
-   ```
-
-5. Push source commit + tag last:
+4. Push source commit + tag:
    ```bash
    git push --follow-tags
    ```
 
-The source push is deliberately last: if `dist.sh` or `publish.sh` fails
-midway, rolling back is local-only.
+5. Publish to GitHub + Cloudflare Pages:
+   ```bash
+   scripts/publish.sh
+   ```
+
+The source push comes *before* `publish.sh`: `gh release create` runs without
+`--target`, so if the tag is not on the remote yet GitHub invents one at the
+current remote head, i.e. the commit before the version bump. Everything up to
+and including `dist.sh` is local and can be undone with `git reset` +
+`git tag -d`; from the push on, fixing a mistake means cutting another release.
+See [release-cycle.md](./release-cycle.md) for the full operator checklist.
 
 ## Partial-failure recovery
 
