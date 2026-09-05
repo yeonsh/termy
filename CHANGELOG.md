@@ -6,6 +6,17 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.4 — 2026-09-05
+
+- Codex hooks: termy now repairs the deprecated `[features].codex_hooks`
+  setting at launch, not only when hooks are (re)installed. Upgrading from
+  0.2.2 left the old key in place because the hook path already matched, so
+  Codex kept warning on every start; `omx setup` also writes the old key
+  back. The Codex Hooks… menu reports the repair when run by hand.
+- Running the unit tests no longer rewrites `~/.claude` and `~/.codex`. The
+  test host used to run termy's real launch sequence, which re-pointed both
+  hook configurations at the DerivedData build on every test run.
+
 ## 0.2.3 — 2026-09-05
 
 - Codex hook setup now enables `[features].hooks` instead of the deprecated
