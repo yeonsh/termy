@@ -5,7 +5,7 @@
 // .codex/config.toml). The schema, per developers.openai.com/codex/hooks:
 //
 //   [features]
-//   codex_hooks = true
+//   hooks = true
 //
 //   [[hooks.PermissionRequest]]
 //   _termy_managed = true
@@ -232,7 +232,7 @@ enum CodexHookInstaller {
 
             \(bundledHookURL.path)
 
-            It also enables `codex_hooks = true` under [features] if it \
+            It also enables `hooks = true` under [features] if it \
             isn't already on. Your existing config is preserved and the \
             previous file is backed up before writing. You can uninstall \
             anytime from the termy menu.
@@ -296,16 +296,17 @@ enum CodexHookInstaller {
 
     /// Add termy hook blocks for every event in `allEvents`. Existing
     /// termy-managed blocks are replaced, user blocks are preserved.
-    /// `[features] codex_hooks` is force-enabled.
+    /// `[features] hooks` is force-enabled and its deprecated alias removed.
     ///
     /// Implementation note: TOMLKit's `subscript = value` deep-copies on
     /// assignment, so any pattern that mutates a sub-value AFTER inserting
     /// it into a parent silently loses the mutation. Everything below
     /// builds inside-out and assigns top-down.
     static func applyInstall(to config: TOMLTable, hookPath: String) {
-        // [features] codex_hooks = true — build fully, then assign.
+        // [features] hooks = true — build fully, then assign.
         let features = (config["features"]?.table) ?? TOMLTable()
-        features["codex_hooks"] = true
+        features.remove(at: "codex_hooks")
+        features["hooks"] = true
         config["features"] = features
 
         // Build the new hooks table fresh, carrying over any user blocks.
@@ -358,7 +359,7 @@ enum CodexHookInstaller {
 
     /// Remove termy-managed blocks. Empties out event arrays if no user
     /// blocks remain, and removes the `hooks` key entirely if every event
-    /// is gone. `[features] codex_hooks` is left alone — if the user had
+    /// is gone. `[features] hooks` is left alone — if the user had
     /// it on for other reasons, we don't want to break those.
     static func applyUninstall(from config: TOMLTable) {
         guard let prior = config["hooks"]?.table else { return }

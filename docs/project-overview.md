@@ -169,7 +169,7 @@ helper, dispatched on its `--agent codex` flag. Per
 `developers.openai.com/codex/hooks`:
 
 - **Config lives in `~/.codex/config.toml`** (TOML, not JSON), gated by
-  `[features] codex_hooks = true`. The installer in `CodexHookInstaller.swift`
+  `[features] hooks = true`. The installer in `CodexHookInstaller.swift`
   uses TOMLKit to merge our blocks non-destructively, marker-tagged
   `_termy_managed = true` for surgical uninstall.
 - **Six events, no `SessionEnd` and no error event.** `PermissionRequest`

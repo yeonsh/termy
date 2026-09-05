@@ -19,8 +19,9 @@ final class CodexHookInstallerTests: XCTestCase {
         let config = TOMLTable()
         CodexHookInstaller.applyInstall(to: config, hookPath: path)
 
-        // [features] codex_hooks = true
-        XCTAssertEqual(config["features"]?.table?["codex_hooks"]?.bool, true)
+        // [features] hooks = true
+        XCTAssertEqual(config["features"]?.table?["hooks"]?.bool, true)
+        XCTAssertNil(config["features"]?.table?["codex_hooks"])
 
         // hooks.<Event> arrays populated for each of the 6 events
         let hooks = config["hooks"]?.table
@@ -39,6 +40,23 @@ final class CodexHookInstallerTests: XCTestCase {
                 "\"\(path)\" --agent codex \(event)"
             )
         }
+    }
+
+    func test_install_migratesDeprecatedFeature_preservesUnrelatedFeatures() throws {
+        let config = try TOMLTable(string: """
+            [features]
+            codex_hooks = true
+            hooks = false
+            multi_agent = true
+            """)
+
+        CodexHookInstaller.applyInstall(to: config, hookPath: path)
+
+        let reparsed = try TOMLTable(string: config.convert(to: .toml))
+        let features = reparsed["features"]?.table
+        XCTAssertEqual(features?["hooks"]?.bool, true)
+        XCTAssertNil(features?["codex_hooks"])
+        XCTAssertEqual(features?["multi_agent"]?.bool, true)
     }
 
     // MARK: - Preserve user blocks
@@ -131,7 +149,7 @@ final class CodexHookInstallerTests: XCTestCase {
     }
 
     func test_uninstall_leavesFeaturesAlone() {
-        // [features] codex_hooks gets enabled by install but uninstall
+        // [features] hooks gets enabled by install but uninstall
         // shouldn't touch it — user might have flipped it on for other
         // reasons.
         let config = TOMLTable()
@@ -139,7 +157,7 @@ final class CodexHookInstallerTests: XCTestCase {
 
         CodexHookInstaller.applyUninstall(from: config)
 
-        XCTAssertEqual(config["features"]?.table?["codex_hooks"]?.bool, true)
+        XCTAssertEqual(config["features"]?.table?["hooks"]?.bool, true)
     }
 
     // MARK: - isTermyBlock
@@ -220,7 +238,7 @@ final class CodexHookInstallerTests: XCTestCase {
             CodexHookInstaller.findInstalledPath(in: reparsed),
             path
         )
-        XCTAssertEqual(reparsed["features"]?.table?["codex_hooks"]?.bool, true)
+        XCTAssertEqual(reparsed["features"]?.table?["hooks"]?.bool, true)
         for event in CodexHookInstaller.allEvents {
             XCTAssertEqual(reparsed["hooks"]?.table?[event]?.array?.count, 1, event)
         }

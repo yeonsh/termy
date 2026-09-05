@@ -6,6 +6,14 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.3 — 2026-09-05
+
+- Codex hook setup now enables `[features].hooks` instead of the deprecated
+  `[features].codex_hooks` setting. Installing or reinstalling termy's Codex
+  hooks removes the deprecated alias while preserving other feature settings
+  and user hooks. Existing installations can migrate by uninstalling and
+  reinstalling hooks from termy → Codex Hooks….
+
 ## 0.2.2 — 2026-09-02
 
 - Drag the titlebar project chips to reorder them. Project order used to be derived from the sequence the first pane of each project opened in, with no way to change it. A user-set order now layers on top of that: chips you've moved come first, projects you haven't touched follow in the derived order, and a project drops out on its own when its last pane closes. Opening a new project appends it instead of reshuffling what's already there. The same order drives the chip strip, the ⌘1–9 numbering, and the project clusters in the ALL view, so they never disagree. A drag under 4pt still reads as a plain filter switch, the strip auto-scrolls when the pointer reaches a viewport edge, and the ALL chip stays pinned first. The order survives a restart alongside the rest of the window record; session files written by older builds decode without one and fall back to the derived order.
