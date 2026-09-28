@@ -156,6 +156,53 @@ enum BalancedPanePlacementPlanner {
     }
 }
 
+/// On-screen order of the pane grid, shared by the layout pass and ⌘[ / ⌘]
+/// so focus cycling walks panes the way the user sees them rather than the
+/// order they were opened in. `columns` are the workspace's `rows`: each one
+/// renders as a vertical stack, and the stacks sit left to right.
+enum PaneGridOrder {
+    /// Splits each column by project and gathers a project's pieces into one
+    /// cluster (an array of columns). Clusters follow `projectOrder` — the
+    /// chip order the ALL view lays its project cells out in. A column that
+    /// mixes projects (rare; a pane `cd`d away) lands in each project's cell.
+    static func clusters<Item>(
+        columns: [[Item]],
+        projectOrder: [String],
+        projectId: (Item) -> String
+    ) -> [[[Item]]] {
+        var byProject: [String: [[Item]]] = [:]
+        for column in columns {
+            var bucket: [String: [Item]] = [:]
+            var orderInColumn: [String] = []
+            for item in column {
+                let id = projectId(item)
+                if bucket[id] == nil {
+                    orderInColumn.append(id)
+                }
+                bucket[id, default: []].append(item)
+            }
+            for id in orderInColumn {
+                if let items = bucket[id] {
+                    byProject[id, default: []].append(items)
+                }
+            }
+        }
+        return projectOrder.compactMap { byProject[$0] }
+    }
+
+    /// Reading order: project cells left to right, top to bottom; inside a
+    /// cell, columns left to right and each column top to bottom. With one
+    /// project on screen that is simply the columns in order.
+    static func readingOrder<Item>(
+        columns: [[Item]],
+        projectOrder: [String],
+        projectId: (Item) -> String
+    ) -> [Item] {
+        clusters(columns: columns, projectOrder: projectOrder, projectId: projectId)
+            .flatMap { $0.flatMap { $0 } }
+    }
+}
+
 struct PaneFocusHistory {
     private var paneIds: [String] = []
 
@@ -372,6 +419,16 @@ final class Workspace: NSView, NSSplitViewDelegate {
 
     private var visiblePanes: [Pane] {
         panes.filter(isVisible)
+    }
+
+    /// Visible panes as laid out on screen — what ⌘[ / ⌘] walk. Ignores
+    /// maximize: cycling to another pane exits it (see `focus(pane:)`).
+    private var visiblePanesInLayoutOrder: [Pane] {
+        PaneGridOrder.readingOrder(
+            columns: rows.map { $0.filter(isVisible) },
+            projectOrder: knownProjectIds,
+            projectId: \.projectId
+        )
     }
 
     // MARK: - Add / close
@@ -637,7 +694,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
     }
 
     func cycleFocus(delta: Int) {
-        let vis = visiblePanes
+        let vis = visiblePanesInLayoutOrder
         guard !vis.isEmpty, let current = focusedPane,
               let idx = vis.firstIndex(where: { $0 === current }) else {
             vis.first.map { focus(pane: $0) }
@@ -830,7 +887,11 @@ final class Workspace: NSView, NSSplitViewDelegate {
     /// 기존 단일 프로젝트 경로(`populateColumns`)와 달리 4단계 split이 된다:
     ///   outer(grid-rows) → grid-row(cells) → cell(columns) → column(panes)
     private func populateProjectGrid(outer: NSSplitView, frame: CGRect, visibleRows: [[Pane]]) {
-        let clusters = clusterRowsByProject(visibleRows: visibleRows)
+        let clusters = PaneGridOrder.clusters(
+            columns: visibleRows,
+            projectOrder: knownProjectIds,
+            projectId: \.projectId
+        )
         guard !clusters.isEmpty else {
             populateColumns(outer: outer, frame: frame, visibleRows: visibleRows)
             return
@@ -897,31 +958,6 @@ final class Workspace: NSView, NSSplitViewDelegate {
                 }
             }
         }
-    }
-
-    /// 각 visibleRow를 (보통 동일한) projectId 기준으로 쪼갠 뒤, 같은 프로젝트의
-    /// row 조각들을 묶어 클러스터([컬럼들의 배열])로 만든다. 클러스터 순서는
-    /// `knownProjectIds`를 따라가서 토올바와 일치한다. 한 row가 여러 프로젝트를
-    /// 섞고 있을 경우(드물다)에도 각 projectId의 panes만 모아서 별도 클러스터로
-    /// 할당한다.
-    private func clusterRowsByProject(visibleRows: [[Pane]]) -> [[[Pane]]] {
-        var byProject: [String: [[Pane]]] = [:]
-        for row in visibleRows {
-            var bucket: [String: [Pane]] = [:]
-            var orderInRow: [String] = []
-            for pane in row {
-                if bucket[pane.projectId] == nil {
-                    orderInRow.append(pane.projectId)
-                }
-                bucket[pane.projectId, default: []].append(pane)
-            }
-            for projectId in orderInRow {
-                if let panes = bucket[projectId], !panes.isEmpty {
-                    byProject[projectId, default: []].append(panes)
-                }
-            }
-        }
-        return knownProjectIds.compactMap { byProject[$0] }
     }
 
     private func installRootSplit(
