@@ -6,6 +6,15 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.5 — 2026-09-28
+
+- ⌘[ / ⌘] now move focus through panes in on-screen order — left column to
+  right, top to bottom within each column — instead of the order the panes
+  were created. Inserting a column next to a middle one with ⌘D, or adding a
+  pane to an earlier column with ⌘⇧D, used to send focus jumping around the
+  grid. In the ALL view with several projects, focus walks the project
+  clusters in chip order and applies the same rule inside each cluster.
+
 ## 0.2.4 — 2026-09-05
 
 - Codex hooks: termy now repairs the deprecated `[features].codex_hooks`
