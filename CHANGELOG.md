@@ -6,6 +6,16 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.6 — 2026-10-04
+
+- The ALL view now gives every pane the same share of the window instead of
+  giving every project the same share. Panes used to be grouped into one
+  equal-sized cell per project, so a project with a single pane took as much
+  room as one with six. Panes now sit in one even grid — 5 panes as 3 + 2,
+  7 as 3 + 2 + 2 — with each project's panes kept next to each other in chip
+  order, and ⌘[ / ⌘] walk them left to right, top to bottom. Single-project
+  views keep the column layout you built with ⌘D / ⌘⇧D.
+
 ## 0.2.5 — 2026-09-28
 
 - ⌘[ / ⌘] now move focus through panes in on-screen order — left column to
