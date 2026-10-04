@@ -163,8 +163,8 @@ enum BalancedPanePlacementPlanner {
 enum PaneGridOrder {
     /// Splits each column by project and gathers a project's pieces into one
     /// cluster (an array of columns). Clusters follow `projectOrder` — the
-    /// chip order the ALL view lays its project cells out in. A column that
-    /// mixes projects (rare; a pane `cd`d away) lands in each project's cell.
+    /// chip order the ALL grid lays panes out in. A column that mixes
+    /// projects (rare; a pane `cd`d away) lands in each project's cluster.
     static func clusters<Item>(
         columns: [[Item]],
         projectOrder: [String],
@@ -190,9 +190,11 @@ enum PaneGridOrder {
         return projectOrder.compactMap { byProject[$0] }
     }
 
-    /// Reading order: project cells left to right, top to bottom; inside a
-    /// cell, columns left to right and each column top to bottom. With one
-    /// project on screen that is simply the columns in order.
+    /// Reading order: projects in chip order; inside a project, columns left
+    /// to right and each column top to bottom. With one project on screen
+    /// that is simply the columns in order. The ALL grid fills its rows in
+    /// this same order, so it is also that grid's left-to-right,
+    /// top-to-bottom order.
     static func readingOrder<Item>(
         columns: [[Item]],
         projectOrder: [String],
@@ -200,6 +202,19 @@ enum PaneGridOrder {
     ) -> [Item] {
         clusters(columns: columns, projectOrder: projectOrder, projectId: projectId)
             .flatMap { $0.flatMap { $0 } }
+    }
+
+    /// Panes per row of the ALL grid, top to bottom. ⌈√N⌉ columns, as many
+    /// rows as that needs, and the panes spread so rows differ by at most
+    /// one — every pane gets (nearly) the same area regardless of which
+    /// project it belongs to. Extra panes go to the top rows.
+    static func equalRowSizes(paneCount: Int) -> [Int] {
+        guard paneCount > 0 else { return [] }
+        let columns = Int(ceil(Double(paneCount).squareRoot()))
+        let rowCount = (paneCount + columns - 1) / columns
+        let base = paneCount / rowCount
+        let extra = paneCount % rowCount
+        return (0..<rowCount).map { $0 < extra ? base + 1 : base }
     }
 }
 
@@ -369,7 +384,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
     /// the order the user dragged the titlebar chips into. Projects the user
     /// never placed follow in first-pane-opened order, so opening a new one
     /// doesn't reshuffle the chips. This single order drives the filter bar,
-    /// the ⌘1–9 numbering, and the ALL view's project clusters.
+    /// the ⌘1–9 numbering, and the pane order of the ALL grid.
     var knownProjectIds: [String] {
         ProjectOrder.effective(
             discovered: discoveredProjectIds,
@@ -396,7 +411,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
         let reordered = ProjectOrder.moving(current, from: from, to: to)
         guard reordered != current else { return }
         preferredProjectOrder = reordered
-        // Cluster order in the ALL view reads straight off knownProjectIds.
+        // Pane order in the ALL grid reads straight off knownProjectIds.
         relayout()
         onPanesChanged?()
     }
@@ -848,7 +863,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
 
         let projectIds = Set(visibleRows.flatMap { $0.map(\.projectId) })
         if filter.isAll && projectIds.count > 1 {
-            populateProjectGrid(outer: outer, frame: outerFrame, visibleRows: visibleRows)
+            populateEqualGrid(outer: outer, frame: outerFrame, visibleRows: visibleRows)
         } else {
             populateColumns(outer: outer, frame: outerFrame, visibleRows: visibleRows)
         }
@@ -882,81 +897,50 @@ final class Workspace: NSView, NSSplitViewDelegate {
         }
     }
 
-    /// ALL 뷰에서 프로젝트가 둘 이상일 때, 각 프로젝트의 row/column 배치를
-    /// 보존한 채 프로젝트 셀들을 √N 그리드(예: 4 → 2×2)에 균등 배치한다.
-    /// 기존 단일 프로젝트 경로(`populateColumns`)와 달리 4단계 split이 된다:
-    ///   outer(grid-rows) → grid-row(cells) → cell(columns) → column(panes)
-    private func populateProjectGrid(outer: NSSplitView, frame: CGRect, visibleRows: [[Pane]]) {
-        let clusters = PaneGridOrder.clusters(
+    /// ALL 뷰에서 프로젝트가 둘 이상일 때, 프로젝트별로 칸을 나누지 않고
+    /// 모든 pane을 하나의 균등 그리드(`PaneGridOrder.equalRowSizes`)에 놓아
+    /// pane마다 같은 면적을 준다. 채우는 순서는 `PaneGridOrder.readingOrder`
+    /// (칩 순서 → 프로젝트 안 열 순서)라서 같은 프로젝트 pane은 붙어 있고
+    /// ⌘[ / ⌘] 순서와도 맞는다. `rows`는 건드리지 않으므로 프로젝트 뷰에서는
+    /// 사용자가 만든 열 배치가 그대로 보인다. split은 2단계다:
+    ///   outer(grid-rows) → grid-row(panes)
+    private func populateEqualGrid(outer: NSSplitView, frame: CGRect, visibleRows: [[Pane]]) {
+        let ordered = PaneGridOrder.readingOrder(
             columns: visibleRows,
             projectOrder: knownProjectIds,
             projectId: \.projectId
         )
-        guard !clusters.isEmpty else {
+        let rowSizes = PaneGridOrder.equalRowSizes(paneCount: ordered.count)
+        guard !rowSizes.isEmpty else {
             populateColumns(outer: outer, frame: frame, visibleRows: visibleRows)
             return
         }
 
-        let n = clusters.count
-        let cols = max(Int(ceil(Double(n).squareRoot())), 1)
-        let gridRows = (n + cols - 1) / cols
-        let cellHeight = frame.height / CGFloat(gridRows)
-
         outer.isVertical = false
+        let rowHeight = frame.height / CGFloat(rowSizes.count)
+        var start = 0
 
-        for gridRow in 0..<gridRows {
-            let start = gridRow * cols
-            let end = min(start + cols, n)
-            let clustersInRow = Array(clusters[start..<end])
-            guard !clustersInRow.isEmpty else { continue }
-
+        for (gridRow, size) in rowSizes.enumerated() {
             let rowSplit = makeSplit(vertical: true)
             rowSplit.frame = CGRect(
                 x: 0,
-                y: frame.height - CGFloat(gridRow + 1) * cellHeight,
+                y: frame.height - CGFloat(gridRow + 1) * rowHeight,
                 width: frame.width,
-                height: cellHeight
+                height: rowHeight
             )
             outer.addArrangedSubview(rowSplit)
 
-            let cellCount = max(clustersInRow.count, 1)
-            let cellWidth = frame.width / CGFloat(cellCount)
-
-            for (cellIdx, cluster) in clustersInRow.enumerated() {
-                let cell = makeSplit(vertical: true)
-                cell.frame = CGRect(
-                    x: CGFloat(cellIdx) * cellWidth,
+            let paneWidth = frame.width / CGFloat(size)
+            for (paneIdx, pane) in ordered[start..<start + size].enumerated() {
+                pane.frame = CGRect(
+                    x: CGFloat(paneIdx) * paneWidth,
                     y: 0,
-                    width: cellWidth,
-                    height: cellHeight
+                    width: paneWidth,
+                    height: rowHeight
                 )
-                rowSplit.addArrangedSubview(cell)
-
-                let columnCount = max(cluster.count, 1)
-                let columnWidth = cellWidth / CGFloat(columnCount)
-                for (colIdx, columnPanes) in cluster.enumerated() {
-                    let column = makeSplit(vertical: false)
-                    column.frame = CGRect(
-                        x: CGFloat(colIdx) * columnWidth,
-                        y: 0,
-                        width: columnWidth,
-                        height: cellHeight
-                    )
-                    cell.addArrangedSubview(column)
-
-                    let paneCount = max(columnPanes.count, 1)
-                    let paneHeight = cellHeight / CGFloat(paneCount)
-                    for (paneIdx, pane) in columnPanes.enumerated() {
-                        pane.frame = CGRect(
-                            x: 0,
-                            y: cellHeight - CGFloat(paneIdx + 1) * paneHeight,
-                            width: columnWidth,
-                            height: paneHeight
-                        )
-                        column.addArrangedSubview(pane)
-                    }
-                }
+                rowSplit.addArrangedSubview(pane)
             }
+            start += size
         }
     }
 
