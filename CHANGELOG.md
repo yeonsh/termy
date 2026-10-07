@@ -6,6 +6,17 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.8 — 2026-10-07
+
+- termy now runs on SwiftTerm 1.20, a newer version of the terminal engine
+  with many upstream rendering and input fixes.
+- Selected text stays readable. It is drawn in the terminal's text color on
+  the selection highlight in both dark and light mode, so colored output
+  inside a selection shows in that one color while selected.
+- Scrolling back through a pane's history no longer snaps to the bottom each
+  time new output arrives. The pane follows new output again once you scroll
+  back down.
+
 ## 0.2.7 — 2026-10-07
 
 - Trackpad scrolling now follows your fingers instead of racing ahead of
