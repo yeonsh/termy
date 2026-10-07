@@ -36,6 +36,7 @@ xcodebuild \
     -scheme termy \
     -configuration "$CONFIG" \
     -destination 'platform=macOS' \
+    -skipPackagePluginValidation \
     build \
     | tail -4
 

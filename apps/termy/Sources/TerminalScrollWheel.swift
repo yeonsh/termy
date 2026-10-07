@@ -1,21 +1,24 @@
 // TerminalScrollWheel.swift
 //
-// Distance-accurate wheel/trackpad scrolling for TermyTerminalView. The
-// pinned SwiftTerm (f37922e) maps every wheel event to at least one row: it
-// reads `deltaY` (which is `scrollingDeltaY / 10` on precise devices),
-// truncates it, and feeds a step curve — 0–1 → 1 row, 2–5 → 3, 6–9 → 10,
-// ≥10 → a full screen. A trackpad emits 60–120 small events per second
-// including the momentum tail, so scroll distance tracked the event count
-// instead of the finger, and a flick jumped whole screens per event.
+// Distance-accurate wheel/trackpad scrolling for TermyTerminalView. SwiftTerm
+// f37922e mapped every wheel event to at least one row: it read `deltaY`
+// (which is `scrollingDeltaY / 10` on precise devices), truncated it, and fed
+// a step curve — 0–1 → 1 row, 2–5 → 3, 6–9 → 10, ≥10 → a full screen. A
+// trackpad emits 60–120 small events per second including the momentum tail,
+// so scroll distance tracked the event count instead of the finger, and a
+// flick jumped whole screens per event.
 //
 // The accumulator follows upstream's fix (SwiftTerm 91863f0, #600); the speed
 // follows Ghostty, the terminal termy is compared against day to day. Ghostty
 // doubles precise deltas (SurfaceView_AppKit `scrollWheel`), moves 3 rows per
 // wheel tick (`mouse-scroll-multiplier` default), and sends one wheel report
-// or arrow key per row with no cap. Upstream's ×1 travel plus its report
-// budget (5d3026a, #657) felt clearly slower in Claude Code side by side.
-// Delete this file and the scroll-wheel monitor in TermyTerminalView once
-// SwiftTerm is bumped past 5d3026a — then set its `scrollSensitivity` to match.
+// or arrow key per row with no cap.
+//
+// Kept on SwiftTerm 1.20, which ships 91863f0: its `scrollWheel` runs at ×1
+// travel, and one `scrollSensitivity` can't express ×2 trackpad travel and 3
+// rows per wheel tick at once. Upstream main later adds a report budget
+// (5d3026a, #657) that felt clearly slower in Claude Code side by side, and
+// nothing upstream latches a gesture to its pane like `ScrollGestureLatch`.
 
 import AppKit
 

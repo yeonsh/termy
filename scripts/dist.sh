@@ -68,12 +68,15 @@ echo "==> xcodegen"
 xcodegen generate --quiet
 
 echo "==> archive (Release)"
+# SwiftTerm ships a build-tool plugin (SwiftTermBuildInfoPlugin) that
+# xcodebuild refuses to run until it is trusted; there is no Xcode prompt here.
 xcodebuild \
     -project termy.xcodeproj \
     -scheme "$SCHEME" \
     -configuration Release \
     -destination 'generic/platform=macOS' \
     -archivePath "$ARCHIVE" \
+    -skipPackagePluginValidation \
     archive \
     | tail -20
 

@@ -221,6 +221,65 @@ final class TermyTerminalViewTests: XCTestCase {
         )
     }
 
+    // MARK: - Option+Left/Right word motion
+
+    func test_optionArrowWordMotion_mapsOptionLeftToMetaB() {
+        XCTAssertEqual(
+            TermyTerminalView.optionArrowWordMotion(
+                keyEvent(keyCode: kVK_LeftArrow, modifiers: .option)
+            ),
+            "\u{1B}b"
+        )
+    }
+
+    func test_optionArrowWordMotion_mapsOptionRightToMetaF() {
+        XCTAssertEqual(
+            TermyTerminalView.optionArrowWordMotion(
+                keyEvent(keyCode: kVK_RightArrow, modifiers: .option)
+            ),
+            "\u{1B}f"
+        )
+    }
+
+    /// AppKit tags every arrow keyDown with `.numericPad` and `.function`;
+    /// those bits must not block the match.
+    func test_optionArrowWordMotion_ignoresArrowKeyDeviceBits() {
+        XCTAssertEqual(
+            TermyTerminalView.optionArrowWordMotion(
+                keyEvent(keyCode: kVK_LeftArrow, modifiers: [.option, .numericPad, .function])
+            ),
+            "\u{1B}b"
+        )
+    }
+
+    /// Plain and Shift/Cmd/Ctrl-combined arrows keep SwiftTerm's xterm
+    /// encoding (`CSI D`, `CSI 1;4D`, …); only bare Option is remapped.
+    func test_optionArrowWordMotion_skipsOtherModifierCombos() {
+        let combos: [NSEvent.ModifierFlags] = [
+            [],
+            [.shift],
+            [.option, .shift],
+            [.option, .command],
+            [.option, .control],
+        ]
+        for mods in combos {
+            XCTAssertNil(
+                TermyTerminalView.optionArrowWordMotion(
+                    keyEvent(keyCode: kVK_LeftArrow, modifiers: mods)
+                ),
+                "should skip \(mods.rawValue)"
+            )
+        }
+    }
+
+    func test_optionArrowWordMotion_skipsVerticalArrows() {
+        XCTAssertNil(
+            TermyTerminalView.optionArrowWordMotion(
+                keyEvent(keyCode: kVK_UpArrow, modifiers: .option)
+            )
+        )
+    }
+
     // MARK: - CMD+click URL gating
     //
     // SwiftTerm's `.implicit` link detection matches rooted/relative paths

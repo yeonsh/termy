@@ -364,6 +364,9 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         terminal.nativeBackgroundColor = theme.paneBackgroundColor
         terminal.nativeForegroundColor = theme.terminalForegroundColor
         terminal.selectedTextBackgroundColor = theme.terminalSelectionBackgroundColor
+        // SwiftTerm 1.20 (ed395c7) repaints selected text in this color, black
+        // by default, which all but vanishes on the dark selection background.
+        terminal.selectedTextForegroundColor = theme.terminalForegroundColor
         terminal.installColors(theme.terminalANSIColors.map { $0.termyTerminalColor() })
     }
 

@@ -29,12 +29,20 @@ Squash-merged to main as `690a193` on 2026-04-26.
   covers start/end; THINK/WAIT/IDLE for hook-less agents would need
   bespoke heuristics (e.g., output cadence, prompt regex).
 
-### Bump SwiftTerm past f37922e
-- **What:** Move the pinned SwiftTerm (`f37922e`, 2026-04-16) to current `main`, then delete `TerminalScrollWheel.swift` and the scroll-wheel monitor in `TermyTerminalView`.
-- **Why:** termy carries a port of upstream's line-accurate scroll wheel (91863f0 / #600) because the pinned `scrollWheel` scrolls at least one row per trackpad event. Upstream also has 400+ other fixes.
-- **Speed:** termy's port is tuned to Ghostty (trackpad travel ×2, 3 rows per wheel tick, no wheel-report cap) after upstream's ×1 travel plus report budget (5d3026a / #657) felt too slow in Claude Code side by side. After the bump, set `scrollSensitivity` and check that the report budget doesn't bring the slowness back. `termy.scrollSensitivity` in UserDefaults scales the speed live.
-- **Cons:** The pin is local-only (`Package.resolved` is gitignored and `project.yml` tracks `branch: main`). A trial build against `6a955b0` (2026-10-03) needed `-skipPackagePluginValidation` (new `SwiftTermBuildInfoPlugin`, so `dist.sh` needs it too), pulled three new packages (swift-png, h, swift-argument-parser), and hit one compile error (`Workspace.swift` reads `pane.terminal.terminal`, now internal).
-- **Context:** Every SwiftTerm quirk in TermyTerminalView (IME `kittyIsComposing`, `feedPrepare` selection clearing, the mouse-reporting bypass, caret overlay timing) was verified against `f37922e` only. Re-verify them live after the bump.
+### Migrate to SwiftTerm 2.0
+- **What:** Move from `exactVersion: "1.20.0"` to SwiftTerm 2.0 once it is tagged. Upstream `main` (`15fed4f`, 2026-10-05) is already 2.0 but untagged; 2026-10-07 bumped f37922e → 1.20.0 instead.
+- **Why:** 2.0 is where upstream development continues (strict concurrency, parse thread, renderer work). Staying on 1.x means no new fixes.
+- **Cons:** 2.0 parses PTY output on the IO thread and never calls `LocalProcessTerminalView.dataReceived`. termy overrides it for the Codex PTY-activity ping (POSSIBLY_WAITING → THINKING) and the IME overlay re-anchor; both would go silent with no compile error. Move them to `setProcessOutputHandler` (runs on the parse thread, `@Sendable`, must return fast) and hop to main. `Terminal` is no longer reachable from the view, so `Workspace.flushPendingTerminalThaws` (`pane.terminal.terminal.updateFullScreen()`) needs another way to force a full redraw. See `MigratingFrom1To2.md` in the SwiftTerm docs.
+- **Scroll:** Keep `TerminalScrollWheel.swift`. 2.0 adds a wheel-report budget (5d3026a / #657, 100 reports/s, burst 6, one report per wheel notch) that felt too slow in Claude Code side by side, and has no gesture latch.
+- **Context:** Re-verify every SwiftTerm workaround in TermyTerminalView live after the move (IME `kittyIsComposing`, caret overlay timing, `feedPrepare` selection clearing, the mouse-reporting bypass, Option+Left/Right, `requestOpenLink` allowlist, selected-text color).
+
+### SwiftTerm 1.20 audit leftovers
+Found while auditing f37922e → 1.20.0 (2026-10-07). None blocked the bump, so none was fixed then.
+- **Pane teardown leaves `ForegroundProcessWatcher` polling.** Unregistering happens only in `processTerminated`, which never fires after `terminate()` (⌘W) or after the pane deallocates. Since 1.20 (424a5a1) `LocalProcess.deinit` closes the PTY, so closing a window now ends its shells with SIGHUP instead of leaking them, and that path joins ⌘W. The watcher keeps calling `tcgetpgrp` on a closed fd; if the fd number is reused, a synthetic SessionStart can attach to the wrong pane.
+- **`TermyTerminalView.cellPosition` doesn't match SwiftTerm's cell width.** SwiftTerm pixel-snaps the width (rounded since 87a7888); termy uses the raw "W" advance, so Cmd+click and wheel-report columns drift on long lines.
+- **Ctrl retarget monitor mangles Ctrl+function keys.** Arrows/F-keys report private-use scalars (0xF7xx), so `needsASCIIRetargeting` is true and `UCKeyTranslate` returns an ASCII control byte. Skip retargeting for 0xF700–0xF8FF.
+- **`kittyIsComposing` can stay true after a non-kitty Hangul commit** when no empty `setMarkedText` follows; SwiftTerm then falls back to the pre-1.20 key encoding for function keys until the next `unmarkText`.
+- **Drag auto-scroll keeps running** if the drag ends with a Cmd+mouseUp over a URL: termy's link monitor swallows the mouseUp, and SwiftTerm only stops its timer there.
 
 ### Separate LaunchAgent daemon
 - **What:** Move HookDaemon out of termy.app into `~/Library/LaunchAgents/app.termy.daemon.plist`.

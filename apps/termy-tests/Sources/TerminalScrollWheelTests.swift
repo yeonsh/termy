@@ -8,7 +8,7 @@ final class TerminalScrollWheelTests: XCTestCase {
 
     // MARK: - ScrollWheelLineAccumulator
 
-    /// The pinned SwiftTerm scrolled a full row for any non-zero precise
+    /// SwiftTerm f37922e scrolled a full row for any non-zero precise
     /// delta, so a 1pt trackpad nudge moved a whole row of text.
     func test_subCellPreciseDelta_scrollsNothing() {
         var accumulator = ScrollWheelLineAccumulator()

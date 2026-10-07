@@ -76,6 +76,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
         installSelectionClearMonitor()
         installControlKeyRetargetMonitor()
         installShiftReturnMonitor()
+        installOptionArrowMonitor()
         installScrollWheelMonitor()
         registerForDraggedTypes([.fileURL])
     }
@@ -87,6 +88,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
         installSelectionClearMonitor()
         installControlKeyRetargetMonitor()
         installShiftReturnMonitor()
+        installOptionArrowMonitor()
         installScrollWheelMonitor()
         registerForDraggedTypes([.fileURL])
     }
@@ -107,6 +109,9 @@ final class TermyTerminalView: LocalProcessTerminalView {
         if let shiftReturnMonitor {
             NSEvent.removeMonitor(shiftReturnMonitor)
         }
+        if let optionArrowMonitor {
+            NSEvent.removeMonitor(optionArrowMonitor)
+        }
         if let scrollWheelMonitor {
             NSEvent.removeMonitor(scrollWheelMonitor)
         }
@@ -118,15 +123,14 @@ final class TermyTerminalView: LocalProcessTerminalView {
     // (claude, codex, tmux, vim, …) the click is forwarded to the child and
     // neither selection nor the single-click clear runs, so the local
     // highlight becomes un-selectable and un-clearable. Rather than
-    // reimplement word/row heuristics (SwiftTerm's `selection` is internal to
-    // the module, so we can't call `selectWordOrExpression` / `select(row:)`
-    // directly), we flip `allowMouseReporting` off for the duration of the
-    // click — SwiftTerm's `mouseDown` then falls through to the selection
-    // path unconditionally — and restore it on the matching mouseUp so real
-    // reporting resumes for the next click. Subclassing `mouseDown` isn't an
-    // option: SwiftTerm marks it `public` but not `open`, which is why we
-    // lean on NSEvent monitors here (same constraint as the link-click and
-    // ctrl-key monitors).
+    // reimplement word/row heuristics, we flip `allowMouseReporting` off for
+    // the duration of the click — SwiftTerm's `mouseDown` then falls through
+    // to the selection path unconditionally — and restore it on the matching
+    // mouseUp so real reporting resumes for the next click. This was built as
+    // a monitor because SwiftTerm f37922e kept `selection` internal and
+    // `mouseDown` non-`open`; 1.20 opens both (b4b78a3, 86456ca), so an
+    // override is now possible, but the monitor still works and is what was
+    // verified live.
     nonisolated(unsafe) private var selectionClearMonitor: Any?
     nonisolated(unsafe) private var selectionReportingRestoreMonitor: Any?
     nonisolated(unsafe) private var reportingWasOverriddenForClick: Bool = false
@@ -247,6 +251,17 @@ final class TermyTerminalView: LocalProcessTerminalView {
         guard let url = Self.openableURL(from: trimmed) else { return false }
         NSWorkspace.shared.open(url)
         return true
+    }
+
+    /// A click the monitor above lets through reaches SwiftTerm's own
+    /// `mouseUp`, which opens the link under it. Since SwiftTerm 1.20
+    /// (1483b09) that default opener also opens any existing file path —
+    /// launching it outright if it's an app or script. Hold SwiftTerm's path
+    /// to the same scheme allowlist so a path-shaped click stays a no-op.
+    override func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = Self.openableURL(from: trimmed) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// SwiftTerm's `.implicit` link detection happily matches rooted/relative
@@ -405,8 +420,8 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// returns a synthetic NSEvent carrying the ASCII character. SwiftTerm's
     /// `keyDown` then sees `'c'` instead of `'ㅊ'` and its existing Ctrl path
     /// (kitty + non-kitty) runs unchanged. Subclassing `keyDown` isn't
-    /// available because SwiftTerm marks it `public` but not `open` — same
-    /// constraint that forced the selection-clear monitor above.
+    /// available because SwiftTerm marks it `public` but not `open` (still
+    /// true in 1.20).
     nonisolated(unsafe) private var controlKeyRetargetMonitor: Any?
 
     private func installControlKeyRetargetMonitor() {
@@ -500,7 +515,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
 
     /// Without the kitty keyboard protocol's `disambiguate` flag,
     /// SwiftTerm's encoder emits plain `\r` for both Enter and Shift+Enter
-    /// (`KittyKeyboardEncoder.swift:583` legacy path; only Shift+Tab gets
+    /// (`KittyKeyboardEncoder.legacySpecialKeySequence`; only Shift+Tab gets
     /// special-cased there). Codex CLI pushes the kitty flags on startup, so
     /// it correctly receives `CSI 13;2u` for Shift+Enter; Claude Code CLI
     /// (Ink/Node) does NOT push kitty flags and instead relies on the host
@@ -511,7 +526,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
     ///
     /// Fix: when kitty `disambiguate` is off, intercept Shift+Return at the
     /// monitor level (SwiftTerm's `keyDown` is `public` but not `open` — same
-    /// constraint as the Ctrl/selection monitors) and send `ESC + CR`, the
+    /// constraint as the Ctrl monitor) and send `ESC + CR`, the
     /// same bytes macOS emits for Option+Enter and that Claude Code already
     /// documents as its multiline shortcut. In zsh/bash readline, Meta+CR
     /// runs `accept-line` identically to plain CR, so this doesn't regress
@@ -546,6 +561,42 @@ final class TermyTerminalView: LocalProcessTerminalView {
             .intersection(.deviceIndependentFlagsMask)
             .subtracting([.capsLock, .numericPad, .function])
         return mods == .shift
+    }
+
+    /// SwiftTerm 1.20 (ae914b7) encodes arrow keys the xterm way when no
+    /// kitty flag is set, so Option+Left/Right now send `CSI 1;3D` /
+    /// `CSI 1;3C`. zsh and bash readline bind neither by default, so word
+    /// motion at the shell prompt stopped working. SwiftTerm f37922e sent
+    /// `ESC b` / `ESC f`, which both bind to backward-word / forward-word;
+    /// restore that for bare Option+Left/Right only. Kitty apps keep
+    /// SwiftTerm's encoding.
+    nonisolated(unsafe) private var optionArrowMonitor: Any?
+
+    private func installOptionArrowMonitor() {
+        optionArrowMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            guard event.window === self.window else { return event }
+            guard self.window?.firstResponder === self else { return event }
+            // Let the IME commit an in-flight syllable first.
+            guard !self.hasMarkedText() else { return event }
+            guard self.optionAsMetaKey else { return event }
+            guard self.terminal.keyboardEnhancementFlags.isEmpty else { return event }
+            guard let motion = Self.optionArrowWordMotion(event) else { return event }
+            self.send(txt: motion)
+            return nil
+        }
+    }
+
+    nonisolated static func optionArrowWordMotion(_ event: NSEvent) -> String? {
+        let mods = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .numericPad, .function])
+        guard mods == .option else { return nil }
+        switch Int(event.keyCode) {
+        case kVK_LeftArrow: return "\u{1B}b"
+        case kVK_RightArrow: return "\u{1B}f"
+        default: return nil
+        }
     }
 
     /// When any kitty keyboard flag is active, SwiftTerm's `insertText` path
