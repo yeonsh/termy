@@ -76,6 +76,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
         installSelectionClearMonitor()
         installControlKeyRetargetMonitor()
         installShiftReturnMonitor()
+        installScrollWheelMonitor()
         registerForDraggedTypes([.fileURL])
     }
 
@@ -86,6 +87,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
         installSelectionClearMonitor()
         installControlKeyRetargetMonitor()
         installShiftReturnMonitor()
+        installScrollWheelMonitor()
         registerForDraggedTypes([.fileURL])
     }
 
@@ -104,6 +106,9 @@ final class TermyTerminalView: LocalProcessTerminalView {
         }
         if let shiftReturnMonitor {
             NSEvent.removeMonitor(shiftReturnMonitor)
+        }
+        if let scrollWheelMonitor {
+            NSEvent.removeMonitor(scrollWheelMonitor)
         }
     }
 
@@ -291,6 +296,97 @@ final class TermyTerminalView: LocalProcessTerminalView {
         let clampedCol = max(0, min(col, terminal.cols - 1))
         let clampedRow = max(0, min(row, max(0, terminal.rows - 1)))
         return Position(col: clampedCol, row: clampedRow)
+    }
+
+    // SwiftTerm's `scrollWheel` is `public` but not `open` — same constraint
+    // as `mouseDown` and `keyDown` — so the line-accurate replacement (see
+    // TerminalScrollWheel.swift for why it exists) runs from a local monitor
+    // that consumes every wheel event AppKit would have delivered here.
+    nonisolated(unsafe) private var scrollWheelMonitor: Any?
+    private var scrollGestureLatch = ScrollGestureLatch()
+    private var scrollLineAccumulator = ScrollWheelLineAccumulator()
+
+    private func installScrollWheelMonitor() {
+        scrollWheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self else { return event }
+            guard event.window === self.window else { return event }
+            let claimed = self.scrollGestureLatch.claims(
+                phase: event.phase,
+                momentumPhase: event.momentumPhase,
+                isOverView: { self.isScrollTarget(windowLocation: event.locationInWindow) }
+            )
+            guard claimed else { return event }
+            self.handleScrollWheel(event)
+            return nil
+        }
+    }
+
+    /// Every pane's monitor sees every wheel event, so the cheap bounds check
+    /// runs first. The hit-test then leaves events to a view layered above
+    /// the terminal, as AppKit's own routing would.
+    private func isScrollTarget(windowLocation: NSPoint) -> Bool {
+        guard bounds.contains(convert(windowLocation, from: nil)) else { return false }
+        guard let hit = window?.contentView?.hitTest(windowLocation) else { return false }
+        return hit.isDescendant(of: self)
+    }
+
+    /// Same three routes as SwiftTerm's `scrollWheel`, but the row count
+    /// follows the finger's travel instead of the number of events.
+    func handleScrollWheel(_ event: NSEvent) {
+        if event.phase.contains(.began) {
+            scrollLineAccumulator.reset()
+        }
+        let route = TerminalScrollRoute.route(
+            mouseReporting: allowMouseReporting && terminal.mouseMode != .off,
+            alternateBuffer: terminal.isCurrentBufferAlternate
+        )
+        // rows × SwiftTerm's internal cell height, line spacing included.
+        let cellHeight = getOptimalFrameSize().height / CGFloat(max(terminal.rows, 1))
+        let lines = scrollLineAccumulator.lines(
+            delta: event.scrollingDeltaY,
+            isPrecise: event.hasPreciseScrollingDeltas,
+            cellHeight: cellHeight,
+            route: route,
+            sensitivity: TerminalScrollSensitivity.current()
+        )
+        guard lines != 0 else { return }
+        let up = lines > 0
+        let rows = abs(lines)
+
+        switch route {
+        case .scrollback:
+            if up {
+                scrollUp(lines: rows)
+            } else {
+                scrollDown(lines: rows)
+            }
+        case .cursorKeys:
+            let sequence: [UInt8]
+            if terminal.applicationCursor {
+                sequence = up ? EscapeSequences.moveUpApp : EscapeSequences.moveDownApp
+            } else {
+                sequence = up ? EscapeSequences.moveUpNormal : EscapeSequences.moveDownNormal
+            }
+            for _ in 0..<rows {
+                send(sequence)
+            }
+        case .mouseReport:
+            guard let cell = cellPosition(at: event.locationInWindow) else { return }
+            let point = convert(event.locationInWindow, from: nil)
+            let pixelX = Int(min(max(point.x, 0), bounds.width))
+            let pixelY = Int(bounds.height - min(max(point.y, 0), bounds.height))
+            let flags = event.modifierFlags
+            let buttonFlags = terminal.encodeButton(
+                button: up ? 4 : 5,
+                release: false,
+                shift: flags.contains(.shift),
+                meta: flags.contains(.option),
+                control: flags.contains(.control)
+            )
+            for _ in 0..<rows {
+                terminal.sendEvent(buttonFlags: buttonFlags, x: cell.col, y: cell.row, pixelX: pixelX, pixelY: pixelY)
+            }
+        }
     }
 
     /// When a non-ASCII input source is active (Hangul 2-beolsik remaps 'c' →

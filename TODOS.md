@@ -29,6 +29,13 @@ Squash-merged to main as `690a193` on 2026-04-26.
   covers start/end; THINK/WAIT/IDLE for hook-less agents would need
   bespoke heuristics (e.g., output cadence, prompt regex).
 
+### Bump SwiftTerm past f37922e
+- **What:** Move the pinned SwiftTerm (`f37922e`, 2026-04-16) to current `main`, then delete `TerminalScrollWheel.swift` and the scroll-wheel monitor in `TermyTerminalView`.
+- **Why:** termy carries a port of upstream's line-accurate scroll wheel (91863f0 / #600) because the pinned `scrollWheel` scrolls at least one row per trackpad event. Upstream also has 400+ other fixes.
+- **Speed:** termy's port is tuned to Ghostty (trackpad travel ×2, 3 rows per wheel tick, no wheel-report cap) after upstream's ×1 travel plus report budget (5d3026a / #657) felt too slow in Claude Code side by side. After the bump, set `scrollSensitivity` and check that the report budget doesn't bring the slowness back. `termy.scrollSensitivity` in UserDefaults scales the speed live.
+- **Cons:** The pin is local-only (`Package.resolved` is gitignored and `project.yml` tracks `branch: main`). A trial build against `6a955b0` (2026-10-03) needed `-skipPackagePluginValidation` (new `SwiftTermBuildInfoPlugin`, so `dist.sh` needs it too), pulled three new packages (swift-png, h, swift-argument-parser), and hit one compile error (`Workspace.swift` reads `pane.terminal.terminal`, now internal).
+- **Context:** Every SwiftTerm quirk in TermyTerminalView (IME `kittyIsComposing`, `feedPrepare` selection clearing, the mouse-reporting bypass, caret overlay timing) was verified against `f37922e` only. Re-verify them live after the bump.
+
 ### Separate LaunchAgent daemon
 - **What:** Move HookDaemon out of termy.app into `~/Library/LaunchAgents/app.termy.daemon.plist`.
 - **Why:** Survives app crashes; hook events keep flowing while termy is force-quit or crashed.
