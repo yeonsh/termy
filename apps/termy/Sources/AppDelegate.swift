@@ -44,6 +44,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         AppAppearancePreference.applyStoredPreference()
         installMenuBar()
 
+        // Everything below touches state the user's real termy owns, so it is
+        // skipped when termy.app is merely the XCTest host — the real app is
+        // usually still running, often hosting the very session that runs
+        // the tests. `HookDaemon.openSocket` would unlink its
+        // /tmp/termy-$UID.sock and take over every hook event, session restore
+        // would spawn the user's saved panes inside the test process, and the
+        // installers would rewrite ~/.claude and ~/.codex to point at the
+        // DerivedData build.
+        guard !TestHostDetector.isRunningUnderXCTest() else { return }
+
         // Start the hook daemon BEFORE creating any panes. Panes need it to
         // be listening so PtyExit events have somewhere to go.
         Task.detached {
@@ -76,16 +86,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // main window is on screen behind the alert instead of after it.
         // Hook installer runs after FDA so the user isn't stacked with two
         // modal dialogs at once.
-        //
-        // Skipped when termy.app is merely the XCTest host: the installers
-        // would otherwise rewrite the user's real ~/.claude and ~/.codex to
-        // point at the DerivedData build every time the tests run.
-        if !TestHostDetector.isRunningUnderXCTest() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                FullDiskAccess.promptIfNeeded()
-                HookInstaller.promptIfNeeded()
-                CodexHookInstaller.promptIfNeeded()
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            FullDiskAccess.promptIfNeeded()
+            HookInstaller.promptIfNeeded()
+            CodexHookInstaller.promptIfNeeded()
         }
 
         // Instantiating SPUStandardUpdaterController on first access starts
@@ -94,6 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // A test host never restored a session or bound the socket. Flushing
+        // would save its empty window list over the user's session.json, and
+        // `HookDaemon.stop()` unlinks the socket path unconditionally.
+        guard !TestHostDetector.isRunningUnderXCTest() else { return }
+
         // Flush pending workspace autosave, then stop the hook daemon. Both
         // are async; block briefly so the process doesn't exit mid-write.
         // 0.5s cap — `MainWindowController` pre-emptively kicks `flushSync`
