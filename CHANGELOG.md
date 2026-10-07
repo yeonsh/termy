@@ -6,6 +6,20 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.7 — 2026-10-07
+
+- Trackpad scrolling now follows your fingers instead of racing ahead of
+  them. Every scroll event used to move at least one full row, and a
+  trackpad sends dozens of tiny events per second, so a gentle swipe flew
+  through the scrollback and a quick flick jumped a whole screen at a time.
+  Scrolling now moves by the distance you swipe, at the same speed as
+  Ghostty: momentum eases out smoothly, a mouse wheel moves three rows per
+  notch, and Claude Code, `less`, and other full-screen apps scroll at the
+  same rate. A flick keeps scrolling the pane it started in even if the
+  pointer drifts onto a neighboring pane. To adjust the speed, run
+  `defaults write app.termy.macos termy.scrollSensitivity -float 0.8`
+  (lower is slower; it takes effect immediately).
+
 ## 0.2.6 — 2026-10-04
 
 - The ALL view now gives every pane the same share of the window instead of
