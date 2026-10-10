@@ -86,8 +86,8 @@ targets:
         CFBundleName: termy
         CFBundleDisplayName: termy
         CFBundleIdentifier: app.termy.macos
-        CFBundleShortVersionString: "0.2.9"
-        CFBundleVersion: "19"
+        CFBundleShortVersionString: "0.2.10"
+        CFBundleVersion: "20"
         LSMinimumSystemVersion: "14.0"
         NSHumanReadableCopyright: "© 2026 termy"
         NSHighResolutionCapable: YES
@@ -110,6 +110,6 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.termy.macos
         GENERATE_INFOPLIST_FILE: NO
-        MARKETING_VERSION: "0.2.9"
-        CURRENT_PROJECT_VERSION: "19"
+        MARKETING_VERSION: "0.2.10"
+        CURRENT_PROJECT_VERSION: "20"
         OTHER_LDFLAGS: "-Xlinker -no_adhoc_codesign"

@@ -6,6 +6,8 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.10 — 2026-10-10
+
 - Updating termy no longer ends your Claude Code and Codex sessions. When
   you choose Install and Relaunch while an agent is in the middle of a turn,
   termy asks whether to wait and restarts once every agent has finished.
@@ -14,6 +16,19 @@ extracts the matching section into the Sparkle appcast `<description>`.
   as `--model` and `--dangerously-skip-permissions`. The version doing the
   restart must have this feature, so it takes effect from the update after
   this one.
+- If a turn you stopped with Esc keeps an update waiting, choose termy ▸
+  Restart Now to Install Update. termy also asks again every 10 minutes
+  while it waits.
+- termy now notices when Claude Code is waiting for your approval or for
+  input to an MCP tool. The pane's chip turns to WAIT and termy plays its
+  alert sound. Once you answer, the chip goes back to working. Before, only
+  Codex prompts did this.
+- termy now recognizes Claude Code installed with the native installer
+  (`~/.local/bin/claude`), so the dashboard sees it as soon as it starts.
+- Panes no longer inherit Claude Code or Codex session variables when termy
+  itself was started from inside an agent session, for example by a script
+  an agent ran. Claude Code started in such a pane now saves its
+  conversation as usual, so it can be resumed.
 
 ## 0.2.9 — 2026-10-10
 
