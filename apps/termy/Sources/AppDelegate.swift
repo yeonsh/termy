@@ -69,6 +69,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // MissionControlModel → Notifier. Wired once, app-wide.
         MissionControlModel.shared.onSnapshotUpdate = { snapshot in
             Notifier.shared.handle(snapshot)
+            Updater.shared.gate.reevaluate()
+        }
+        MissionControlModel.shared.onLivePanesChanged = {
+            Updater.shared.gate.reevaluate()
+        }
+        Updater.shared.onWillRelaunch = { [weak self] in
+            self?.windowManager.prepareForUpdateRelaunch()
         }
         Notifier.shared.start()
 
@@ -313,6 +320,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         mainMenu.addItem(makeEditMenu())
         mainMenu.addItem(makeViewMenu())
         mainMenu.addItem(makeWindowMenu())
+        #if DEBUG
+        mainMenu.addItem(makeDebugMenu())
+        #endif
         mainMenu.addItem(makeHelpMenu())
     }
 
@@ -330,6 +340,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             keyEquivalent: ""
         )
         update.target = Updater.shared
+        let restartToUpdate = menu.addItem(
+            withTitle: "Restart Now to Install Update",
+            action: #selector(Updater.restartNowToInstallUpdate(_:)),
+            keyEquivalent: ""
+        )
+        restartToUpdate.target = Updater.shared
+        restartToUpdate.isHidden = true
+        Updater.shared.gate.onPendingChanged = { [weak restartToUpdate] in
+            restartToUpdate?.isHidden = !Updater.shared.gate.isPending
+        }
         menu.addItem(.separator())
         let settings = menu.addItem(
             withTitle: "Settings…",
@@ -394,6 +414,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         item.submenu = menu
         return item
     }
+
+    #if DEBUG
+    private func makeDebugMenu() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "Debug")
+        let simulate = menu.addItem(
+            withTitle: "Simulate Update Relaunch",
+            action: #selector(AppDelegate.simulateUpdateRelaunch(_:)),
+            keyEquivalent: ""
+        )
+        simulate.target = self
+        item.submenu = menu
+        return item
+    }
+
+    /// The update-relaunch path without Sparkle: hold for mid-turn agents,
+    /// save each pane's agent session, quit. Relaunch by hand to check
+    /// that the panes resume.
+    @objc private func simulateUpdateRelaunch(_ sender: Any?) {
+        let finish: @MainActor () -> Void = { [weak self] in
+            self?.windowManager.prepareForUpdateRelaunch()
+            NSApp.terminate(nil)
+        }
+        if !Updater.shared.gate.begin(installHandler: finish) {
+            finish()
+        }
+    }
+    #endif
 
     private func makeFileMenu() -> NSMenuItem {
         let item = NSMenuItem()
