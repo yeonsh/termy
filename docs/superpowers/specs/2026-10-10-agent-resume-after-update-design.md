@@ -157,14 +157,17 @@ codex 의 값 하나짜리 플래그는 여러 번 반복될 수 있고(`-c a=1 
 
 `Updater` 의 `updaterWillRelaunchApplication(_:)` 에서 부른다.
 
-1. `SessionAutosaver.freeze()` — 대기 중인 저장을 취소하고, 이후 `requestSave()` 와
-   `flushSync()` 를 모두 무시한다. 종료 중에 창이 닫히면서 생기는 저장이나
-   `applicationWillTerminate` 의 flush 가 resume 기록을 덮어쓰지 않게 한다.
-2. 모든 창에 대해 `sessionWindowRecord(includeAgentResume: true)` 로 `SessionRecord` 를
+1. 모든 창에 대해 `sessionWindowRecord(includeAgentResume: true)` 로 `SessionRecord` 를
    만든다. pane 마다 §5.2 수집을 실행한다.
-3. main thread 에서 **동기로** `session.json` 을 쓴다. `SessionPersistence` 의 쓰기 본문
-   (encode → temp 파일 → rename)을 nonisolated 동기 함수로 분리해서 기존 비동기 `save`
-   와 공유한다. 종료 경로의 비동기 flush 에 기대지 않는다.
+2. `SessionPersistence.sealWithFinalRecord(_:)` 로 main thread 에서 **동기로**
+   `session.json` 을 쓰고 파일을 봉인한다. 봉인 뒤의 `save(_:)` 는 아무것도 쓰지 않는다.
+   - 쓰기 본문(encode → temp 파일 → rename)을 lock 으로 감싼 nonisolated 함수 하나로
+     모으고, 기존 비동기 `save` 와 봉인 쓰기가 둘 다 이 함수를 지난다.
+   - 그래서 종료 중에 창이 닫히면서 생기는 autosave, `applicationWillTerminate` 의 flush,
+     이미 다른 스레드에서 진행 중이던 autosave 가 resume 기록을 덮어쓰지 못한다.
+     autosaver 쪽을 멈추는 것만으로는 이미 진행 중인 쓰기를 막을 수 없어서 저장소
+     단에서 막는다.
+   - 종료 경로의 비동기 flush 에 기대지 않는다.
 
 평소 autosave 는 `includeAgentResume: false` 로 저장하므로, resume 필드는 업데이트 직전
 에만 파일에 들어간다.
@@ -181,10 +184,12 @@ codex 의 값 하나짜리 플래그는 여러 번 반복될 수 있고(`-c a=1 
 
 `AgentResumeCommand.make(_:) -> String`(순수 함수):
 
-- claude: `claude --resume '<id>' <flags…>`
-- codex: `codex resume <flags…> '<id>'` — `codex resume [OPTIONS] [SESSION_ID] [PROMPT]`
+- claude: `claude --resume <id> <flags…>`
+- codex: `codex resume <flags…> <id>` — `codex resume [OPTIONS] [SESSION_ID] [PROMPT]`
   형식이므로 플래그를 id 앞에 둬서, id 뒤에 오는 인자가 prompt 로 해석될 여지를 없앤다.
-- 모든 인자는 작은따옴표로 셸 quoting 한다(값 안의 `'` 는 `'\''`).
+- 인자에 안전한 문자(`A-Z a-z 0-9 _ . / : = @ % + , -`)만 있으면 그대로 두고, 그 밖의
+  문자가 있거나 빈 문자열이면 작은따옴표로 감싼다(값 안의 `'` 는 `'\''`). 명령이 화면에
+  그대로 보이고 사용자가 고쳐 쓸 수도 있으므로, 플래그 이름까지 따옴표로 감싸지 않는다.
 - 실행 파일은 이름(`claude`, `codex`)으로 부르고 PATH 에 맡긴다.
 
 `Pane` 의 입력 타이밍:
@@ -212,6 +217,7 @@ Mission Control 에는 새 pane id 로 평소처럼 잡힌다.
 | 이벤트 | turnOpen |
 |---|---|
 | `UserPromptSubmit` | true |
+| `PreToolUse`, `PostToolUse`, `PostToolUseFailure` | true |
 | `Stop`, `StopFailure` | false |
 | `SessionEnd`, `PtyExit` | false |
 | session id 변경으로 인한 reset | false |
@@ -230,6 +236,9 @@ extension PaneSnapshot {
 ```
 
 - 권한 요청, AskUserQuestion, MCP 입력 대기는 turn 도중이므로 자연히 작업 중이다.
+- tool 이벤트도 turn 을 연다. tool 은 turn 안에서만 실행되므로, `Stop` 뒤에 tool 이벤트가
+  오면 agent 가 다시 일하고 있다는 뜻이다. 예: Stop hook 이 막아서 Claude 가 `Stop` 뒤에
+  작업을 이어가는 경우, termy 가 turn 도중에 켜져서 `UserPromptSubmit` 을 못 본 경우.
 - `.promotedFromPossible`(Codex 가 조용해서 WAIT 로 올린 상태)은 termy 가 이미 "입력
   대기"로 판단한 상태이므로 끝난 것으로 본다. 그렇지 않으면 Codex 가 `Stop` 을 빠뜨릴 때
   업데이트가 끝없이 미뤄진다.
@@ -288,7 +297,7 @@ DEBUG 빌드에만 "Debug ▸ Simulate Update Relaunch" 를 둔다. Sparkle 을 
                                                 ▼
                                        installHandler()
   └ Sparkle → updaterWillRelaunchApplication
-       └ prepareForUpdateRelaunch: freeze → 수집 → session.json 동기 저장
+       └ prepareForUpdateRelaunch: 수집 → session.json 동기 저장 + 봉인
   └ 종료 → 설치 → 새 버전 실행
        └ restoreSessionWindows → pane 마다 startupInput 입력
             → claude --resume … / codex resume …
@@ -319,6 +328,7 @@ DEBUG 빌드에만 "Debug ▸ Simulate Update Relaunch" 를 둔다. Sparkle 을 
   값 여러 개(`--add-dir a b`)가 다음 `-` 에서 멈춤, prompt / `--print` / `--resume` /
   `--continue` 제거, `-p` 의 agent 별 처리.
 - `AgentResumeCommandTests`(신규): 공백·작은따옴표가 든 값의 quoting.
+- `SessionPersistenceTests`: 봉인 뒤의 `save` 가 파일을 덮어쓰지 않음.
 - `AgentResumeCaptureTests`(신규): §5.2 조건 조합.
 - `PaneStateMachineTests`: `turnOpen` 전환 표 전체, "Claude 권한 요청 → Stop" 에서 false,
   `isMidTurn` 의 `.promotedFromPossible` 예외.
@@ -362,5 +372,7 @@ DEBUG 빌드에만 "Debug ▸ Simulate Update Relaunch" 를 둔다. Sparkle 을 
    agent 의 turn 이 끝나고 2초 뒤 종료되는지 확인.
 3. termy 를 다시 실행 → agent pane 두 곳에서 같은 대화가 열리고, 원래 플래그가 붙었는지
    (`ps -o args`) 확인. 빈 셸 pane 은 그대로인지 확인.
-4. 다음 실제 릴리스 설치 때 agent 하나를 작업 중으로 두고 Sparkle 경로 전체와 postpone
-   동안의 Sparkle 기본 UI 를 확인한다.
+4. Sparkle 경로 전체와 postpone 동안의 Sparkle 기본 UI 는 **이 기능이 들어간 버전에서 그
+   다음 버전으로** 업데이트할 때 확인한다. resume 기록과 재시작 미루기는 종료되는 쪽(이전
+   버전)의 코드가 하므로, 이 기능을 처음 담은 버전으로 올리는 업데이트에서는 아직 동작하지
+   않는다. 릴리스 노트에도 이 점을 적는다.
