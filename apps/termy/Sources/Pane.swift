@@ -218,14 +218,39 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
 
     // MARK: - Shell
 
-    private func startShell() {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        var env: [String: String] = ProcessInfo.processInfo.environment
+    /// Variables that describe the *launching* agent session (termy started
+    /// from inside Claude Code / Codex), not the user's configuration. Left in
+    /// place, a `claude` started in a pane runs as a child session and writes
+    /// no transcript, so `--resume` fails. A blanket `CLAUDE_CODE_*` strip
+    /// would also drop settings users set on purpose (e.g. `CLAUDE_CODE_NO_FLICKER`).
+    static let agentSessionMarkerEnvKeys: [String] = [
+        "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_SESSION_ATTENDED",
+        "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_EXECPATH", "CLAUDE_PID",
+        "CLAUDE_EFFORT", "CLAUDE_PLUGIN_DATA", "AI_AGENT",
+        "CODEX_COMPANION_SESSION_ID", "CODEX_SANDBOX",
+        "CODEX_SANDBOX_NETWORK_DISABLED",
+    ]
+
+    /// Environment handed to a pane's login shell.
+    static func shellEnvironment(
+        base: [String: String], paneId: String, projectId: String
+    ) -> [String: String] {
+        var env = base
+        for key in agentSessionMarkerEnvKeys { env.removeValue(forKey: key) }
         env["TERMY_PANE_ID"] = paneId
         env["TERMY_PROJECT_ID"] = projectId
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         env["LC_ALL"] = env["LC_ALL"] ?? "en_US.UTF-8"
+        return env
+    }
+
+    private func startShell() {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let env = Pane.shellEnvironment(
+            base: ProcessInfo.processInfo.environment,
+            paneId: paneId, projectId: projectId)
 
         FileManager.default.changeCurrentDirectoryPath(initialCwd)
         let envArray = env.map { "\($0.key)=\($0.value)" }
