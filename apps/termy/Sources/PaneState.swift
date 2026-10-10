@@ -156,8 +156,13 @@ enum PaneStateMachine {
         // Synthetic events (agent="termy") return nil here and leave the
         // pane's existing kind untouched. A user switching from `claude`
         // to `codex` in the same pane will flip kind on the first event
-        // from the new agent.
+        // from the new agent. The old agent's session id goes with it — a
+        // synthetic SessionStart carries no id, and an update relaunch must
+        // not resume the new agent with the previous one's id.
         if let kind = event.agentKind {
+            if kind != previous.agentKind {
+                next.lastSessionId = nil
+            }
             next.agentKind = kind
         }
 

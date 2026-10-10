@@ -523,4 +523,39 @@ final class PaneStateMachineTests: XCTestCase {
         let decoded = try JSONDecoder().decode(PaneSnapshot.self, from: JSONEncoder().encode(s))
         XCTAssertTrue(decoded.turnOpen)
     }
+
+    // MARK: - Agent switch
+
+    private func claudeSession(_ id: String) -> PaneSnapshot {
+        var s = empty()
+        s.state = .idle
+        s.lastSessionId = id
+        return s
+    }
+
+    func test_agentKindChange_clearsLastSessionId() {
+        // claude exited, codex started with hooks off: only the
+        // ForegroundProcessWatcher's synthetic SessionStart (no id) arrives.
+        let after = PaneStateMachine.apply(codexEvent(.sessionStart, session: nil), to: claudeSession("claude-1"))
+        XCTAssertEqual(after.agentKind, .codex)
+        XCTAssertNil(after.lastSessionId)
+    }
+
+    func test_sameAgentKind_keepsLastSessionId() {
+        let after = PaneStateMachine.apply(makeEvent(.sessionStart, session: nil), to: claudeSession("claude-1"))
+        XCTAssertEqual(after.agentKind, .claude)
+        XCTAssertEqual(after.lastSessionId, "claude-1")
+    }
+
+    func test_agentSwitch_thenCodexEventWithOwnId_endsWithNewId() {
+        let switched = PaneStateMachine.apply(codexEvent(.sessionStart, session: nil), to: claudeSession("claude-1"))
+        let after = PaneStateMachine.apply(codexEvent(.userPromptSubmit, session: "codex-1"), to: switched)
+        XCTAssertEqual(after.lastSessionId, "codex-1")
+    }
+
+    func test_agentSwitch_eventCarryingNewId_endsWithNewId() {
+        let after = PaneStateMachine.apply(codexEvent(.sessionStart, session: "codex-1"), to: claudeSession("claude-1"))
+        XCTAssertEqual(after.agentKind, .codex)
+        XCTAssertEqual(after.lastSessionId, "codex-1")
+    }
 }
