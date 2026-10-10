@@ -60,6 +60,23 @@ final class AgentResumeCaptureTests: XCTestCase {
         )
     }
 
+    // The command is typed as keystrokes, so a control character would act
+    // as a line-editor key (^U, ^C, ESC …) instead of text.
+    func test_sessionIdWithUnsafeCharacters_isNil() {
+        XCTAssertNil(capture(snapshot: snapshot(sessionId: "sess 1")))
+        XCTAssertNil(capture(snapshot: snapshot(sessionId: "sess\u{15}1")))
+    }
+
+    func test_flagWithControlCharacter_dropsAllFlags() {
+        XCTAssertEqual(
+            capture(
+                argv: ["claude", "--dangerously-skip-permissions", "--model", "op\u{1b}us"],
+                snapshot: snapshot()
+            ),
+            AgentResumeRecord(kind: .claude, sessionId: "sess-1", cwd: "/proj", flags: [])
+        )
+    }
+
     // MARK: - restorePlan
 
     private let resumeRecord = AgentResumeRecord(kind: .claude, sessionId: "sess-1", cwd: "/agent", flags: [])

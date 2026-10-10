@@ -6,6 +6,7 @@
 // instance exists.
 
 import AppKit
+import os
 
 @MainActor
 final class WindowManager {
@@ -51,8 +52,16 @@ final class WindowManager {
     func prepareForUpdateRelaunch() {
         guard let sessionPersistence else { return }
         let records = controllers.compactMap { $0.sessionWindowRecord(includeAgentResume: true) }
-        try? sessionPersistence.sealWithFinalRecord(SessionRecord(windows: records))
+        do {
+            try sessionPersistence.sealWithFinalRecord(SessionRecord(windows: records))
+        } catch {
+            // The relaunch goes ahead regardless; the log says why nothing
+            // resumed afterwards.
+            Self.updateLog.error("update relaunch session seal failed: \(String(describing: error), privacy: .public)")
+        }
     }
+
+    private static let updateLog = Logger(subsystem: "app.termy", category: "update")
 
     // MARK: - Window creation
 

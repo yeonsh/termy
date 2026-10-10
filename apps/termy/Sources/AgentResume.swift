@@ -59,6 +59,10 @@ enum AgentResumeCommand {
 enum AgentResumeCapture {
     /// A record only when an agent owns the PTY foreground right now and
     /// termy's hook snapshot has a session id for that same agent.
+    /// The resume command is typed into the shell as keystrokes, where a
+    /// control character would act as an editing key (^U, ^C, ESC) rather
+    /// than text: an id outside `[A-Za-z0-9._-]` gives no record, and a
+    /// control character in any carried flag drops every flag.
     static func record(
         foregroundAgent: AgentKind?,
         argv: [String]?,
@@ -70,14 +74,28 @@ enum AgentResumeCapture {
               snapshot.agentKind == kind,
               snapshot.state != .initializing,
               let sessionId = snapshot.lastSessionId,
-              !sessionId.isEmpty
+              !sessionId.isEmpty,
+              sessionId.unicodeScalars.allSatisfy(sessionIdCharacters.contains)
         else { return nil }
+        var flags = AgentResumeFlags.extract(kind: kind, argv: argv ?? [])
+        if flags.contains(where: containsControlCharacter) {
+            flags = []
+        }
         return AgentResumeRecord(
             kind: kind,
             sessionId: sessionId,
             cwd: processCwd,
-            flags: AgentResumeFlags.extract(kind: kind, argv: argv ?? [])
+            flags: flags
         )
+    }
+
+    private static let sessionIdCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+    )
+
+    /// C0 controls (U+0000–U+001F) and DEL (U+007F).
+    private static func containsControlCharacter(_ word: String) -> Bool {
+        word.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F }
     }
 
     /// Restore-time decision for one saved pane: where its shell starts and
