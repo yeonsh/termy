@@ -130,10 +130,20 @@ static func extract(kind: AgentKind, argv: [String]) -> [String]
 | agent | 값 없는 플래그 | 값 하나 | 값 여러 개 |
 |---|---|---|---|
 | claude | `--dangerously-skip-permissions` | `--model`, `--permission-mode` | `--allowedTools` / `--allowed-tools`, `--disallowedTools` / `--disallowed-tools`, `--add-dir` |
-| codex | `--full-auto`, `--dangerously-bypass-approvals-and-sandbox` | `-m` / `--model`, `-s` / `--sandbox`, `-a` / `--ask-for-approval`, `-p` / `--profile`, `-c` / `--config`, `--add-dir` | — |
+| codex | `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox` | `-m` / `--model`, `-s` / `--sandbox`, `-a` / `--ask-for-approval`, `-p` / `--profile`, `-c` / `--config`, `--add-dir` | — |
 
 codex 의 값 하나짜리 플래그는 여러 번 반복될 수 있고(`-c a=1 -c b=2`), 나온 순서대로
-모두 유지한다.
+모두 유지한다. codex 목록은 `codex resume --help`(codex-cli 0.160.1)가 받는 옵션과
+대조했다. `--full-auto` 는 0.160.1 에 없어서 넣지 않았다.
+
+**CLI 버전 변화와 유지보수.** 플래그는 실행 중인 프로세스의 argv 에서 복사하므로, 그 CLI
+버전이 받아들인 플래그만 들어온다. 그래서 CLI 가 플래그를 없애도 허용 목록의 해당 항목은
+쓰이지 않게 될 뿐이고, 새 플래그가 생기면 이어받지 않을 뿐이다. termy 를 고쳐야 하는
+경우는 resume 명령 형태(`claude --resume`, `codex resume`)가 바뀌거나, 새 플래그를
+이어받고 싶을 때뿐이다. 깨지는 경우는 하나다: 세션 도중 CLI 가 자동 업데이트되고 새
+버전에서 그 플래그가 없어지면 resume 이 "unknown option" 으로 실패하고 셸로 돌아온다.
+입력된 명령이 화면에 남으므로 사용자가 플래그를 지우고 다시 실행할 수 있다. 자동 재시도는
+하지 않는다(사용자 결정, 2026-10-10).
 
 - `--flag=value` 형태를 받는다. 값 여러 개를 받는 플래그는 다음 `-` 로 시작하는 인자
   직전까지를 값으로 본다.
@@ -172,7 +182,8 @@ codex 의 값 하나짜리 플래그는 여러 번 반복될 수 있고(`-c a=1 
 `AgentResumeCommand.make(_:) -> String`(순수 함수):
 
 - claude: `claude --resume '<id>' <flags…>`
-- codex: `codex resume '<id>' <flags…>`
+- codex: `codex resume <flags…> '<id>'` — `codex resume [OPTIONS] [SESSION_ID] [PROMPT]`
+  형식이므로 플래그를 id 앞에 둬서, id 뒤에 오는 인자가 prompt 로 해석될 여지를 없앤다.
 - 모든 인자는 작은따옴표로 셸 quoting 한다(값 안의 `'` 는 `'\''`).
 - 실행 파일은 이름(`claude`, `codex`)으로 부르고 PATH 에 맡긴다.
 
@@ -328,6 +339,18 @@ DEBUG 빌드에만 "Debug ▸ Simulate Update Relaunch" 를 둔다. Sparkle 을 
 
 확인 결과가 설계와 다르면(예: 어떤 플래그를 resume 이 받지 않음) 허용 목록을 고치고 이
 문서에 반영한다.
+
+확인 결과(2026-10-10, Claude Code 2.1.296 / codex-cli 0.160.1):
+
+1. 통과. `claude --resume <id> --model haiku --permission-mode default --allowedTools Read
+   Grep --add-dir /tmp -p …` 가 이전 대화를 이어받았다. 값 여러 개짜리 `--allowedTools` 는
+   다음 `--add-dir` 에서 멈췄다. 다른 디렉터리에서도 같은 id 로 resume 됐다. 그래도 tool 이
+   일하는 디렉터리를 맞추기 위해 agent cwd 에서 resume 한다.
+2. 통과. Bash tool 이 `cd /usr` 한 동안에도 claude 프로세스(`proc_name` = `claude`, native
+   binary)의 cwd 는 실행 디렉터리였다. `cd` 는 자식 `zsh` 의 cwd 만 바꾼다.
+3. `codex resume [OPTIONS] [SESSION_ID] [PROMPT]`. `-m`, `-s`, `-a`, `-p`, `-c`,
+   `--add-dir`, `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox` 를 받는다.
+   `--full-auto` 는 없다 → §5.3 반영. hook `session_id` 호환성은 실사용 검증으로 남긴다.
 
 ## 10. 실제 동작 검증
 
