@@ -254,11 +254,21 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     }
 
     /// Snapshot this window's restorable state. Returns nil for a paneless
-    /// window (nothing worth restoring).
-    func sessionWindowRecord() -> WindowRecord? {
+    /// window (nothing worth restoring). `includeAgentResume` adds each
+    /// pane's live agent session — only the update-relaunch save asks.
+    func sessionWindowRecord(includeAgentResume: Bool = false) -> WindowRecord? {
         guard let window, !workspace.panes.isEmpty else { return nil }
         let rows: [[PaneRecord]] = workspace.rows.map { row in
-            row.map { PaneRecord(cwd: $0.currentCwd) }
+            row.map { pane in
+                PaneRecord(
+                    cwd: pane.currentCwd,
+                    agentResume: includeAgentResume
+                        ? pane.agentResumeRecord(
+                            snapshot: missionControlModel.snapshot(paneId: pane.paneId)
+                        )
+                        : nil
+                )
+            }
         }
         if rows.flatMap({ $0 }).isEmpty { return nil }
         let filterProjectId: String?

@@ -53,3 +53,30 @@ enum AgentResumeCommand {
         return "'" + word.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
     }
 }
+
+/// Decides whether a pane gets an `AgentResumeRecord`. Pure — `Pane`
+/// reads the live process info and passes it in.
+enum AgentResumeCapture {
+    /// A record only when an agent owns the PTY foreground right now and
+    /// termy's hook snapshot has a session id for that same agent.
+    static func record(
+        foregroundAgent: AgentKind?,
+        argv: [String]?,
+        processCwd: String?,
+        snapshot: PaneSnapshot?
+    ) -> AgentResumeRecord? {
+        guard let kind = foregroundAgent,
+              let snapshot,
+              snapshot.agentKind == kind,
+              snapshot.state != .initializing,
+              let sessionId = snapshot.lastSessionId,
+              !sessionId.isEmpty
+        else { return nil }
+        return AgentResumeRecord(
+            kind: kind,
+            sessionId: sessionId,
+            cwd: processCwd,
+            flags: AgentResumeFlags.extract(kind: kind, argv: argv ?? [])
+        )
+    }
+}

@@ -39,6 +39,16 @@ final class WindowManager {
         return true
     }
 
+    /// Final session save before a Sparkle update relaunch: snapshot every
+    /// window with each pane's live agent session and seal session.json so
+    /// nothing written during shutdown replaces it. The next launch reopens
+    /// those conversations (`MainWindowController.applySessionLayout`).
+    func prepareForUpdateRelaunch() {
+        guard let sessionPersistence else { return }
+        let records = controllers.compactMap { $0.sessionWindowRecord(includeAgentResume: true) }
+        try? sessionPersistence.sealWithFinalRecord(SessionRecord(windows: records))
+    }
+
     // MARK: - Window creation
 
     /// Open a fresh window with a single HOME pane, cascaded off the

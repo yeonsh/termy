@@ -9,6 +9,7 @@
 // state. Mirrors `WorkspacePersistence`'s discipline for a single file.
 
 import Foundation
+import os
 
 enum SessionPersistenceError: Error {
     case directoryCreateFailed(Error)
@@ -26,6 +27,11 @@ enum SessionLoadOutcome {
 actor SessionPersistence {
     nonisolated let fileURL: URL
     nonisolated let quarantineDir: URL
+
+    /// Serializes every write and holds the sealed flag, so the final
+    /// update-relaunch write can't be overtaken by an autosave already in
+    /// flight on the actor.
+    private nonisolated let writeLock = OSAllocatedUnfairLock(initialState: false)
 
     static var defaultRootDir: URL {
         let appSupport = FileManager.default
@@ -57,7 +63,28 @@ actor SessionPersistence {
     }
 
     /// Atomic write: encode → temp → `rename(2)`. Final file is `0600`.
+    /// Dropped once `sealWithFinalRecord` has run.
     func save(_ record: SessionRecord) throws {
+        try write(record, seal: false)
+    }
+
+    /// Final write before a Sparkle update relaunch. Synchronous on the
+    /// caller's thread — the terminate path's async flush can't be relied on
+    /// — and every later `save` is dropped, so window closes and the
+    /// shutdown flush can't replace the agent-resume records.
+    nonisolated func sealWithFinalRecord(_ record: SessionRecord) throws {
+        try write(record, seal: true)
+    }
+
+    private nonisolated func write(_ record: SessionRecord, seal: Bool) throws {
+        try writeLock.withLockUnchecked { sealed in
+            guard !sealed else { return }
+            try writeFile(record)
+            if seal { sealed = true }
+        }
+    }
+
+    private nonisolated func writeFile(_ record: SessionRecord) throws {
         let data: Data
         do {
             let encoder = JSONEncoder()

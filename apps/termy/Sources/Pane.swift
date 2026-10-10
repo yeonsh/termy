@@ -245,6 +245,31 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         }
     }
 
+    /// Live agent session in this pane for the update-relaunch save. nil
+    /// when no agent owns the PTY foreground or termy has no session id for
+    /// it (see `AgentResumeCapture`).
+    func agentResumeRecord(snapshot: PaneSnapshot?) -> AgentResumeRecord? {
+        let masterFd = terminal.process.childfd
+        let shellPid = terminal.process.shellPid
+        guard masterFd >= 0, shellPid > 0,
+              let pid = ForegroundProcessWatcher.foregroundProcessGroupLeader(
+                  masterFd: masterFd,
+                  shellPid: shellPid
+              ),
+              let name = ForegroundProcessWatcher.processName(pid: pid)
+        else { return nil }
+        let argv = ForegroundProcessWatcher.processArguments(pid: pid)
+        return AgentResumeCapture.record(
+            foregroundAgent: ForegroundProcessWatcher.classifyAgent(
+                processName: name,
+                arguments: argv ?? []
+            ),
+            argv: argv,
+            processCwd: ForegroundProcessWatcher.processCwd(pid: pid),
+            snapshot: snapshot
+        )
+    }
+
     func focusTerminal() {
         window?.makeFirstResponder(terminal)
     }

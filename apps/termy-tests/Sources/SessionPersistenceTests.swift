@@ -47,4 +47,27 @@ final class SessionPersistenceTests: XCTestCase {
             return XCTFail("expected .missing after quarantine")
         }
     }
+
+    // Review Focus 4
+    func test_seal_writesRecordAndDropsLaterSaves() async throws {
+        let root = tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let persistence = try SessionPersistence(rootDir: root)
+        let final = SessionRecord(windows: [
+            WindowRecord(
+                frame: FrameRecord(x: 0, y: 0, width: 100, height: 100),
+                rows: [[PaneRecord(
+                    cwd: "/x",
+                    agentResume: AgentResumeRecord(kind: .claude, sessionId: "s1", cwd: "/x", flags: [])
+                )]]
+            )
+        ])
+        try persistence.sealWithFinalRecord(final)
+        // An autosave arriving after the seal (e.g. already in flight) must not win.
+        try await persistence.save(SessionRecord(windows: []))
+        guard case .loaded(let loaded) = await persistence.load() else {
+            return XCTFail("expected .loaded")
+        }
+        XCTAssertEqual(loaded, final)
+    }
 }
