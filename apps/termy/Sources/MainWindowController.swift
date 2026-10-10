@@ -297,11 +297,15 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
                 let axis: SplitAxis = (colIdx == 0) ? .row : .column
                 // An update relaunch saved this pane's live agent session —
                 // reopen the conversation where the agent was running.
-                let resume = paneRec.agentResume
+                let plan = AgentResumeCapture.restorePlan(
+                    paneCwd: paneRec.cwd,
+                    resume: paneRec.agentResume,
+                    directoryExists: { FileManager.default.directoryExists(atPath: $0) }
+                )
                 workspace.addPane(
-                    cwd: resume?.cwd ?? paneRec.cwd,
+                    cwd: plan.cwd,
                     splitAxis: axis,
-                    startupInput: resume.map(AgentResumeCommand.make)
+                    startupInput: plan.startupInput
                 )
             }
         }

@@ -59,4 +59,49 @@ final class AgentResumeCaptureTests: XCTestCase {
             AgentResumeRecord(kind: .claude, sessionId: "sess-1", cwd: nil, flags: [])
         )
     }
+
+    // MARK: - restorePlan
+
+    private let resumeRecord = AgentResumeRecord(kind: .claude, sessionId: "sess-1", cwd: "/agent", flags: [])
+
+    private func plan(
+        paneCwd: String = "/pane",
+        resume: AgentResumeRecord?,
+        existing: Set<String>
+    ) -> (cwd: String, startupInput: String?) {
+        AgentResumeCapture.restorePlan(paneCwd: paneCwd, resume: resume, directoryExists: existing.contains)
+    }
+
+    func test_restorePlan_agentCwdExists_startsThereWithCommand() {
+        let p = plan(resume: resumeRecord, existing: ["/agent", "/pane"])
+        XCTAssertEqual(p.cwd, "/agent")
+        XCTAssertEqual(p.startupInput, "claude --resume sess-1")
+    }
+
+    func test_restorePlan_agentCwdMissing_fallsBackToPaneCwdWithCommand() {
+        let p = plan(resume: resumeRecord, existing: ["/pane"])
+        XCTAssertEqual(p.cwd, "/pane")
+        XCTAssertEqual(p.startupInput, "claude --resume sess-1")
+    }
+
+    func test_restorePlan_agentCwdNil_usesPaneCwdWithCommand() {
+        var resume = resumeRecord
+        resume.cwd = nil
+        let p = plan(resume: resume, existing: ["/pane"])
+        XCTAssertEqual(p.cwd, "/pane")
+        XCTAssertEqual(p.startupInput, "claude --resume sess-1")
+    }
+
+    func test_restorePlan_bothMissing_noResume() {
+        // Never resume an agent in the `$HOME` fallback.
+        let p = plan(resume: resumeRecord, existing: [])
+        XCTAssertEqual(p.cwd, "/pane")
+        XCTAssertNil(p.startupInput)
+    }
+
+    func test_restorePlan_noRecord_paneCwdOnly() {
+        let p = plan(resume: nil, existing: ["/pane"])
+        XCTAssertEqual(p.cwd, "/pane")
+        XCTAssertNil(p.startupInput)
+    }
 }

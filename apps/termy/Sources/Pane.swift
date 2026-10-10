@@ -163,8 +163,13 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         applyActiveAppearance(isShowingActiveAppearance)
     }
 
+    /// A requested directory that no longer exists falls back to `$HOME`,
+    /// not the app's cwd: `startShell` changes the process-wide cwd, so
+    /// that would be whatever directory the previous pane started in.
     private static func resolveCwd(_ requested: String?) -> String {
-        if let r = requested, !r.isEmpty, r != "/" { return r }
+        if let r = requested, !r.isEmpty, r != "/" {
+            return FileManager.default.directoryExists(atPath: r) ? r : NSHomeDirectory()
+        }
         let appCwd = FileManager.default.currentDirectoryPath
         if !appCwd.isEmpty, appCwd != "/" { return appCwd }
         return NSHomeDirectory()
@@ -518,5 +523,13 @@ private extension NSColor {
             green: UInt16(green * 65535.0),
             blue: UInt16(blue * 65535.0)
         )
+    }
+}
+
+extension FileManager {
+    /// True only for an existing directory (a file at `path` doesn't count).
+    func directoryExists(atPath path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        return fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 }

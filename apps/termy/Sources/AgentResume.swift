@@ -79,4 +79,24 @@ enum AgentResumeCapture {
             flags: AgentResumeFlags.extract(kind: kind, argv: argv ?? [])
         )
     }
+
+    /// Restore-time decision for one saved pane: where its shell starts and
+    /// which resume command to type. The agent's cwd, else the pane's; when
+    /// neither exists any more the shell lands in `$HOME`
+    /// (`Pane.resolveCwd`) and the agent is not resumed — a resume there
+    /// would run in an unrelated directory.
+    static func restorePlan(
+        paneCwd: String,
+        resume: AgentResumeRecord?,
+        directoryExists: (String) -> Bool
+    ) -> (cwd: String, startupInput: String?) {
+        guard let resume else { return (paneCwd, nil) }
+        if let agentCwd = resume.cwd, directoryExists(agentCwd) {
+            return (agentCwd, AgentResumeCommand.make(resume))
+        }
+        if directoryExists(paneCwd) {
+            return (paneCwd, AgentResumeCommand.make(resume))
+        }
+        return (paneCwd, nil)
+    }
 }
