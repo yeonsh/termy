@@ -69,4 +69,9 @@ struct PaneRecord: Codable, Equatable {
     /// Last-known cwd of the pane. Stored as an absolute path; restore falls
     /// back to `$HOME` if the folder no longer exists at restore time.
     var cwd: String
+    /// Agent session to resume in this pane. Written only by the
+    /// update-relaunch save (`WindowManager.prepareForUpdateRelaunch`); nil
+    /// in every other session save and in ⌘K workspace records, so the key
+    /// is absent from those files.
+    var agentResume: AgentResumeRecord? = nil
 }

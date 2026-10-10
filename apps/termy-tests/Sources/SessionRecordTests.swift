@@ -28,4 +28,30 @@ final class SessionRecordTests: XCTestCase {
         let rect = CGRect(x: 1, y: 2, width: 3, height: 4)
         XCTAssertEqual(FrameRecord(rect).cgRect, rect)
     }
+
+    func test_paneRecord_withAgentResume_roundTrips() throws {
+        let pane = PaneRecord(
+            cwd: "/a",
+            agentResume: AgentResumeRecord(
+                kind: .codex,
+                sessionId: "019a-session",
+                cwd: "/a/sub",
+                flags: ["-m", "gpt-5"]
+            )
+        )
+        let data = try JSONEncoder().encode(pane)
+        XCTAssertEqual(try JSONDecoder().decode(PaneRecord.self, from: data), pane)
+    }
+
+    func test_paneRecord_decodesLegacyJSONWithoutAgentResume() throws {
+        let legacy = #"{"cwd": "/legacy"}"#
+        let pane = try JSONDecoder().decode(PaneRecord.self, from: Data(legacy.utf8))
+        XCTAssertEqual(pane.cwd, "/legacy")
+        XCTAssertNil(pane.agentResume)
+    }
+
+    func test_paneRecord_withoutAgentResume_omitsKey() throws {
+        let data = try JSONEncoder().encode(PaneRecord(cwd: "/a"))
+        XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("agentResume"))
+    }
 }
