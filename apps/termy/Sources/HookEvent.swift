@@ -60,6 +60,9 @@ struct HookEvent: Codable {
         var cwd: String?
         var source: String?                  // SessionStart: "startup" | "resume" | "compact"
         var reason: String?                  // SessionEnd: "clear" | "exit" | ...; Notification: "permission" | "idle" | "mcp_elicit"
+        /// Claude Code's Notification payload carries `notification_type`
+        /// (permission_prompt, idle_prompt, ...) and no `reason`.
+        var notificationType: String?        // Notification
         var prompt: String?                  // UserPromptSubmit, truncated
         var lastAssistantMessage: String?    // Stop, truncated
         /// CC actually sends this as a numeric string ("0"/"1") despite the
@@ -71,11 +74,27 @@ struct HookEvent: Codable {
         var toolInput: String?               // Pre/PostToolUse, truncated
         var exitCode: Int32?                 // PtyExit
 
+        /// Normalized Notification reason: an explicit `reason` (legacy
+        /// payloads) wins, else `notification_type` mapped onto the
+        /// "permission" | "idle" | "mcp_elicit" vocabulary the state machine
+        /// and Notifier use. Unknown types pass through as the raw string.
+        var notificationReason: String? {
+            if let reason { return reason }
+            guard let type = notificationType else { return nil }
+            switch type {
+            case "permission_prompt": return "permission"
+            case "idle_prompt": return "idle"
+            case "elicitation_dialog", "elicitation_url_dialog": return "mcp_elicit"
+            default: return type
+            }
+        }
+
         enum CodingKeys: String, CodingKey {
             case sessionId = "session_id"
             case cwd
             case source
             case reason
+            case notificationType = "notification_type"
             case prompt
             case lastAssistantMessage = "last_assistant_message"
             case stopHookActive = "stop_hook_active"

@@ -47,6 +47,31 @@ final class AgentKindTests: XCTestCase {
         XCTAssertEqual(event.meta.toolName, "Bash")
     }
 
+    private func notificationMeta(_ metaJSON: String) throws -> HookEvent.Meta {
+        let json = """
+        { "event": "Notification", "pane_id": "p1", "project_id": "proj", "ts": 1.0,
+          "agent": "claude-code", "meta": \(metaJSON) }
+        """.data(using: .utf8)!
+        return try JSONDecoder().decode(HookEvent.self, from: json).meta
+    }
+
+    func test_hookEvent_notificationType_mapsToReason() throws {
+        XCTAssertEqual(try notificationMeta(#"{"notification_type":"permission_prompt"}"#).notificationReason, "permission")
+        XCTAssertEqual(try notificationMeta(#"{"notification_type":"idle_prompt"}"#).notificationReason, "idle")
+        XCTAssertEqual(try notificationMeta(#"{"notification_type":"elicitation_dialog"}"#).notificationReason, "mcp_elicit")
+        XCTAssertEqual(try notificationMeta(#"{"notification_type":"elicitation_url_dialog"}"#).notificationReason, "mcp_elicit")
+        XCTAssertEqual(try notificationMeta(#"{"notification_type":"auth_success"}"#).notificationReason, "auth_success")
+    }
+
+    func test_hookEvent_explicitReasonWinsOverNotificationType() throws {
+        let m = try notificationMeta(#"{"reason":"mcp_elicit","notification_type":"idle_prompt"}"#)
+        XCTAssertEqual(m.notificationReason, "mcp_elicit")
+    }
+
+    func test_hookEvent_notificationReason_nilWithoutEither() throws {
+        XCTAssertNil(try notificationMeta("{}").notificationReason)
+    }
+
     func test_hookEvent_agentKindFromClaudeCode() throws {
         let json = """
         {
@@ -171,7 +196,7 @@ final class AgentKindTests: XCTestCase {
         XCTAssertNil(after.notificationReason)
     }
 
-    func test_claudePostToolUse_afterPermissionNotification_preservesWaiting() {
+    func test_claudePostToolUse_afterPermissionNotification_resumesThinking() {
         var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .claude)
         s.state = .waiting
         s.needsAttention = true
@@ -185,9 +210,10 @@ final class AgentKindTests: XCTestCase {
             meta: { var m = HookEvent.Meta(); m.toolName = "Bash"; return m }()
         )
         let after = PaneStateMachine.apply(event, to: s)
-        XCTAssertEqual(after.state, .waiting)
-        XCTAssertTrue(after.needsAttention)
-        XCTAssertEqual(after.notificationReason, "permission")
+        // Claude has no resolve event; PostToolUse proves the prompt was answered.
+        XCTAssertEqual(after.state, .thinking)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertNil(after.notificationReason)
     }
 
     // MARK: - Codex fake-WAIT recovery

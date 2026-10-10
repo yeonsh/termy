@@ -260,23 +260,39 @@ enum PaneStateMachine {
             next.turnOpen = false
 
         case .notification:
-            next.needsAttention = true
-            next.notificationReason = event.meta.reason
-            // Reasons where Claude is actively paused waiting for the user
-            // (permission prompt, MCP elicitation, post-idle reminder) should
-            // flip the visible state to WAITING — "THINKING while waiting on
-            // me" is a lie, and so is "IDLE while waiting on me" (IDLE lands
-            // any time the 30s WAITING→IDLE timer fires while a notification
-            // is still outstanding). `auth_success` and unknown reasons
-            // preserve state since Claude continues on its own.
-            switch event.meta.reason {
-            case "permission", "idle", "mcp_elicit":
+            let reason = event.meta.notificationReason
+            switch reason {
+            case "idle":
+                // Claude sends idle_prompt only once the turn is over (no
+                // turn, no dialog, no background agents, ~60s after the last
+                // query). A pane still THINKING here missed its Stop (e.g.
+                // Esc interrupt), so surface WAIT — the Notifier chimes on
+                // entering it. Any other state already reflects an ended
+                // turn: leave state/attention alone (no second chime).
+                next.turnOpen = false
+                if previous.state == .thinking {
+                    next.state = .waiting
+                    next.needsAttention = true
+                    next.notificationReason = "idle"
+                    next.enteredStateAt = next.updatedAt
+                }
+            case "permission", "mcp_elicit":
+                // Claude is paused on the user (permission prompt, MCP
+                // elicitation): "THINKING while waiting on me" is a lie, and
+                // so is "IDLE while waiting on me" (the 30s WAITING→IDLE timer
+                // can fire while a notification is outstanding), so flip to
+                // WAITING. The turn is still open.
+                next.needsAttention = true
+                next.notificationReason = reason
                 if previous.state == .thinking || previous.state == .idle {
                     next.state = .waiting
                     next.enteredStateAt = next.updatedAt
                 }
             default:
-                break
+                // `auth_success` and unknown reasons preserve state since
+                // Claude continues on its own.
+                next.needsAttention = true
+                next.notificationReason = reason
             }
 
         case .permissionRequest:
@@ -341,6 +357,17 @@ enum PaneStateMachine {
                 next.needsAttention = false
                 next.notificationReason = nil
                 next.waitSource = nil
+                next.enteredStateAt = next.updatedAt
+            } else if (event.agentKind ?? previous.agentKind) == .claude,
+                      previous.state == .waiting,
+                      previous.notificationReason == "permission"
+                        || previous.notificationReason == "mcp_elicit" {
+                // Claude has no PermissionRequest-style resolve event; a
+                // PostToolUse proves the dialog was answered. PreToolUse does
+                // not (a parallel tool's can arrive while it is still up).
+                next.state = .thinking
+                next.needsAttention = false
+                next.notificationReason = nil
                 next.enteredStateAt = next.updatedAt
             } else if (event.agentKind ?? previous.agentKind) == .codex,
                       previous.state == .possiblyWaiting {

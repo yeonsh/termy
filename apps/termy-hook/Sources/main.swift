@@ -29,7 +29,7 @@ let writeDeadline: TimeInterval = 0.1
 /// small — raw SessionStart with an active plugin can be >150KB.
 /// Keys match HookEvent.Meta in the host app.
 let forwardedKeys: Set<String> = [
-    "session_id", "cwd", "source", "reason",
+    "session_id", "cwd", "source", "reason", "notification_type",
     "prompt", "last_assistant_message", "stop_hook_active",
     "tool_name", "tool_use_id", "tool_input",
     "exit_code"
