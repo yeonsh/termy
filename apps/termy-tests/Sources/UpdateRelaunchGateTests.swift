@@ -144,6 +144,37 @@ final class UpdateRelaunchGateTests: XCTestCase {
         XCTAssertEqual(h.pendingChanges.value, 2)
     }
 
+    func test_choiceForResponse_onlySecondButtonRestarts() {
+        XCTAssertEqual(UpdateRelaunchGate.choice(for: .alertFirstButtonReturn), .waitForAgents)
+        XCTAssertEqual(UpdateRelaunchGate.choice(for: .alertSecondButtonReturn), .restartNow)
+        XCTAssertEqual(UpdateRelaunchGate.choice(for: .abort), .waitForAgents)
+        XCTAssertEqual(UpdateRelaunchGate.choice(for: .stop), .waitForAgents)
+        XCTAssertEqual(UpdateRelaunchGate.choice(for: .cancel), .waitForAgents)
+    }
+
+    func test_beginWhilePending_replacesHandlerWithoutSecondPrompt() {
+        let h = Harness()
+        h.busy = 1
+        let a = Counter()
+        let b = Counter()
+        XCTAssertTrue(h.gate.begin { a.value += 1 })
+        XCTAssertTrue(h.gate.begin { b.value += 1 })
+        XCTAssertEqual(h.promptCounts, [1])
+        h.answer?(.restartNow)
+        XCTAssertEqual(a.value, 0)
+        XCTAssertEqual(b.value, 1)
+    }
+
+    func test_beginAfterRelease_promptsAgainNextCycle() {
+        let h = Harness()
+        h.busy = 1
+        h.begin()
+        h.answer?(.restartNow)
+        XCTAssertEqual(h.installs.value, 1)
+        XCTAssertTrue(h.begin())
+        XCTAssertEqual(h.promptCounts, [1, 1])
+    }
+
     func test_promptTitle_singularAndPlural() {
         XCTAssertEqual(UpdateRelaunchGate.promptTitle(busyCount: 1), "1 agent is still working")
         XCTAssertEqual(UpdateRelaunchGate.promptTitle(busyCount: 3), "3 agents are still working")

@@ -100,13 +100,23 @@ final class UpdateRelaunchGate {
         busyCount == 1 ? "1 agent is still working" : "\(busyCount) agents are still working"
     }
 
+    /// Only the explicit "Restart Now" button restarts; an aborted or
+    /// stopped modal must never kill agents.
+    static func choice(for response: NSApplication.ModalResponse) -> UpdateRelaunchChoice {
+        response == .alertSecondButtonReturn ? .restartNow : .waitForAgents
+    }
+
     /// The production prompt: an NSAlert on the next run-loop turn, so
     /// Sparkle's delegate callback returns before the modal starts.
+    /// Scheduled with `RunLoop.main.perform`, not GCD: a `runModal()` inside a
+    /// `DispatchQueue.main.async` block keeps the serial main queue busy, so
+    /// PTY drains and hook deliveries stall until the alert closes. A run-loop
+    /// callout lets the modal run loop keep draining the main queue.
     static func presentAlert(
         busyCount: Int,
         completion: @escaping @MainActor (UpdateRelaunchChoice) -> Void
     ) {
-        DispatchQueue.main.async {
+        RunLoop.main.perform {
             MainActor.assumeIsolated {
                 let alert = NSAlert()
                 alert.messageText = promptTitle(busyCount: busyCount)
@@ -114,7 +124,7 @@ final class UpdateRelaunchGate {
                 alert.addButton(withTitle: "Wait for Agents")
                 alert.addButton(withTitle: "Restart Now")
                 let response = alert.runModal()
-                completion(response == .alertFirstButtonReturn ? .waitForAgents : .restartNow)
+                completion(choice(for: response))
             }
         }
     }
