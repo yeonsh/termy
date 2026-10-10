@@ -282,13 +282,18 @@ enum PaneStateMachine {
             case "idle":
                 // Claude sends idle_prompt only once the turn is over (no
                 // turn, no dialog, no background agents, ~60s after the last
-                // query). A pane still THINKING here missed its Stop (e.g.
-                // Esc interrupt), so surface WAIT — the Notifier chimes on
-                // entering it. Any other state already reflects an ended
-                // turn: leave state/attention alone (no second chime).
-                // idle_prompt is only sent with no dialog on screen, so a
-                // WAIT still carrying permission/mcp_elicit is stale (dialog
-                // dismissed, no Stop): clear attention, keep state, no chime.
+                // query) and only if the user hasn't touched the pane since.
+                // It does NOT follow an Esc interrupt — the Esc keypress
+                // counts as interaction (verified live, Claude Code 2.1.296),
+                // so an interrupted turn stays open until the next prompt;
+                // UpdateRelaunchGate's menu escape and reminder cover that.
+                // A pane still THINKING here missed its Stop some other way,
+                // so surface WAIT — the Notifier chimes on entering it. Any
+                // other state already reflects an ended turn: leave
+                // state/attention alone (no second chime). idle_prompt is
+                // only sent with no dialog on screen, so a WAIT still carrying
+                // a blocking reason is stale: clear attention, keep state,
+                // no chime.
                 next.turnOpen = false
                 // enteredStateAt restarts: idle_prompt lands >=60s after the
                 // dismissal, and tickIdle's sleep/wake guard (since < 120)

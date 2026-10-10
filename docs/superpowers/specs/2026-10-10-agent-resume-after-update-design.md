@@ -336,8 +336,12 @@ DEBUG 빌드에만 "Debug ▸ Simulate Update Relaunch" 를 둔다. Sparkle 을 
   을 보내지 않으므로 그 pane 의 `turnOpen` 은 다음 prompt 까지 true 로 남고, [Wait for
   Agents] 를 고르면 업데이트가 계속 미뤄진다. alert 본문이 메뉴 항목(termy ▸ Restart Now to
   Install Update)을 알려 주고, 기다리는 동안 10분마다 alert 를 다시 띄워서(§5.7 7번)
-  빠져나갈 길이 보이게 한다. 근본 해결은 termy-hook 이 Claude 의 `notification_type` 을
-  넘겨서 중단을 알아채는 것이다. 후속 작업이며 이 브랜치에는 없다.
+  빠져나갈 길이 보이게 한다. 후속 작업(2026-10-10)으로 termy-hook 이 Claude 의
+  `notification_type` 을 넘기게 됐지만, Claude Code 2.1.296 은 Esc 로 중단한 turn 뒤에는
+  `idle_prompt` 를 보내지 않는다(Esc 키 입력이 사용자 활동으로 잡힌다 — 실제 앱에서 Esc 뒤
+  3분 동안 아무 입력이 없어도 오지 않음을 확인). 그래서 이 경우는 여전히 메뉴 항목과 10분
+  재알림으로 처리한다. 남은 방법은 turn 중에는 Claude 가 spinner 를 계속 그린다는 점을 이용해
+  PTY 출력이 멈춘 것을 신호로 쓰는 것인데, 별도 설계가 필요하다.
 - 같은 pane 에서 agent 가 바뀜(claude 를 끝내고 hook 이 꺼진 codex 를 실행 등) →
   `PaneStateMachine.apply` 가 `agentKind` 를 다른 종류로 바꿀 때 `lastSessionId` 를 지운다.
   `ForegroundProcessWatcher` 의 합성 SessionStart 에는 session id 가 없어서, 지우지 않으면
