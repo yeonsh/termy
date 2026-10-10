@@ -104,7 +104,7 @@ final class ForegroundProcessWatcherTests: XCTestCase {
         XCTAssertNil(
             ForegroundProcessWatcher.classifyAgent(
                 processName: "vim",
-                arguments: ["/tmp/codex"]
+                arguments: ["vim", "/tmp/codex"]
             )
         )
     }
@@ -155,6 +155,30 @@ final class ForegroundProcessWatcherTests: XCTestCase {
 
     func test_agentEntrypoint_unrelatedScript_isNil() {
         XCTAssertNil(ForegroundProcessWatcher.agentEntrypoint(in: ["node", "server.js"]))
+    }
+
+    func test_classifyAgent_versionNamedNativeClaude_usesArgv0() {
+        XCTAssertEqual(
+            ForegroundProcessWatcher.classifyAgent(processName: "2.1.296", arguments: ["claude", "--model", "opus"]),
+            .claude
+        )
+    }
+
+    func test_classifyAgent_versionNamedNativeClaude_fullPathArgv0() {
+        XCTAssertEqual(
+            ForegroundProcessWatcher.classifyAgent(processName: "2.1.296", arguments: ["/Users/u/.local/bin/claude"]),
+            .claude
+        )
+    }
+
+    func test_classifyAgent_nonRuntimeWithClaudeLikeArgument_isNil() {
+        XCTAssertNil(
+            ForegroundProcessWatcher.classifyAgent(processName: "less", arguments: ["less", "/tmp/claude-notes.md"])
+        )
+    }
+
+    func test_classifyAgent_unknownNameNoArguments_isNil() {
+        XCTAssertNil(ForegroundProcessWatcher.classifyAgent(processName: "2.1.296", arguments: []))
     }
 
     // MARK: - processCwd

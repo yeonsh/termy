@@ -82,4 +82,11 @@ final class AgentResumeFlagsTests: XCTestCase {
     func test_noAgentEntrypoint_returnsEmpty() {
         XCTAssertEqual(claude(["node", "server.js", "--model", "x"]), [])
     }
+
+    func test_claude_nativeInstallArgv0_extractsFlags() {
+        XCTAssertEqual(
+            claude(["claude", "--model", "sonnet", "--allowedTools", "Bash(sleep:*)"]),
+            ["--model", "sonnet", "--allowedTools", "Bash(sleep:*)"]
+        )
+    }
 }

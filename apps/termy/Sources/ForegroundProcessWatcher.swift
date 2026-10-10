@@ -157,14 +157,22 @@ actor ForegroundProcessWatcher {
     /// The hook stream corrects state once the user submits a prompt, but the
     /// dashboard should show the pane as soon as Codex is launched. For known
     /// JS runtimes, inspect argv for a real Codex/Claude CLI entrypoint.
+    ///
+    /// Native Claude Code installs as a symlink to a version-named file
+    /// (`~/.local/bin/claude -> .../versions/2.1.296`). `proc_name` then reports
+    /// the file's basename ("2.1.296") while argv[0] keeps the name the user
+    /// typed ("claude"), so other processes fall back to argv[0] only.
     static func classifyAgent(processName: String, arguments: [String]) -> AgentKind? {
         if let direct = classifyAgent(by: processName) {
             return direct
         }
-        guard isJavaScriptRuntime(processName) else {
-            return nil
+        if isJavaScriptRuntime(processName) {
+            return agentEntrypoint(in: arguments)?.kind
         }
-        return agentEntrypoint(in: arguments)?.kind
+        // argv[0] only: scanning other arguments would make
+        // `less /tmp/claude-notes.md` look like claude.
+        guard let argv0 = arguments.first else { return nil }
+        return classifyAgent(by: (argv0 as NSString).lastPathComponent)
     }
 
     /// Map a process basename / executable name to a known agent.
