@@ -36,6 +36,11 @@ final class WindowManager {
         for windowRecord in record.windows {
             restoreWindow(from: windowRecord)
         }
+        // Rewrite session.json now. Restored windows replay their panes
+        // before `windowManager` is wired, so no save has fired yet — and an
+        // update relaunch's agent-resume records must not resume again on a
+        // later launch.
+        sessionAutosaver?.requestSave()
         return true
     }
 

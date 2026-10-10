@@ -295,7 +295,14 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         for savedRow in record.rows {
             for (colIdx, paneRec) in savedRow.enumerated() {
                 let axis: SplitAxis = (colIdx == 0) ? .row : .column
-                workspace.addPane(cwd: paneRec.cwd, splitAxis: axis)
+                // An update relaunch saved this pane's live agent session —
+                // reopen the conversation where the agent was running.
+                let resume = paneRec.agentResume
+                workspace.addPane(
+                    cwd: resume?.cwd ?? paneRec.cwd,
+                    splitAxis: axis,
+                    startupInput: resume.map(AgentResumeCommand.make)
+                )
             }
         }
         // Defensive: an empty saved record would leave a paneless window.

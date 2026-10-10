@@ -451,7 +451,8 @@ final class Workspace: NSView, NSSplitViewDelegate {
     @discardableResult
     func addPane(
         cwd: String? = nil,
-        splitAxis: SplitAxis = .balanced
+        splitAxis: SplitAxis = .balanced,
+        startupInput: String? = nil
     ) -> Pane {
         // Project id = focused pane's project if available, else derive
         // from cwd or the current filter.
@@ -468,7 +469,8 @@ final class Workspace: NSView, NSSplitViewDelegate {
 
         let pane = Pane(
             projectId: projectId,
-            cwd: cwd ?? focusedPane?.currentCwd
+            cwd: cwd ?? focusedPane?.currentCwd,
+            startupInput: startupInput
         )
         pane.translatesAutoresizingMaskIntoConstraints = false
         pane.onPaneClicked = { [weak self, weak pane] in

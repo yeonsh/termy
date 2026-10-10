@@ -81,9 +81,14 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     /// MainActor (init), so the unsafety is contained.
     nonisolated(unsafe) private var fontPreferenceObserver: NSObjectProtocol?
 
+    /// Pending agent-resume command for a pane restored after an update
+    /// relaunch. nil once typed (or when there is none).
+    private var startupInputScheduler: StartupInputScheduler?
+
     init(
         projectId: String,
-        cwd: String? = nil
+        cwd: String? = nil,
+        startupInput: String? = nil
     ) {
         self.paneId = UUID().uuidString
         self.projectId = projectId
@@ -119,6 +124,9 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         installHeadWatcher(for: self.currentCwd)
         observeFontPreference()
         startShell()
+        if let startupInput {
+            scheduleStartupInput(startupInput)
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
@@ -243,6 +251,21 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
                 )
             }
         }
+    }
+
+    /// Type `input` into the fresh shell once it looks ready (see
+    /// `StartupInputScheduler`). Used to resume an agent after an update
+    /// relaunch.
+    private func scheduleStartupInput(_ input: String) {
+        let scheduler = StartupInputScheduler(schedule: MainQueueTimer.schedule) { [weak self] in
+            guard let self else { return }
+            self.terminal.onOutput = nil
+            self.startupInputScheduler = nil
+            self.terminal.send(txt: input + "\r")
+        }
+        startupInputScheduler = scheduler
+        terminal.onOutput = { [weak scheduler] in scheduler?.outputReceived() }
+        scheduler.start()
     }
 
     /// Live agent session in this pane for the update-relaunch save. nil

@@ -676,6 +676,10 @@ final class TermyTerminalView: LocalProcessTerminalView {
     //   5. After ~20s of model hang (kill -STOP `pidof codex`), confirm
     //      promotion to WAIT(.promotedFromPossible) with sound.
 
+    /// Called after every chunk of PTY output has been rendered. `Pane`
+    /// uses it to time a restored pane's agent-resume command.
+    var onOutput: (@MainActor () -> Void)?
+
     /// PTY produced bytes — forward to SwiftTerm's renderer (via super) and
     /// publish a liveness ping to HookDaemon. The ping reverts a Codex pane
     /// out of POSSIBLY_WAITING because reasoning-summary text prints to the
@@ -683,6 +687,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// to the current caret position after each PTY echo.
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
+        onOutput?()
 
         // Liveness ping: revert POSSIBLY_WAITING → THINKING while PTY is
         // producing output (reasoning text keeps flowing even between hooks).
