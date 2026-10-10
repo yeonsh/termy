@@ -117,20 +117,23 @@ final class TermyTerminalView: LocalProcessTerminalView {
         }
     }
 
-    // SwiftTerm's built-in `mouseDown` already implements the textbook
-    // double-click-word / triple-click-row selection — but only on the
-    // non-mouse-reporting branch. Under a TUI agent that enables mouse mode
-    // (claude, codex, tmux, vim, …) the click is forwarded to the child and
-    // neither selection nor the single-click clear runs, so the local
-    // highlight becomes un-selectable and un-clearable. Rather than
-    // reimplement word/row heuristics, we flip `allowMouseReporting` off for
-    // the duration of the click — SwiftTerm's `mouseDown` then falls through
-    // to the selection path unconditionally — and restore it on the matching
-    // mouseUp so real reporting resumes for the next click. This was built as
-    // a monitor because SwiftTerm f37922e kept `selection` internal and
-    // `mouseDown` non-`open`; 1.20 opens both (b4b78a3, 86456ca), so an
-    // override is now possible, but the monitor still works and is what was
-    // verified live.
+    // Under a TUI that captures the mouse (Claude Code fullscreen, tmux,
+    // vim, …) SwiftTerm forwards clicks to the child, which selects text
+    // itself. Only that selection survives scrolling: the child scrolls by
+    // redrawing the screen, and SwiftTerm drops its own cell-based selection
+    // on the next write while reporting is on (`feedPrepare`). termy used to
+    // turn reporting off for every click so drags always selected natively;
+    // under Claude Code fullscreen that selection vanished on the first
+    // wheel tick. Shift+drag still selects natively (SwiftTerm 1.20 bypasses
+    // reporting for Shift, 551bfcc).
+    //
+    // Cmd+click is the one press termy keeps from the child: it opens links
+    // (`installLinkClickMonitor`), and the link monitor swallows the mouseUp,
+    // which would leave the child holding a press with no release. For those
+    // we flip `allowMouseReporting` off and restore it on the matching
+    // mouseUp. This was built as a monitor because SwiftTerm f37922e kept
+    // `selection` internal and `mouseDown` non-`open`; 1.20 opens both
+    // (b4b78a3, 86456ca), so an override is now possible.
     nonisolated(unsafe) private var selectionClearMonitor: Any?
     nonisolated(unsafe) private var selectionReportingRestoreMonitor: Any?
     nonisolated(unsafe) private var reportingWasOverriddenForClick: Bool = false
@@ -183,33 +186,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
             guard !event.modifierFlags.contains(.shift) else { return event }
             let local = self.convert(event.locationInWindow, from: nil)
             guard self.bounds.contains(local) else { return event }
-            self.onClickInBounds?()
-
-            // Bypass mouse reporting for the duration of this press-drag-up
-            // cycle — SwiftTerm's selection code (click-clear, double-click
-            // word, triple-click row, drag-extend) all sit behind an
-            // `if allowMouseReporting { forward to child; return }` guard, so
-            // under a TUI with mouseMode ≠ .off the user can't select or clear
-            // anything. Toggling off proactively makes selection behave like a
-            // native macOS text view regardless of what the child declared.
-            // The matching leftMouseUp monitor restores the flag so actual
-            // mouse reports resume once the click/drag is over.
-            //
-            // Tradeoff: pure clicks inside the child's UI (e.g. Claude's
-            // internal button hit-testing) no longer reach the child. For
-            // termy's target workflow (LLM CLIs, which are keyboard-driven)
-            // this is a non-issue; we can add a ⌥-modifier passthrough later
-            // if a TUI that genuinely needs mouse input becomes important.
-            if self.allowMouseReporting {
-                self.allowMouseReporting = false
-                self.reportingWasOverriddenForClick = true
-            }
-            // Single-click clear stays defensive: SwiftTerm's own case-1 path
-            // handles this when reporting is off, but if the child ever
-            // re-enables reporting mid-click we still want click-to-dismiss.
-            if event.clickCount == 1, self.selectionActive {
-                self.selectNone()
-            }
+            self.handleClickInBounds(event)
             return event
         }
 
@@ -220,6 +197,22 @@ final class TermyTerminalView: LocalProcessTerminalView {
                 self.allowMouseReporting = true
             }
             return event
+        }
+    }
+
+    /// An unshifted left-mouse-down inside the view, before SwiftTerm's own
+    /// `mouseDown` sees it.
+    func handleClickInBounds(_ event: NSEvent) {
+        onClickInBounds?()
+        if event.modifierFlags.contains(.command), allowMouseReporting {
+            allowMouseReporting = false
+            reportingWasOverriddenForClick = true
+        }
+        // A Shift+drag selection under a mouse-capturing child is otherwise
+        // un-clearable: the click goes to the child, so SwiftTerm's own
+        // click-to-dismiss never runs.
+        if event.clickCount == 1, selectionActive {
+            selectNone()
         }
     }
 

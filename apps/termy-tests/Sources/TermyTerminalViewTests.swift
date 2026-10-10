@@ -330,4 +330,63 @@ final class TermyTerminalViewTests: XCTestCase {
     func test_openableURL_rejectsEmpty() {
         XCTAssertNil(TermyTerminalView.openableURL(from: ""))
     }
+
+    // MARK: - Clicks under a mouse-capturing child
+
+    /// Claude Code fullscreen scrolls by redrawing, so only its own selection
+    /// survives the wheel. A plain drag has to reach it.
+    @MainActor
+    func test_plainClick_underMouseCapture_staysWithTheChild() throws {
+        let view = Self.mouseCapturingTerminal()
+        let click = try XCTUnwrap(Self.leftMouseDown(modifierFlags: []))
+
+        view.handleClickInBounds(click)
+
+        XCTAssertTrue(view.allowMouseReporting)
+    }
+
+    /// termy opens links on Cmd+click and swallows that mouseUp, so the
+    /// press must not reach the child either.
+    @MainActor
+    func test_cmdClick_underMouseCapture_staysWithTermy() throws {
+        let view = Self.mouseCapturingTerminal()
+        let click = try XCTUnwrap(Self.leftMouseDown(modifierFlags: .command))
+
+        view.handleClickInBounds(click)
+
+        XCTAssertFalse(view.allowMouseReporting)
+    }
+
+    /// A Shift+drag selection must still clear on a plain click even though
+    /// that click goes to the child.
+    @MainActor
+    func test_plainClick_underMouseCapture_clearsNativeSelection() throws {
+        let view = Self.mouseCapturingTerminal()
+        view.selectAll()
+        XCTAssertTrue(view.selectionActive)
+        let click = try XCTUnwrap(Self.leftMouseDown(modifierFlags: []))
+
+        view.handleClickInBounds(click)
+
+        XCTAssertFalse(view.selectionActive)
+    }
+
+    @MainActor
+    private static func mouseCapturingTerminal() -> TermyTerminalView {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
+        // Alternate screen + any-event tracking + SGR, as Claude Code
+        // fullscreen sets them.
+        view.feed(text: "\u{1b}[?1049h\u{1b}[?1003h\u{1b}[?1006hhello")
+        XCTAssertEqual(view.terminal.mouseMode, .anyEvent)
+        XCTAssertTrue(view.allowMouseReporting)
+        return view
+    }
+
+    private static func leftMouseDown(modifierFlags: NSEvent.ModifierFlags) -> NSEvent? {
+        NSEvent.mouseEvent(
+            with: .leftMouseDown, location: NSPoint(x: 10, y: 10),
+            modifierFlags: modifierFlags, timestamp: 0, windowNumber: 0,
+            context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        )
+    }
 }
