@@ -134,4 +134,41 @@ final class ForegroundProcessWatcherTests: XCTestCase {
         }
         XCTAssertFalse(arguments.isEmpty)
     }
+
+    // MARK: - agentEntrypoint
+
+    func test_agentEntrypoint_nativeBinary_isIndexZero() {
+        let entry = ForegroundProcessWatcher.agentEntrypoint(
+            in: ["/Users/u/.local/bin/claude", "--model", "opus"]
+        )
+        XCTAssertEqual(entry?.index, 0)
+        XCTAssertEqual(entry?.kind, .claude)
+    }
+
+    func test_agentEntrypoint_nodeLauncher_findsScript() {
+        let entry = ForegroundProcessWatcher.agentEntrypoint(
+            in: ["node", "/opt/homebrew/bin/codex", "-m", "o3"]
+        )
+        XCTAssertEqual(entry?.index, 1)
+        XCTAssertEqual(entry?.kind, .codex)
+    }
+
+    func test_agentEntrypoint_unrelatedScript_isNil() {
+        XCTAssertNil(ForegroundProcessWatcher.agentEntrypoint(in: ["node", "server.js"]))
+    }
+
+    // MARK: - processCwd
+
+    func test_processCwd_ofCurrentProcess_matchesFileManager() {
+        func resolved(_ path: String) -> String {
+            URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        }
+        let actual = ForegroundProcessWatcher.processCwd(pid: getpid())
+        XCTAssertEqual(actual.map(resolved), resolved(FileManager.default.currentDirectoryPath))
+    }
+
+    func test_processCwd_ofMissingProcess_isNil() {
+        // macOS pids stay below 100_000.
+        XCTAssertNil(ForegroundProcessWatcher.processCwd(pid: 999_999))
+    }
 }

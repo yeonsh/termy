@@ -124,6 +124,20 @@ actor ForegroundProcessWatcher {
     /// classify it. Returns `nil` for the shell prompt, for unknown binaries
     /// (vim, less, etc.), and on syscall failure.
     private func currentForegroundAgent(masterFd: Int32, shellPid: pid_t) -> AgentKind? {
+        guard let pid = Self.foregroundProcessGroupLeader(masterFd: masterFd, shellPid: shellPid),
+              let name = Self.processName(pid: pid)
+        else { return nil }
+        return Self.classifyAgent(
+            processName: name,
+            arguments: Self.processArguments(pid: pid) ?? []
+        )
+    }
+
+    /// PID of the PTY's foreground process-group leader, or nil when the
+    /// shell itself owns the foreground (or on syscall failure). The pgrp ID
+    /// equals the leader's PID. Static so `Pane` can call it synchronously
+    /// on the main actor for the update-relaunch capture.
+    static func foregroundProcessGroupLeader(masterFd: Int32, shellPid: pid_t) -> pid_t? {
         let fgPgrp = tcgetpgrp(masterFd)
         guard fgPgrp > 0 else { return nil }
         // If the foreground PG is the shell's own PG, no agent is running.
@@ -131,11 +145,7 @@ actor ForegroundProcessWatcher {
         // and not "exact PID == shell".)
         let shellPgrp = getpgid(shellPid)
         if shellPgrp > 0 && shellPgrp == fgPgrp { return nil }
-        guard let name = Self.processName(pid: fgPgrp) else { return nil }
-        return Self.classifyAgent(
-            processName: name,
-            arguments: Self.processArguments(pid: fgPgrp) ?? []
-        )
+        return fgPgrp
     }
 
     // MARK: - Pure helpers (testable)
@@ -154,7 +164,7 @@ actor ForegroundProcessWatcher {
         guard isJavaScriptRuntime(processName) else {
             return nil
         }
-        return classifyAgent(fromArguments: arguments)
+        return agentEntrypoint(in: arguments)?.kind
     }
 
     /// Map a process basename / executable name to a known agent.
@@ -180,19 +190,23 @@ actor ForegroundProcessWatcher {
             || normalized == "deno"
     }
 
-    private static func classifyAgent(fromArguments arguments: [String]) -> AgentKind? {
-        for argument in arguments {
+    /// Find the argument that names the agent CLI — `argv[0]` for a native
+    /// binary, the script path after `node` / `bun` / `deno` for JS
+    /// launchers. Shared with `AgentResumeFlags`, which keeps only the
+    /// arguments after the entrypoint.
+    static func agentEntrypoint(in arguments: [String]) -> (index: Int, kind: AgentKind)? {
+        for (index, argument) in arguments.enumerated() {
             let normalized = argument.lowercased()
             let basename = (normalized as NSString).lastPathComponent
             if basename == "codex"
                 || basename.hasPrefix("codex-")
                 || normalized.contains("@openai/codex") {
-                return .codex
+                return (index, .codex)
             }
             if basename == "claude"
                 || basename.hasPrefix("claude-")
                 || normalized.contains("@anthropic-ai/claude-code") {
-                return .claude
+                return (index, .claude)
             }
         }
         return nil
@@ -262,6 +276,26 @@ actor ForegroundProcessWatcher {
             }
         }
         return arguments
+        #else
+        return nil
+        #endif
+    }
+
+    /// The process's current working directory via
+    /// `proc_pidinfo(PROC_PIDVNODEPATHINFO)`. Returns nil if the process is
+    /// gone or the call fails. Used instead of the pane's OSC 7 cwd, which
+    /// only updates when the user's shell config emits it.
+    static func processCwd(pid: pid_t) -> String? {
+        #if canImport(Darwin)
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else {
+            return nil
+        }
+        let path = withUnsafeBytes(of: &info.pvi_cdir.vip_path) { raw in
+            String(cString: raw.baseAddress!.assumingMemoryBound(to: CChar.self))
+        }
+        return path.isEmpty ? nil : path
         #else
         return nil
         #endif
