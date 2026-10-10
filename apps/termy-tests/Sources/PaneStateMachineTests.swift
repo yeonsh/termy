@@ -405,4 +405,122 @@ final class PaneStateMachineTests: XCTestCase {
         XCTAssertEqual(after.waitSource, .askUserQuestion)
         XCTAssertTrue(after.needsAttention)
     }
+
+    // MARK: - turnOpen / isMidTurn
+
+    private func codexEvent(_ kind: HookEventKind, session: String? = "s1") -> HookEvent {
+        var meta = HookEvent.Meta()
+        meta.sessionId = session
+        return HookEvent(event: kind, paneId: "p1", projectId: "proj", ts: 1.0, agent: "codex", meta: meta)
+    }
+
+    private func open() -> PaneSnapshot {
+        PaneStateMachine.apply(makeEvent(.userPromptSubmit, prompt: "go"), to: empty())
+    }
+
+    func test_turnOpen_defaultsToFalse() {
+        XCTAssertFalse(empty().turnOpen)
+    }
+
+    func test_turnOpen_userPromptSubmit_opens() {
+        XCTAssertTrue(open().turnOpen)
+        XCTAssertTrue(open().isMidTurn)
+    }
+
+    func test_turnOpen_stop_closes() {
+        let after = PaneStateMachine.apply(makeEvent(.stop, last: "done"), to: open())
+        XCTAssertFalse(after.turnOpen)
+        XCTAssertFalse(after.isMidTurn)
+    }
+
+    func test_turnOpen_stopFailure_closes() {
+        XCTAssertFalse(PaneStateMachine.apply(makeEvent(.stopFailure), to: open()).turnOpen)
+    }
+
+    func test_turnOpen_sessionEndAndPtyExit_close() {
+        XCTAssertFalse(PaneStateMachine.apply(makeEvent(.sessionEnd), to: open()).turnOpen)
+        XCTAssertFalse(PaneStateMachine.apply(makeEvent(.ptyExit, exitCode: 0), to: open()).turnOpen)
+        XCTAssertFalse(PaneStateMachine.apply(makeEvent(.ptyExit, exitCode: 1), to: open()).turnOpen)
+    }
+
+    func test_turnOpen_toolEvents_open() {
+        for kind in [HookEventKind.preToolUse, .postToolUse, .postToolUseFailure] {
+            var s = empty()
+            s.state = .idle
+            XCTAssertTrue(
+                PaneStateMachine.apply(makeEvent(kind, toolName: "Bash"), to: s).turnOpen,
+                "\(kind) should open the turn"
+            )
+        }
+    }
+
+    // Review Focus 1
+    func test_turnOpen_toolUseAfterStop_reopensTurn() {
+        let stopped = PaneStateMachine.apply(makeEvent(.stop, last: "done"), to: open())
+        let resumed = PaneStateMachine.apply(makeEvent(.preToolUse, toolName: "Bash"), to: stopped)
+        XCTAssertTrue(resumed.isMidTurn)
+    }
+
+    func test_turnOpen_sessionIdChange_resets() {
+        var s = open()
+        s.lastSessionId = "s1"
+        let after = PaneStateMachine.apply(makeEvent(.notification, session: "s2", reason: "idle"), to: s)
+        XCTAssertFalse(after.turnOpen)
+    }
+
+    func test_turnOpen_codexSessionStart_closes() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: "proj", agentKind: .codex)
+        s.state = .thinking
+        s.turnOpen = true
+        XCTAssertFalse(PaneStateMachine.apply(codexEvent(.sessionStart), to: s).turnOpen)
+    }
+
+    func test_turnOpen_claudeSessionStart_keepsTurn() {
+        // Auto-compact fires SessionStart mid-turn.
+        let after = PaneStateMachine.apply(makeEvent(.sessionStart), to: open())
+        XCTAssertTrue(after.turnOpen)
+    }
+
+    func test_isMidTurn_permissionWait_isTrue() {
+        let waiting = PaneStateMachine.apply(makeEvent(.notification, reason: "permission"), to: open())
+        XCTAssertEqual(waiting.state, .waiting)
+        XCTAssertTrue(waiting.isMidTurn)
+    }
+
+    func test_isMidTurn_claudePermissionThenStop_isFalse() {
+        // notificationReason stays "permission" after Stop, which is why the
+        // gate reads turnOpen instead of the wait reason.
+        let waiting = PaneStateMachine.apply(makeEvent(.notification, reason: "permission"), to: open())
+        let stopped = PaneStateMachine.apply(makeEvent(.stop, last: "done"), to: waiting)
+        XCTAssertEqual(stopped.notificationReason, "permission")
+        XCTAssertFalse(stopped.isMidTurn)
+    }
+
+    func test_isMidTurn_promotedFromPossible_isFalse() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: "proj", agentKind: .codex)
+        s.turnOpen = true
+        s.state = .waiting
+        s.waitSource = .promotedFromPossible
+        XCTAssertFalse(s.isMidTurn)
+    }
+
+    func test_isMidTurn_possiblyWaiting_isTrue() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: "proj", agentKind: .codex)
+        s.turnOpen = true
+        s.state = .possiblyWaiting
+        XCTAssertTrue(s.isMidTurn)
+    }
+
+    func test_isMidTurn_initializing_isFalse() {
+        var s = empty()
+        s.turnOpen = true
+        XCTAssertFalse(s.isMidTurn)
+    }
+
+    func test_paneSnapshot_codableRoundTrip_preservesTurnOpen() throws {
+        var s = empty()
+        s.turnOpen = true
+        let decoded = try JSONDecoder().decode(PaneSnapshot.self, from: JSONEncoder().encode(s))
+        XCTAssertTrue(decoded.turnOpen)
+    }
 }

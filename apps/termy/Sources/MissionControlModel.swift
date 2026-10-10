@@ -62,6 +62,11 @@ final class MissionControlModel {
     /// AsyncStream has a single consumer (two `for await`s would race and
     /// silently split events).
     var onSnapshotUpdate: ((PaneSnapshot) -> Void)?
+    /// Called after the set of live panes changes (window registered,
+    /// re-registered, or closed). `UpdateRelaunchGate` re-counts mid-turn
+    /// panes on it, since closing a busy window changes the count without
+    /// any snapshot update.
+    var onLivePanesChanged: (() -> Void)?
 
     /// Single app-wide instance. Every window's `MissionControlView`
     /// observes this one model, and it is the sole consumer of
@@ -109,6 +114,7 @@ final class MissionControlModel {
         )
         labelsByPaneId = labelsByPaneId.filter { livePaneIds.contains($0.key) }
         recomputeItems()
+        onLivePanesChanged?()
     }
 
     /// Pushed by Workspace whenever a pane's header recomputes.
@@ -138,13 +144,32 @@ final class MissionControlModel {
         return PaneDisplayLabel(project: String(snapshot.paneId.prefix(8)), branch: nil)
     }
 
+    /// Fold one daemon update into the model. The pump calls this for every
+    /// HookDaemon update; tests call it directly.
+    func applySnapshot(_ snapshot: PaneSnapshot) {
+        snapshotsById[snapshot.paneId] = snapshot
+        recomputeItems()
+        onSnapshotUpdate?(snapshot)
+    }
+
+    /// Latest snapshot for a pane, or nil before its first hook event.
+    func snapshot(paneId: String) -> PaneSnapshot? {
+        snapshotsById[paneId]
+    }
+
+    /// Live panes whose agent is mid-turn. `UpdateRelaunchGate` holds an
+    /// update relaunch until this reaches zero.
+    var midTurnPaneCount: Int {
+        snapshotsById.values.reduce(0) { count, snapshot in
+            count + (livePaneIds.contains(snapshot.paneId) && snapshot.isMidTurn ? 1 : 0)
+        }
+    }
+
     private func pumpUpdates() async {
         for await update in HookDaemon.shared.updates {
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.snapshotsById[update.snapshot.paneId] = update.snapshot
-                self.recomputeItems()
-                self.onSnapshotUpdate?(update.snapshot)
+                self.applySnapshot(update.snapshot)
             }
         }
     }

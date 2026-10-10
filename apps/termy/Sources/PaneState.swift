@@ -34,6 +34,10 @@
 // POSSIBLY_WAITING is rendered as THINK in the dashboard chip — invisible to
 // the user. The two-stage WAIT is documented in
 // docs/superpowers/plans/2026-04-26-codex-possibly-waiting-state.md.
+//
+// Orthogonal to the state: `turnOpen` tracks turn boundaries
+// (UserPromptSubmit / tool events open, Stop / StopFailure / SessionEnd /
+// PtyExit / resets close) for the update-relaunch gate.
 
 import Foundation
 
@@ -86,11 +90,17 @@ struct PaneSnapshot: Sendable, Codable {
     /// TermyTerminalView.dataReceived → HookDaemon.recordPtyActivity.
     /// Used as a liveness signal during POSSIBLY_WAITING.
     var lastPtyActivityAt: Date?
+    /// True between the start of an agent turn and its end. Opened by
+    /// UserPromptSubmit and by any tool event (tools only run inside a
+    /// turn — this also catches Claude continuing after a blocking Stop
+    /// hook), closed by Stop / StopFailure / SessionEnd / PtyExit and by
+    /// session resets. Feeds `isMidTurn`, which holds update relaunches.
+    var turnOpen: Bool = false
 
     private enum CodingKeys: String, CodingKey {
         case paneId, projectId, state, needsAttention, notificationReason, waitSource
         case lastSessionId, lastCwd, lastPrompt, lastAssistantMessage
-        case updatedAt, enteredStateAt, agentKind, lastPtyActivityAt
+        case updatedAt, enteredStateAt, agentKind, lastPtyActivityAt, turnOpen
     }
 }
 
@@ -120,6 +130,20 @@ extension PaneSnapshot {
     }
 }
 
+extension PaneSnapshot {
+    /// The agent is inside a turn, so restarting now would kill work that
+    /// `claude --resume` / `codex resume` can't bring back. Permission and
+    /// question waits count — they happen mid-turn. A Codex pane promoted
+    /// to WAIT by the silence heuristic doesn't: termy already treats it as
+    /// waiting for input, and a missed Codex Stop would otherwise hold an
+    /// update forever.
+    var isMidTurn: Bool {
+        turnOpen
+            && state != .initializing
+            && !(state == .waiting && waitSource == .promotedFromPossible)
+    }
+}
+
 /// Pure state-transition function. Given the current snapshot and an
 /// incoming event, returns the new snapshot. Deterministic — no I/O, no
 /// timers. HookDaemon owns the idle timer separately.
@@ -146,6 +170,7 @@ enum PaneStateMachine {
             next.needsAttention = false
             next.notificationReason = nil
             next.enteredStateAt = next.updatedAt
+            next.turnOpen = false
         }
         if let incoming = event.meta.sessionId {
             next.lastSessionId = incoming
@@ -174,6 +199,7 @@ enum PaneStateMachine {
                 next.needsAttention = false
                 next.notificationReason = nil
                 next.enteredStateAt = next.updatedAt
+                next.turnOpen = false
             } else if previous.state == .initializing {
                 next.state = .idle
                 next.enteredStateAt = next.updatedAt
@@ -185,6 +211,7 @@ enum PaneStateMachine {
             next.needsAttention = false
             next.notificationReason = nil
             next.enteredStateAt = next.updatedAt
+            next.turnOpen = true
 
         case .stop:
             next.lastAssistantMessage = event.meta.lastAssistantMessage
@@ -198,12 +225,14 @@ enum PaneStateMachine {
                 next.waitSource = .turnEnd
             }
             next.enteredStateAt = next.updatedAt
+            next.turnOpen = false
 
         case .stopFailure:
             // Abnormal turn termination (rate-limit, mid-turn crash). Unlike
             // PostToolUseFailure, this really does end the turn.
             next.state = .errored
             next.enteredStateAt = next.updatedAt
+            next.turnOpen = false
 
         case .postToolUseFailure:
             // Per-tool failure is NOT a pane-level error. Claude routinely
@@ -211,7 +240,7 @@ enum PaneStateMachine {
             // and continues the turn. Flipping to ERRORED on every such tool
             // failure makes the dashboard lie ("ERR" on a pane that's still
             // THINKING). Keep the state unchanged.
-            break
+            next.turnOpen = true
 
         case .sessionEnd, .ptyExit:
             // PtyExit with non-zero exit → ERRORED; everything else → INIT.
@@ -223,6 +252,7 @@ enum PaneStateMachine {
                 next.notificationReason = nil
             }
             next.enteredStateAt = next.updatedAt
+            next.turnOpen = false
 
         case .notification:
             next.needsAttention = true
@@ -257,6 +287,7 @@ enum PaneStateMachine {
             next.enteredStateAt = next.updatedAt
 
         case .preToolUse:
+            next.turnOpen = true
             if event.meta.toolName == "AskUserQuestion" {
                 next.state = .waiting
                 next.needsAttention = true
@@ -285,6 +316,7 @@ enum PaneStateMachine {
             }
 
         case .postToolUse:
+            next.turnOpen = true
             if event.meta.toolName == "AskUserQuestion",
                previous.state == .waiting,
                previous.waitSource == .askUserQuestion
