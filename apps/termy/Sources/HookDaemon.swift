@@ -514,7 +514,8 @@ actor HookDaemon {
             // signal persists paints the chip accent-blue via backgroundTint's
             // needsAttention branch, making the dashboard read "IDLE label on
             // blue THINK-ish background". Leave the pane WAITING until an
-            // event (UserPromptSubmit / PostToolUse / SessionEnd) clears
+            // event (UserPromptSubmit / PostToolUse / PostToolUseFailure /
+            // SessionEnd, or an idle_prompt clearing a stale wait) clears
             // needsAttention.
             if snapshot.needsAttention { continue }
             let since = now.timeIntervalSince(snapshot.enteredStateAt)

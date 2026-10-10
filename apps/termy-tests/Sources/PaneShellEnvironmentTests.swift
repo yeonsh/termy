@@ -17,6 +17,7 @@ final class PaneShellEnvironmentTests: XCTestCase {
         "CLAUDE_EFFORT", "CLAUDE_PLUGIN_DATA", "AI_AGENT",
         "CODEX_COMPANION_SESSION_ID", "CODEX_SANDBOX",
         "CODEX_SANDBOX_NETWORK_DISABLED",
+        "CLAUDE_CODE_MESSAGING_TOKEN", "CODEX_THREAD_ID",
     ]
 
     private func make(_ base: [String: String]) -> [String: String] {
@@ -30,6 +31,11 @@ final class PaneShellEnvironmentTests: XCTestCase {
         for key in markers {
             XCTAssertNil(env[key], "\(key) should be stripped")
         }
+    }
+
+    func testStripsGitEditorOnlyWhenTrue() {
+        XCTAssertNil(make(["GIT_EDITOR": "true"])["GIT_EDITOR"])
+        XCTAssertEqual(make(["GIT_EDITOR": "vim"])["GIT_EDITOR"], "vim")
     }
 
     func testKeepsUserConfiguration() {

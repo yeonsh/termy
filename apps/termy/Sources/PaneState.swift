@@ -74,7 +74,7 @@ struct PaneSnapshot: Sendable, Codable {
     let projectId: String?
     var state: PaneState
     var needsAttention: Bool
-    var notificationReason: String?     // Claude legacy: "permission" | "idle" | "mcp_elicit" or nil
+    var notificationReason: String?     // "permission" | "idle" | "mcp_elicit" | "ask_user_question", or a raw Claude notification type (e.g. "auth_success"), or nil
     /// Codex-only typed reason for `.waiting`. nil for Claude and for non-waiting states.
     var waitSource: WaitSource?
     var lastSessionId: String?
@@ -151,6 +151,10 @@ extension PaneSnapshot {
 /// incoming event, returns the new snapshot. Deterministic — no I/O, no
 /// timers. HookDaemon owns the idle timer separately.
 enum PaneStateMachine {
+    /// Notification reasons meaning Claude is blocked on the user; they gate
+    /// informational-notification overwrite and the idle_prompt stale clear.
+    private static let blockingReasons: Set<String> = ["permission", "mcp_elicit", "ask_user_question"]
+
     static func apply(_ event: HookEvent, to previous: PaneSnapshot) -> PaneSnapshot {
         var next = previous
         next.updatedAt = Date()
@@ -286,11 +290,14 @@ enum PaneStateMachine {
                 // WAIT still carrying permission/mcp_elicit is stale (dialog
                 // dismissed, no Stop): clear attention, keep state, no chime.
                 next.turnOpen = false
+                // enteredStateAt restarts: idle_prompt lands >=60s after the
+                // dismissal, and tickIdle's sleep/wake guard (since < 120)
+                // would otherwise never move the stale WAIT to IDLE.
                 if previous.state == .waiting,
-                   previous.notificationReason == "permission"
-                    || previous.notificationReason == "mcp_elicit" {
+                   let r = previous.notificationReason, Self.blockingReasons.contains(r) {
                     next.needsAttention = false
                     next.notificationReason = nil
+                    next.enteredStateAt = next.updatedAt
                 } else if previous.state == .thinking {
                     next.state = .waiting
                     next.needsAttention = true
@@ -316,8 +323,7 @@ enum PaneStateMachine {
                 // blocking WAIT is outstanding must not overwrite its
                 // reason, or PostToolUse recovery would no longer match.
                 if previous.state == .waiting,
-                   previous.notificationReason == "permission"
-                    || previous.notificationReason == "mcp_elicit" {
+                   let r = previous.notificationReason, Self.blockingReasons.contains(r) {
                     break
                 }
                 next.needsAttention = true

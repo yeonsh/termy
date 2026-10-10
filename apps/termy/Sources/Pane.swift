@@ -230,6 +230,7 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         "CLAUDE_EFFORT", "CLAUDE_PLUGIN_DATA", "AI_AGENT",
         "CODEX_COMPANION_SESSION_ID", "CODEX_SANDBOX",
         "CODEX_SANDBOX_NETWORK_DISABLED",
+        "CLAUDE_CODE_MESSAGING_TOKEN", "CODEX_THREAD_ID",
     ]
 
     /// Environment handed to a pane's login shell.
@@ -238,6 +239,9 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     ) -> [String: String] {
         var env = base
         for key in agentSessionMarkerEnvKeys { env.removeValue(forKey: key) }
+        // Claude Code sets GIT_EDITOR=true for its children; leaked, it makes
+        // `git commit` without -m abort. A user's own value survives.
+        if env["GIT_EDITOR"] == "true" { env.removeValue(forKey: "GIT_EDITOR") }
         env["TERMY_PANE_ID"] = paneId
         env["TERMY_PROJECT_ID"] = projectId
         env["TERM"] = "xterm-256color"

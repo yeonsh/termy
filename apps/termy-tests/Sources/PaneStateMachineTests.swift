@@ -327,14 +327,40 @@ final class PaneStateMachineTests: XCTestCase {
         s.state = .thinking
         s.turnOpen = true
         s = PaneStateMachine.apply(claudeNotification("permission_prompt"), to: s)
-        let entered = s.enteredStateAt
         let after = PaneStateMachine.apply(claudeNotification("idle_prompt"), to: s)
         XCTAssertEqual(after.state, .waiting)
         XCTAssertFalse(after.needsAttention)
         XCTAssertNil(after.notificationReason)
         XCTAssertFalse(after.turnOpen)
         XCTAssertFalse(after.isMidTurn)
-        XCTAssertEqual(after.enteredStateAt, entered)
+        XCTAssertEqual(after.enteredStateAt, after.updatedAt)
+    }
+
+    private func askUserQuestionWait() -> PaneSnapshot {
+        var s = empty()
+        s.state = .waiting
+        s.needsAttention = true
+        s.notificationReason = "ask_user_question"
+        s.turnOpen = true
+        return s
+    }
+
+    func test_claude_informationalNotification_duringAskUserQuestion_keepsRecovery() {
+        var s = askUserQuestionWait()
+        s = PaneStateMachine.apply(claudeNotification("agent_completed"), to: s)
+        XCTAssertEqual(s.notificationReason, "ask_user_question")
+        s = PaneStateMachine.apply(makeEvent(.postToolUse, toolName: "AskUserQuestion"), to: s)
+        XCTAssertEqual(s.state, .thinking)
+        XCTAssertNil(s.notificationReason)
+    }
+
+    func test_claude_idlePrompt_onStaleAskUserQuestion_clearsAttention() {
+        let after = PaneStateMachine.apply(claudeNotification("idle_prompt"), to: askUserQuestionWait())
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertNil(after.notificationReason)
+        XCTAssertFalse(after.turnOpen)
+        XCTAssertEqual(after.enteredStateAt, after.updatedAt)
     }
 
     func test_claude_elicitationDialog_waitsThenPostToolUseRecovers() {
