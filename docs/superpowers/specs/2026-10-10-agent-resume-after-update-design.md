@@ -360,12 +360,22 @@ DEBUG 빌드에만 "Debug ▸ Simulate Update Relaunch" 를 둔다. Sparkle 을 
    binary)의 cwd 는 실행 디렉터리였다. `cd` 는 자식 `zsh` 의 cwd 만 바꾼다.
 3. `codex resume [OPTIONS] [SESSION_ID] [PROMPT]`. `-m`, `-s`, `-a`, `-p`, `-c`,
    `--add-dir`, `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox` 를 받는다.
-   `--full-auto` 는 없다 → §5.3 반영. hook `session_id` 호환성은 실사용 검증으로 남긴다.
+   `--full-auto` 는 없다 → §5.3 반영.
+4. 통과. termy journal(`events.jsonl`)의 codex hook `session_id`(`01a11516-…`)가
+   `~/.codex/sessions/…/rollout-…-01a11516-….jsonl` 의 UUID 와 같다 — `codex resume` 이
+   찾는 id 다. claude hook `session_id` 도 `~/.claude/projects/<dir>/<id>.jsonl` 과 같다.
+   codex 는 실행하지 않고 파일만 대조했다.
+5. 통과. 새 login zsh 에 프롬프트 전(0s / 0.05s / 0.5s)에 명령을 넣어도 실행됐다. 이 Mac 의
+   login zsh 는 약 0.8s 에 첫 출력, 50ms 안에 출력 끝(출력 사이 최대 38ms) → 300ms quiet
+   기준으로 약 1.1s 에 입력된다.
+6. 통과. 고정 버전 Sparkle 2.6.4 헤더에 `shouldPostponeRelaunchForUpdate:…untilInvokingBlock:`
+   와 `updaterWillRelaunchApplication:` 이 있다.
 
 ## 10. 실제 동작 검증
 
-개발 세션이 termy 안에서 돌기 때문에 재시작 경로는 사람이 직접 검증한다(Debug 빌드를
-같이 띄우면 hook socket 을 빼앗는다).
+개발 세션이 Ghostty 에서 돌 때는 controller 가 직접 검증한다(사용자 결정, 2026-10-10).
+설치본 termy 가 hook socket 과 `session.json` 을 쓰므로, 검증 동안 설치본을 종료하고
+`session.json` 을 백업했다가 되돌린다. 세션이 termy 안에서 돌면 사람이 검증한다.
 
 1. DEBUG 빌드에서 agent 둘(하나는 작업 중, 하나는 turn 종료) + 빈 셸 pane 하나를 둔다.
 2. "Debug ▸ Simulate Update Relaunch" → alert 확인 → [Wait for Agents] → 작업 중이던

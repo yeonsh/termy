@@ -19,7 +19,7 @@
   `xcodebuild test -project termy.xcodeproj -scheme termy -destination 'platform=macOS' -derivedDataPath build/DerivedData-tests -skipPackagePluginValidation -only-testing:termy-tests/<Class> 2>&1 | tail -25`
   → `** TEST SUCCEEDED **`. `-derivedDataPath` 와 `-skipPackagePluginValidation` 을 빼면 이 환경에서 EPERM 이나 plugin 검증 오류가 난다.
 - 전체 테스트: 위 명령에서 `-only-testing` 을 뺀다.
-- **termy.app 을 실행하지 않는다.** `scripts/relaunch.sh`, `open termy.app`, Debug 빌드 실행 모두 금지다. 개발 세션 자체가 termy 안에서 돌고 있어서, 실행하면 사용자 세션이 죽거나 hook socket 을 빼앗긴다. XCTest host 로 뜨는 것은 괜찮다(`TestHostDetector` 가 막는다).
+- **Task 1–7 에서는 termy.app 을 실행하지 않는다.** `scripts/relaunch.sh`, `open termy.app`, Debug 빌드 실행 모두 금지다. 사용자가 쓰는 설치본 termy 가 hook socket(`/tmp/termy-$UID.sock`)과 `~/Library/Application Support/termy/session.json` 을 쓰고 있어서, 두 번째 인스턴스는 hook 이벤트를 가로채고 세션 파일을 덮어쓴다. XCTest host 로 뜨는 것은 괜찮다(`TestHostDetector` 가 막는다). 실제 앱 검증은 모든 태스크가 끝난 뒤 controller 가 Task 8 로 한다.
 - 앱 UI 문구는 영어다. alert 문구는 spec §5.7 그대로:
   - 제목: `"1 agent is still working"` / `"N agents are still working"`
   - 본문: `"termy will restart to install the update when they finish their current turn. Other programs running in panes will still be stopped."`
@@ -2230,7 +2230,7 @@ git commit -m "feat(update): agent가 turn 도중이면 업데이트 재시작�
 
 ---
 
-## Task 7: CHANGELOG 와 사람 검증 준비
+## Task 7: CHANGELOG
 
 **Files:**
 - Modify: `CHANGELOG.md` (`## Unreleased` 아래)
@@ -2266,13 +2266,31 @@ git add CHANGELOG.md
 git commit -m "docs(changelog): 업데이트 후 agent 세션 이어가기 항목을 추가"
 ```
 
-- [ ] **Step 4: 사람 검증 안내 (에이전트는 실행하지 않는다)**
+---
 
-아래는 사용자가 직접 한다(spec §10). 에이전트는 이 목록을 최종 보고에 그대로 옮긴다.
+## Task 8: 실제 앱 검증 (controller 가 직접, subagent 에 맡기지 않음)
 
-1. 실행 중인 termy 를 모두 종료한 상태에서 Debug 빌드(`build/DerivedData-debug/Build/Products/Debug/termy.app`)만 띄운다.
-2. pane 셋: (a) `claude --model sonnet` 에 오래 걸리는 작업을 시켜 둔 pane, (b) `claude --permission-mode plan` 으로 한 턴을 끝낸 pane, (c) 빈 셸.
-3. Debug ▸ Simulate Update Relaunch → "1 agent is still working" alert → Wait for Agents → 앱 메뉴에 "Restart Now to Install Update" 가 보이는지 → (a) 의 turn 이 끝나고 약 2초 뒤 termy 가 종료되는지.
-4. 같은 Debug 빌드를 다시 실행 → (a)(b) 에서 같은 대화가 열리는지, `ps -o args= -p <pid>` 로 `--model sonnet` / `--permission-mode plan` 이 붙었는지, (c) 는 빈 셸인지.
-5. 한 번 더 종료·실행해서 resume 이 반복되지 않는지(복원 후 저장으로 resume 기록이 지워짐).
-6. 이 기능이 들어간 버전 다음 릴리스를 설치할 때 Sparkle 경로 전체와 postpone 중 Sparkle 기본 UI 를 확인한다.
+개발 세션은 Ghostty 에서 돈다(2026-10-10 확인: `TERM_PROGRAM=ghostty`, `TERMY_PANE_ID` 없음). 시작 전에 `echo $TERM_PROGRAM $TERMY_PANE_ID` 로 다시 확인한다. termy 안이면 이 태스크는 사용자에게 넘긴다.
+
+- [ ] **Step 1: 준비**
+  - 사용자에게 설치본 termy 를 종료해 달라고 요청하고, `pgrep -lf "termy.app/Contents/MacOS/termy"` 가 비었는지 확인한다.
+  - `cp ~/Library/Application\ Support/termy/session.json /tmp/termy-session-backup.json`
+  - Debug 빌드: `xcodebuild build -project termy.xcodeproj -scheme termy -configuration Debug -destination 'platform=macOS' -derivedDataPath build/DerivedData-debug -skipPackagePluginValidation 2>&1 | tail -3`
+
+- [ ] **Step 2: 미루기 확인**
+  - `open build/DerivedData-debug/Build/Products/Debug/termy.app`
+  - pane 셋을 만든다: (a) `claude --model sonnet` 에 1분 넘게 걸리는 작업을 시킨 pane, (b) `claude --permission-mode plan` 으로 한 턴을 끝낸 pane, (c) 빈 셸. agent 를 띄우는 입력과 화면 확인은 사용자에게 부탁하거나, 가능하면 computer-use 로 한다.
+  - Debug ▸ Simulate Update Relaunch → "1 agent is still working" alert → Wait for Agents.
+  - 앱 메뉴에 "Restart Now to Install Update" 가 보이는지, (a) 의 turn 이 끝나고 약 2초 뒤 termy 가 종료되는지 확인한다.
+  - 종료 직후 `session.json` 에 (a)(b) 의 `agentResume` 이 있고 (c) 에는 없는지 확인한다.
+
+- [ ] **Step 3: resume 확인**
+  - 같은 Debug 빌드를 다시 `open` 한다.
+  - (a)(b) 에서 같은 대화가 열리는지, `ps -o args= -p <pid>` 로 `--model sonnet` / `--permission-mode plan` 이 붙었는지, (c) 는 빈 셸인지 확인한다.
+  - 몇 초 뒤 `session.json` 에서 `agentResume` 이 사라졌는지 확인한다(복원 후 저장).
+
+- [ ] **Step 4: 정리**
+  - Debug termy 를 종료한다.
+  - `cp /tmp/termy-session-backup.json ~/Library/Application\ Support/termy/session.json`
+  - 사용자에게 설치본 termy 를 다시 열어도 된다고 알린다.
+  - 확인하지 못한 항목(Sparkle 경로 전체, postpone 중 Sparkle 기본 UI — 이 기능이 들어간 버전 **다음** 릴리스에서만 가능)을 최종 보고에 적는다.
