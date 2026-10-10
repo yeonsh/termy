@@ -179,4 +179,41 @@ final class UpdateRelaunchGateTests: XCTestCase {
         XCTAssertEqual(UpdateRelaunchGate.promptTitle(busyCount: 1), "1 agent is still working")
         XCTAssertEqual(UpdateRelaunchGate.promptTitle(busyCount: 3), "3 agents are still working")
     }
+
+    // An Esc-interrupted Claude turn never sends Stop, so the wait can last
+    // until the next prompt — remind the user the update is still held.
+    func test_waiting_repromptsAfterReminderInterval() {
+        let h = Harness()
+        h.busy = 1
+        h.begin()
+        h.answer?(.waitForAgents)
+        h.clock.advance(by: UpdateRelaunchGate.reminderInterval - 1)
+        XCTAssertEqual(h.promptCounts, [1])
+        h.clock.advance(by: 2)
+        XCTAssertEqual(h.promptCounts, [1, 1])
+        h.answer?(.waitForAgents)
+        h.clock.advance(by: UpdateRelaunchGate.reminderInterval)
+        XCTAssertEqual(h.promptCounts, [1, 1, 1])
+        h.answer?(.restartNow)
+        XCTAssertEqual(h.installs.value, 1)
+        XCTAssertEqual(h.pendingChanges.value, 2)
+    }
+
+    func test_reminderDoesNothingWhenIdle_settleReleases() {
+        let h = Harness()
+        h.busy = 1
+        h.begin()
+        h.answer?(.waitForAgents)
+        h.busy = 0
+        h.gate.reevaluate()
+        h.clock.advance(by: UpdateRelaunchGate.settleDelay)
+        XCTAssertEqual(h.installs.value, 1)
+        h.clock.advance(by: UpdateRelaunchGate.reminderInterval)
+        XCTAssertEqual(h.promptCounts, [1])
+        XCTAssertEqual(h.clock.pendingCount, 0)
+    }
+
+    func test_promptBody_mentionsMenuEscape() {
+        XCTAssertTrue(UpdateRelaunchGate.promptBody.contains("Restart Now to Install Update"))
+    }
 }

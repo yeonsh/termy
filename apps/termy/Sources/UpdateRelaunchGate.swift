@@ -8,7 +8,9 @@
 // Flow: Sparkle asks to relaunch → `begin` → agents busy? ask the user
 // (Wait for Agents / Restart Now) → while waiting, re-count on every
 // snapshot or live-pane change → zero, and still zero `settleDelay` later
-// → run Sparkle's install handler exactly once.
+// → run Sparkle's install handler exactly once. Still busy after
+// `reminderInterval` → ask again (an Esc-interrupted Claude turn sends no
+// Stop, so the wait can otherwise sit unseen until the next prompt).
 
 import AppKit
 
@@ -22,6 +24,14 @@ final class UpdateRelaunchGate {
     /// Re-check this long after the count first reaches zero, so a queued
     /// message that starts the next turn right after Stop isn't cut off.
     static let settleDelay: TimeInterval = 2
+
+    /// While waiting, ask again this often. Claude sends no Stop after an
+    /// Esc interrupt, so the wait can last until the next prompt.
+    static let reminderInterval: TimeInterval = 600
+
+    /// Names the menu escape, since an interrupted turn can hold the update
+    /// with nothing else on screen saying so.
+    static let promptBody = "termy will restart to install the update when they finish their current turn. To restart sooner, choose termy ▸ Restart Now to Install Update. Other programs running in panes will still be stopped."
 
     typealias PresentPrompt = @MainActor (
         _ busyCount: Int,
@@ -41,6 +51,7 @@ final class UpdateRelaunchGate {
     private var phase: Phase = .idle
     private var installHandler: (@MainActor () -> Void)?
     private var cancelSettle: (@MainActor () -> Void)?
+    private var cancelReminder: (@MainActor () -> Void)?
 
     /// Fires when `isPending` flips, so the app menu can show or hide
     /// "Restart Now to Install Update".
@@ -70,10 +81,7 @@ final class UpdateRelaunchGate {
         let busy = midTurnCount()
         guard busy > 0 else { return false }
         self.installHandler = installHandler
-        setPhase(.prompting)
-        presentPrompt(busy) { [weak self] choice in
-            self?.handle(choice)
-        }
+        prompt(busyCount: busy)
         return true
     }
 
@@ -120,12 +128,21 @@ final class UpdateRelaunchGate {
             MainActor.assumeIsolated {
                 let alert = NSAlert()
                 alert.messageText = promptTitle(busyCount: busyCount)
-                alert.informativeText = "termy will restart to install the update when they finish their current turn. Other programs running in panes will still be stopped."
+                alert.informativeText = promptBody
                 alert.addButton(withTitle: "Wait for Agents")
                 alert.addButton(withTitle: "Restart Now")
                 let response = alert.runModal()
                 completion(choice(for: response))
             }
+        }
+    }
+
+    /// Show the prompt; the answer goes to `handle`. Used by `begin` and by
+    /// the reminder, so both answers take the same path.
+    private func prompt(busyCount: Int) {
+        setPhase(.prompting)
+        presentPrompt(busyCount) { [weak self] choice in
+            self?.handle(choice)
         }
     }
 
@@ -137,6 +154,8 @@ final class UpdateRelaunchGate {
         case .waitForAgents:
             setPhase(.waiting)
             reevaluate()
+            cancelReminder?()
+            cancelReminder = schedule(Self.reminderInterval) { [weak self] in self?.reminderElapsed() }
         }
     }
 
@@ -148,9 +167,21 @@ final class UpdateRelaunchGate {
         }
     }
 
+    /// Ask again while agents are still busy. At zero the settle timer
+    /// already owns the release.
+    private func reminderElapsed() {
+        cancelReminder = nil
+        guard phase == .waiting else { return }
+        let busy = midTurnCount()
+        guard busy > 0 else { return }
+        prompt(busyCount: busy)
+    }
+
     private func release() {
         cancelSettle?()
         cancelSettle = nil
+        cancelReminder?()
+        cancelReminder = nil
         let handler = installHandler
         installHandler = nil
         setPhase(.released)
