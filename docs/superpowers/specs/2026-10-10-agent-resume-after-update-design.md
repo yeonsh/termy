@@ -104,6 +104,10 @@ static func record(
 - `foregroundAgent` 가 nil 이 아니다.
 - `snapshot` 이 있고, `snapshot.agentKind == foregroundAgent` 이고, `state != .initializing`
   이고, `lastSessionId` 가 비어 있지 않다.
+- `lastSessionId` 가 `[A-Za-z0-9._-]` 문자로만 되어 있다(§7 제어 문자).
+
+이어받을 플래그(§5.3) 중 하나라도 제어 문자(U+0000–U+001F, U+007F)를 가지면 기록은 만들되
+`flags` 를 비운다.
 
 실제 값은 pane 이 조회한다.
 
@@ -168,6 +172,8 @@ codex 의 값 하나짜리 플래그는 여러 번 반복될 수 있고(`-c a=1 
      autosaver 쪽을 멈추는 것만으로는 이미 진행 중인 쓰기를 막을 수 없어서 저장소
      단에서 막는다.
    - 종료 경로의 비동기 flush 에 기대지 않는다.
+   - 쓰기가 실패하면 `Logger`(subsystem `app.termy`, category `update`)로 남기고 재시작은
+     그대로 진행한다. 다음 실행에서 resume 이 없었던 이유를 로그로 찾을 수 있다.
 
 평소 autosave 는 `includeAgentResume: false` 로 저장하므로, resume 필드는 업데이트 직전
 에만 파일에 들어간다.
@@ -176,8 +182,9 @@ codex 의 값 하나짜리 플래그는 여러 번 반복될 수 있고(`-c a=1 
 
 - `WindowManager.restoreSessionWindows` → `MainWindowController.applySessionLayout` →
   `Workspace.addPane(cwd:splitAxis:startupInput:)` → `Pane(projectId:cwd:startupInput:)`.
-  - pane 시작 디렉터리는 `agentResume?.cwd ?? record.cwd`.
-  - `startupInput = agentResume.map(AgentResumeCommand.make)`.
+  - pane 시작 디렉터리와 `startupInput` 은 `AgentResumeCapture.restorePlan` 이 정한다.
+    agent cwd 가 있는 디렉터리면 거기서, 아니면 `record.cwd` 가 있는 디렉터리면 거기서
+    `AgentResumeCommand.make(agentResume)` 를 입력한다. 둘 다 없으면 resume 하지 않는다(§7).
 - ⌘K 프로젝트 레이아웃 복원 경로는 `startupInput` 을 넘기지 않는다.
 - 복원을 마치면 `sessionAutosaver.requestSave()` 를 한 번 부른다. `session.json` 이 resume
   필드 없이 다시 쓰여서, 이후 크래시 뒤 재실행에서 같은 세션을 또 띄우지 않는다.
@@ -262,7 +269,9 @@ extension PaneSnapshot {
 1. `begin` 은 다음 run loop 에서 alert 를 띄운다(Sparkle 콜백을 막지 않음).
    - 제목: "N agents are still working"(1개면 "1 agent is still working")
    - 본문: "termy will restart to install the update when they finish their current
-     turn. Other programs running in panes will still be stopped."
+     turn. To restart sooner, choose termy ▸ Restart Now to Install Update. Other programs
+     running in panes will still be stopped." — 기다리는 동안 화면에 다른 표시가 없으므로
+     메뉴로 빠져나가는 길을 본문에 적는다(§7 Esc 중단).
    - 버튼: [Wait for Agents] (기본), [Restart Now]
 2. alert 가 떠 있는 동안에는 자동 재시작하지 않는다.
 3. [Restart Now] → handler 를 바로 호출한다.
@@ -272,6 +281,11 @@ extension PaneSnapshot {
    열리면 취소하고 계속 기다린다. 큐에 쌓인 메시지가 `Stop` 직후 다음 turn 으로 이어지는
    경우와 겹치지 않기 위해서다.
 6. handler 는 정확히 한 번만 호출한다.
+7. 기다리는 동안 10분(`reminderInterval` = 600초)마다 다시 센다. 아직 작업 중인 agent 가
+   있으면 같은 alert 를 다시 띄우고 답은 처음 alert 와 같이 처리한다([Wait for Agents] → 4번,
+   다시 10분 뒤에 묻기 / [Restart Now] → 3번). 0 이면 아무것도 하지 않는다(5번이 처리). 다시 묻는
+   동안에도 pending 이므로 메뉴 항목은 계속 보이고 `onPendingChanged` 는 불리지 않는다.
+   handler 를 호출하면 이 타이머도 취소한다.
 
 pending 동안 앱 메뉴에 "Restart Now to Install Update" 항목이 보인다(평소에는 숨김).
 누르면 3번과 같다.
@@ -309,11 +323,30 @@ DEBUG 빌드에만 "Debug ▸ Simulate Update Relaunch" 를 둔다. Sparkle 을 
 - hook 이 설치되지 않아 session id 가 없음 → resume 없이 빈 셸.
 - foreground 가 agent 가 아님(vim, dev server 등) → resume 없음. 그 프로그램은 지금처럼
   종료된다(alert 본문에 명시).
-- agent cwd 가 복원 시점에 사라짐 → `Pane.resolveCwd` 가 `$HOME` 으로 대체, resume 은
-  실패 메시지를 보이고 셸로 돌아온다.
+- 디렉터리가 복원 시점에 사라짐 → agent cwd 가 없으면 pane 의 저장된 cwd 에서 resume 한다.
+  둘 다 없으면 셸은 `$HOME` 에서 시작하고 resume 명령은 입력하지 않는다. `$HOME` 에서
+  resume 하면 엉뚱한 디렉터리에서 agent 가 권한 플래그를 단 채 돌 수 있기 때문이다
+  (`AgentResumeCapture.restorePlan`). `Pane.resolveCwd` 는 요청한 디렉터리가 없으면 `$HOME`
+  을 쓴다. 앱 프로세스 cwd 로 대체하지 않는 이유는 `startShell` 이 프로세스 cwd 를 바꾸므로
+  그 값이 직전 pane 의 디렉터리이기 때문이다.
 - 두 pane 이 같은 session id 를 쓰고 있었음 → 둘 다 같은 세션으로 resume(원래 상태와 같음).
 - 기다리는 중 ⌘Q → Sparkle 이 종료 시 설치만 하고 다시 띄우지 않는다. resume 하지 않는다.
 - `Stop` 을 놓쳐 `turnOpen` 이 true 로 남음 → [Restart Now] / 메뉴로 빠져나간다.
+- Claude 에서 Esc 로 turn 을 중단하거나 권한 요청을 Esc 로 거절함 → Claude 는 이때 `Stop`
+  을 보내지 않으므로 그 pane 의 `turnOpen` 은 다음 prompt 까지 true 로 남고, [Wait for
+  Agents] 를 고르면 업데이트가 계속 미뤄진다. alert 본문이 메뉴 항목(termy ▸ Restart Now to
+  Install Update)을 알려 주고, 기다리는 동안 10분마다 alert 를 다시 띄워서(§5.7 7번)
+  빠져나갈 길이 보이게 한다. 근본 해결은 termy-hook 이 Claude 의 `notification_type` 을
+  넘겨서 중단을 알아채는 것이다. 후속 작업이며 이 브랜치에는 없다.
+- 같은 pane 에서 agent 가 바뀜(claude 를 끝내고 hook 이 꺼진 codex 를 실행 등) →
+  `PaneStateMachine.apply` 가 `agentKind` 를 다른 종류로 바꿀 때 `lastSessionId` 를 지운다.
+  `ForegroundProcessWatcher` 의 합성 SessionStart 에는 session id 가 없어서, 지우지 않으면
+  `codex resume <claude 의 id>` 가 기록된다. 종류가 같으면 그대로 둔다.
+- session id 나 플래그에 제어 문자가 들어 있음 → resume 명령은 셸 line editor 에 키 입력으로
+  들어가므로 ^U, ^C, ESC 같은 문자는 글자가 아니라 편집 키로 동작해서 따옴표를 벗어날 수
+  있다. session id 가 `[A-Za-z0-9._-]` 밖의 문자를 가지면 기록하지 않고, 이어받을 플래그 중
+  하나라도 제어 문자(U+0000–U+001F, U+007F)를 가지면 플래그를 모두 버린다(값만 버리면 값을
+  받는 플래그가 뒤 인자를 값으로 삼으므로 통째로 버린다).
 - resume 필드를 쓴 뒤 설치가 실패해서 사람이 직접 다시 실행함 → 그 실행에서 resume 한다.
   원래 의도(업데이트를 위한 재시작)와 맞으므로 허용한다.
 - 여러 창 → 모든 창을 같은 방식으로 처리한다.
@@ -329,11 +362,19 @@ DEBUG 빌드에만 "Debug ▸ Simulate Update Relaunch" 를 둔다. Sparkle 을 
   `--continue` 제거, `-p` 의 agent 별 처리.
 - `AgentResumeCommandTests`(신규): 공백·작은따옴표가 든 값의 quoting.
 - `SessionPersistenceTests`: 봉인 뒤의 `save` 가 파일을 덮어쓰지 않음.
-- `AgentResumeCaptureTests`(신규): §5.2 조건 조합.
+- `AgentResumeCaptureTests`(신규): §5.2 조건 조합, 공백이나 제어 문자가 든 session id 는
+  nil, 제어 문자가 든 플래그 값이 있으면 `flags: []`. `restorePlan`: agent cwd 있음 → agent
+  cwd + 명령, agent cwd 없음·pane cwd 있음 → pane cwd + 명령, agent cwd nil·pane cwd 있음 →
+  pane cwd + 명령, 둘 다 없음 → pane cwd + 명령 없음, resume 기록 없음 → pane cwd + 명령 없음.
 - `PaneStateMachineTests`: `turnOpen` 전환 표 전체, "Claude 권한 요청 → Stop" 에서 false,
-  `isMidTurn` 의 `.promotedFromPossible` 예외.
+  `isMidTurn` 의 `.promotedFromPossible` 예외. agent 종류가 바뀌면 `lastSessionId` 를 지움,
+  같은 종류면 유지, 바뀐 뒤 codex 이벤트가 가져온 새 id 로 끝남.
 - `UpdateRelaunchGateTests`(신규): handler 한 번만 호출, 2초 재확인 중 새 turn 이 열리면
-  취소, [Restart Now] 즉시 호출, alert 표시 중 자동 호출 없음.
+  취소, [Restart Now] 즉시 호출, alert 표시 중 자동 호출 없음. 기다리는 동안
+  `reminderInterval` 마다 다시 묻기(pending 변화 알림은 들어갈 때·나올 때 두 번뿐), 0 이 되어
+  settle 로 끝나면 다시 묻지 않고 남은 타이머 없음, alert 본문에 메뉴 항목 이름이 있음.
+- `Pane.resolveCwd` 의 `$HOME` 대체는 private 이고 기존 테스트가 없어 단위 테스트를 두지
+  않는다. 복원 경로의 판단은 `restorePlan` 테스트가 맡는다.
 - `StartupInputSchedulerTests`(신규): 300ms quiet / 3초 상한 / 한 번만 전송.
 
 ## 9. 구현 전 확인 항목
