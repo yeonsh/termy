@@ -22,6 +22,9 @@
 //   WAITING(.permission)         ──(PostToolUse)──▶ THINKING (Codex resumed)
 //   WAITING(.askUserQuestion)    ──(PostToolUse AskUserQuestion)──▶ THINKING
 //   WAITING(.promotedFromPossible) ──(Pre/PostToolUse)──▶ THINKING (recovery, c80d2c4 lineage)
+//   THINKING         ──(Notification permission|mcp_elicit|idle, Claude)──▶ WAITING ♪
+//   WAITING(permission|mcp_elicit) ──(PostToolUse | PostToolUseFailure)──▶ THINKING (Claude)
+//   WAITING(permission|mcp_elicit) ──(Notification idle)──▶ WAITING, attention cleared (no chime)
 //   IDLE      ──(UserPromptSubmit)──────▶ THINKING
 //   IDLE      ──(SessionEnd | PtyExit)──▶ INIT
 //   ERRORED   ──(UserPromptSubmit)──────▶ THINKING
@@ -244,8 +247,18 @@ enum PaneStateMachine {
             // recovers from Read-missing-file, Glob-no-matches, Bash-exit-1
             // and continues the turn. Flipping to ERRORED on every such tool
             // failure makes the dashboard lie ("ERR" on a pane that's still
-            // THINKING). Keep the state unchanged.
+            // THINKING). Keep the state unchanged — except that an approved
+            // Claude tool that then fails proves the dialog was answered.
             next.turnOpen = true
+            if (event.agentKind ?? previous.agentKind) == .claude,
+               previous.state == .waiting,
+               previous.notificationReason == "permission"
+                || previous.notificationReason == "mcp_elicit" {
+                next.state = .thinking
+                next.needsAttention = false
+                next.notificationReason = nil
+                next.enteredStateAt = next.updatedAt
+            }
 
         case .sessionEnd, .ptyExit:
             // PtyExit with non-zero exit → ERRORED; everything else → INIT.
@@ -269,8 +282,16 @@ enum PaneStateMachine {
                 // Esc interrupt), so surface WAIT — the Notifier chimes on
                 // entering it. Any other state already reflects an ended
                 // turn: leave state/attention alone (no second chime).
+                // idle_prompt is only sent with no dialog on screen, so a
+                // WAIT still carrying permission/mcp_elicit is stale (dialog
+                // dismissed, no Stop): clear attention, keep state, no chime.
                 next.turnOpen = false
-                if previous.state == .thinking {
+                if previous.state == .waiting,
+                   previous.notificationReason == "permission"
+                    || previous.notificationReason == "mcp_elicit" {
+                    next.needsAttention = false
+                    next.notificationReason = nil
+                } else if previous.state == .thinking {
                     next.state = .waiting
                     next.needsAttention = true
                     next.notificationReason = "idle"
@@ -290,7 +311,15 @@ enum PaneStateMachine {
                 }
             default:
                 // `auth_success` and unknown reasons preserve state since
-                // Claude continues on its own.
+                // Claude continues on its own. Informational ones (e.g.
+                // elicitation_response, agent_completed) arriving while a
+                // blocking WAIT is outstanding must not overwrite its
+                // reason, or PostToolUse recovery would no longer match.
+                if previous.state == .waiting,
+                   previous.notificationReason == "permission"
+                    || previous.notificationReason == "mcp_elicit" {
+                    break
+                }
                 next.needsAttention = true
                 next.notificationReason = reason
             }
@@ -363,8 +392,10 @@ enum PaneStateMachine {
                       previous.notificationReason == "permission"
                         || previous.notificationReason == "mcp_elicit" {
                 // Claude has no PermissionRequest-style resolve event; a
-                // PostToolUse proves the dialog was answered. PreToolUse does
-                // not (a parallel tool's can arrive while it is still up).
+                // PostToolUse is the best signal the dialog was answered.
+                // PreToolUse is not (a parallel tool's can arrive while it is
+                // still up); a parallel tool's PostToolUse can too, which we
+                // accept because the WAIT chime already played.
                 next.state = .thinking
                 next.needsAttention = false
                 next.notificationReason = nil

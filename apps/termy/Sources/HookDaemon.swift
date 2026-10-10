@@ -508,7 +508,8 @@ actor HookDaemon {
         let now = Date()
         for (id, snapshot) in panes where snapshot.state == .waiting {
             // A WAITING pane with an outstanding attention signal (permission,
-            // mcp_elicit, ask_user_question, post-idle reminder) is NOT idle —
+            // mcp_elicit, ask_user_question; idle notifications only flip a stuck
+            // THINKING pane and clear stale permission attention) is NOT idle —
             // Claude is blocked on the user. Flipping it to IDLE while the
             // signal persists paints the chip accent-blue via backgroundTint's
             // needsAttention branch, making the dashboard read "IDLE label on

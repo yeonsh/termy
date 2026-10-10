@@ -276,6 +276,67 @@ final class PaneStateMachineTests: XCTestCase {
         XCTAssertFalse(after.needsAttention)
     }
 
+    func test_claude_elicitationResponse_doesNotOverwriteMcpElicit() {
+        var s = empty()
+        s.state = .thinking
+        s = PaneStateMachine.apply(makeEvent(.preToolUse, toolName: "mcp__x"), to: s)
+        s = PaneStateMachine.apply(claudeNotification("elicitation_dialog"), to: s)
+        s = PaneStateMachine.apply(claudeNotification("elicitation_response"), to: s)
+        XCTAssertEqual(s.state, .waiting)
+        XCTAssertEqual(s.notificationReason, "mcp_elicit")
+        XCTAssertTrue(s.needsAttention)
+        s = PaneStateMachine.apply(makeEvent(.postToolUse, toolName: "mcp__x"), to: s)
+        XCTAssertEqual(s.state, .thinking)
+        XCTAssertNil(s.notificationReason)
+        XCTAssertFalse(s.needsAttention)
+    }
+
+    func test_claude_informationalNotification_duringPermissionWait_keepsReason() {
+        var s = empty()
+        s.state = .thinking
+        s = PaneStateMachine.apply(claudeNotification("permission_prompt"), to: s)
+        s = PaneStateMachine.apply(claudeNotification("agent_completed"), to: s)
+        XCTAssertEqual(s.notificationReason, "permission")
+        XCTAssertTrue(s.needsAttention)
+        s = PaneStateMachine.apply(makeEvent(.postToolUse, toolName: "Bash"), to: s)
+        XCTAssertEqual(s.state, .thinking)
+    }
+
+    func test_claude_informationalNotification_whileThinking_storesAsBefore() {
+        var s = empty()
+        s.state = .thinking
+        let after = PaneStateMachine.apply(claudeNotification("agent_completed"), to: s)
+        XCTAssertEqual(after.state, .thinking)
+        XCTAssertTrue(after.needsAttention)
+        XCTAssertEqual(after.notificationReason, "agent_completed")
+    }
+
+    func test_claude_postToolUseFailure_afterPermission_recovers() {
+        var s = empty()
+        s.state = .thinking
+        s = PaneStateMachine.apply(claudeNotification("permission_prompt"), to: s)
+        s = PaneStateMachine.apply(makeEvent(.postToolUseFailure, toolName: "Bash"), to: s)
+        XCTAssertEqual(s.state, .thinking)
+        XCTAssertFalse(s.needsAttention)
+        XCTAssertNil(s.notificationReason)
+        XCTAssertTrue(s.turnOpen)
+    }
+
+    func test_claude_idlePrompt_onStalePermissionWait_clearsAttentionKeepsWaiting() {
+        var s = empty()
+        s.state = .thinking
+        s.turnOpen = true
+        s = PaneStateMachine.apply(claudeNotification("permission_prompt"), to: s)
+        let entered = s.enteredStateAt
+        let after = PaneStateMachine.apply(claudeNotification("idle_prompt"), to: s)
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertNil(after.notificationReason)
+        XCTAssertFalse(after.turnOpen)
+        XCTAssertFalse(after.isMidTurn)
+        XCTAssertEqual(after.enteredStateAt, entered)
+    }
+
     func test_claude_elicitationDialog_waitsThenPostToolUseRecovers() {
         var s = empty()
         s.state = .thinking
