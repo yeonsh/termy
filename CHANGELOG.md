@@ -6,6 +6,17 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.9 — 2026-10-10
+
+- Text you select in Claude Code's fullscreen mode now stays selected while
+  you scroll. termy used to take over every click to make its own selection,
+  and that selection disappeared as soon as Claude Code redrew the screen to
+  scroll. Clicks and drags now go to apps that use the mouse, like Claude
+  Code fullscreen, tmux, and vim, the same as in Ghostty and iTerm2. Claude
+  Code copies your selection to the clipboard when you release the mouse.
+  Hold Shift while dragging to use termy's own selection instead.
+  Cmd+click still opens links.
+
 ## 0.2.8 — 2026-10-07
 
 - termy now runs on SwiftTerm 1.20, a newer version of the terminal engine
