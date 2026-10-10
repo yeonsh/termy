@@ -6,6 +6,15 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+- Updating termy no longer ends your Claude Code and Codex sessions. When
+  you choose Install and Relaunch while an agent is in the middle of a turn,
+  termy asks whether to wait and restarts once every agent has finished.
+  After the restart, each pane that was running an agent reopens the same
+  conversation with `claude --resume` or `codex resume`, keeping flags such
+  as `--model` and `--dangerously-skip-permissions`. The version doing the
+  restart must have this feature, so it takes effect from the update after
+  this one.
+
 ## 0.2.9 — 2026-10-10
 
 - Text you select in Claude Code's fullscreen mode now stays selected while
