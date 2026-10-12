@@ -371,20 +371,61 @@ final class TermyTerminalViewTests: XCTestCase {
         XCTAssertFalse(view.selectionActive)
     }
 
+    /// The link monitor swallows the Cmd+click mouseUp it opened a link on,
+    /// so the restore monitor never sees it. Reporting must come back on
+    /// anyway, or the next plain click never reaches the child.
     @MainActor
-    private static func mouseCapturingTerminal() -> TermyTerminalView {
+    func test_cmdClickOpeningMarkdownLink_underMouseCapture_restoresReporting() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent("docs"),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("docs/x.md")
+        try "# x\n".write(to: file, atomically: true, encoding: .utf8)
+
+        let view = Self.mouseCapturingTerminal(showing: "docs/x.md")
+        var opened: [URL] = []
+        view.markdownBaseDirectories = { [dir.path] }
+        view.onOpenMarkdownFile = { opened.append($0) }
+
+        view.handleClickInBounds(try XCTUnwrap(Self.leftMouseDown(modifierFlags: .command)))
+        XCTAssertFalse(view.allowMouseReporting)
+        // Top-left cell, where the path starts.
+        let mouseUp = try XCTUnwrap(Self.mouseEvent(
+            .leftMouseUp,
+            at: NSPoint(x: 2, y: view.frame.height - 2),
+            modifierFlags: .command
+        ))
+
+        XCTAssertNil(view.handleLinkClickMouseUp(mouseUp), "the link monitor consumes the click")
+        XCTAssertEqual(opened, [file.resolvingSymlinksInPath()])
+        XCTAssertTrue(view.allowMouseReporting)
+    }
+
+    @MainActor
+    private static func mouseCapturingTerminal(showing text: String = "hello") -> TermyTerminalView {
         let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
         // Alternate screen + any-event tracking + SGR, as Claude Code
         // fullscreen sets them.
-        view.feed(text: "\u{1b}[?1049h\u{1b}[?1003h\u{1b}[?1006hhello")
+        view.feed(text: "\u{1b}[?1049h\u{1b}[?1003h\u{1b}[?1006h" + text)
         XCTAssertEqual(view.terminal.mouseMode, .anyEvent)
         XCTAssertTrue(view.allowMouseReporting)
         return view
     }
 
     private static func leftMouseDown(modifierFlags: NSEvent.ModifierFlags) -> NSEvent? {
+        mouseEvent(.leftMouseDown, at: NSPoint(x: 10, y: 10), modifierFlags: modifierFlags)
+    }
+
+    private static func mouseEvent(
+        _ type: NSEvent.EventType,
+        at location: NSPoint,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> NSEvent? {
         NSEvent.mouseEvent(
-            with: .leftMouseDown, location: NSPoint(x: 10, y: 10),
+            with: type, location: location,
             modifierFlags: modifierFlags, timestamp: 0, windowNumber: 0,
             context: nil, eventNumber: 0, clickCount: 1, pressure: 1
         )

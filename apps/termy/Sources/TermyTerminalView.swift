@@ -212,12 +212,17 @@ final class TermyTerminalView: LocalProcessTerminalView {
 
         selectionReportingRestoreMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
             guard let self else { return event }
-            if self.reportingWasOverriddenForClick {
-                self.reportingWasOverriddenForClick = false
-                self.allowMouseReporting = true
-            }
+            self.endClickReportingOverride()
             return event
         }
+    }
+
+    /// Ends the Cmd+click mouse-reporting override started in
+    /// `handleClickInBounds`.
+    private func endClickReportingOverride() {
+        guard reportingWasOverriddenForClick else { return }
+        reportingWasOverriddenForClick = false
+        allowMouseReporting = true
     }
 
     /// An unshifted left-mouse-down inside the view, before SwiftTerm's own
@@ -243,15 +248,24 @@ final class TermyTerminalView: LocalProcessTerminalView {
         // and mouse reporting are unaffected.
         linkClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
             guard let self else { return event }
-            guard event.modifierFlags.contains(.command) else { return event }
-            guard event.window === self.window else { return event }
-            let local = self.convert(event.locationInWindow, from: nil)
-            guard self.bounds.contains(local) else { return event }
-            if self.openLinkUnderMouse(windowLocation: event.locationInWindow) {
-                return nil
-            }
-            return event
+            return self.handleLinkClickMouseUp(event)
         }
+    }
+
+    /// The link monitor's body: nil when a Cmd+click mouseUp over this
+    /// view opened a link, the event itself otherwise.
+    func handleLinkClickMouseUp(_ event: NSEvent) -> NSEvent? {
+        guard event.modifierFlags.contains(.command) else { return event }
+        guard event.window === window else { return event }
+        let local = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(local) else { return event }
+        if openLinkUnderMouse(windowLocation: event.locationInWindow) {
+            // Monitors that run after this one never see a nil-returned
+            // event, the restore monitor included; end the override here.
+            endClickReportingOverride()
+            return nil
+        }
+        return event
     }
 
     private func openLinkUnderMouse(windowLocation: NSPoint) -> Bool {
