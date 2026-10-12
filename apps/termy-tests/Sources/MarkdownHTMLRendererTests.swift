@@ -88,6 +88,23 @@ final class MarkdownHTMLRendererTests: XCTestCase {
         )
     }
 
+    func test_escapeHandlesSpecialCharactersFollowedByCombiningMarks() {
+        XCTAssertEqual(
+            MarkdownHTMLRenderer.escape("\"\u{301}<\u{301}&\u{301}"),
+            "&quot;\u{301}&lt;\u{301}&amp;\u{301}"
+        )
+    }
+
+    func test_linkDestinationWithQuoteAndCombiningMarkStaysInsideHref() {
+        let html = body("[a](<x\"\u{301}y>)")
+        XCTAssertTrue(html.contains("href=\"x&quot;\u{301}y\""), html)
+    }
+
+    func test_codeFenceLanguageWithQuoteAndCombiningMarkStaysInsideClass() {
+        let html = body("```sw\"\u{301}ift\nx\n```\n")
+        XCTAssertTrue(html.contains("class=\"language-sw&quot;\u{301}ift\""), html)
+    }
+
     /// Smoke test on a real spec: tables and task lists from this repo's
     /// own docs render without falling back to raw text.
     func test_rendersThisFeaturesSpec() throws {

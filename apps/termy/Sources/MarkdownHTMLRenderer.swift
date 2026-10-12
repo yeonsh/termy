@@ -45,14 +45,16 @@ enum MarkdownHTMLRenderer {
     static func escape(_ text: String) -> String {
         var out = ""
         out.reserveCapacity(text.utf8.count)
-        for character in text {
-            switch character {
+        // Scalars, not Characters: a special character followed by a combining
+        // mark is one grapheme cluster that would match no case below.
+        for scalar in text.unicodeScalars {
+            switch scalar {
             case "&": out += "&amp;"
             case "<": out += "&lt;"
             case ">": out += "&gt;"
             case "\"": out += "&quot;"
             case "'": out += "&#39;"
-            default: out.append(character)
+            default: out.unicodeScalars.append(scalar)
             }
         }
         return out
