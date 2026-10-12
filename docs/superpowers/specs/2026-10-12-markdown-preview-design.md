@@ -107,7 +107,8 @@ enum MarkdownLinkResolver {
 
 1. 앞뒤 공백을 자른다. 앞쪽의 `(` `[` `` ` `` `'` `"`, 뒤쪽의 `.` `,` `;` `:` `!` `?` `)` `]`
    `` ` `` `'` `"`를 반복해서 떼어 낸다.
-2. `file://`로 시작하면 `URL(string:)`의 `path`(percent 디코딩됨)를 쓴다.
+2. `file://`로 시작하면 `URL(string:)`의 `path`(percent 디코딩됨)를 쓴다. 그 밖에 `://`가
+   들어 있으면(`https://…/README.md` 같은 웹 URL) `.notMarkdown`이다.
 3. `#` 뒤(fragment: `#L12`, `#heading`)를 버린다. 끝의 `:숫자` 또는 `:숫자:숫자`를 버린다.
 4. 마지막 경로 요소의 확장자가 `extensions`에 없으면(대소문자 무시) `.notMarkdown`.
 5. `~/`로 시작하면 `homeDirectory`로 바꾼다. `/`로 시작하면 절대 경로다. 그 밖은 상대 경로로
@@ -204,7 +205,8 @@ GitHub와 비슷하게 꾸미고, 시스템 글꼴과 `ui-monospace`를 쓴다. 
 ```swift
 struct FileFingerprint: Equatable { let inode: UInt64; let size: Int64; let mtimeNanoseconds: Int64 }
 
-enum FileChange: Equatable { case none, modified, deleted, recreated }
+// `.none`은 Optional.none과 헷갈리므로 `.unchanged`라고 부른다.
+enum FileChange: Equatable { case unchanged, modified, deleted, recreated }
 
 final class MarkdownFileWatcher {
     init(fileURL: URL, onChange: @escaping (FileChange) -> Void)
@@ -218,8 +220,8 @@ final class MarkdownFileWatcher {
   디렉터리 감시는 atomic save로 파일이 다시 생기는 것을 잡는다.
 - 이벤트가 오면 main queue에서 150ms debounce한 뒤 `stat`으로 fingerprint를 다시 구하고
   `classify`로 판정한다.
-  - `nil → nil`: `.none`
-  - 같음: `.none`
+  - `nil → nil`: `.unchanged`
+  - 같음: `.unchanged`
   - `a → b`(inode·크기·mtime 중 하나라도 다름): `.modified`
   - `a → nil`: `.deleted`
   - `nil → a`: `.recreated`
@@ -234,7 +236,7 @@ final class MarkdownFileWatcher {
   창이 있으면 `makeKeyAndOrderFront`, 없으면 새 controller를 만들어 보여 준다.
 - `closeAll()`: 열린 프리뷰 창을 모두 닫는다.
 - controller의 `windowWillClose`에서 목록에서 뺀다.
-- `isPreviewWindow(_ window: NSWindow?) -> Bool`: AppDelegate가 메뉴 판정에 쓴다.
+- `static func isPreviewWindow(_ window: NSWindow?) -> Bool`: AppDelegate가 메뉴 판정에 쓴다.
 
 `MarkdownPreviewWindowController` (`NSWindowController`, `NSWindowDelegate`, `WKNavigationDelegate`):
 
@@ -328,6 +330,11 @@ Cmd+클릭 (leftMouseUp)
   수정·삭제·rename 후 재생성 이벤트를 받는지 한 번씩 확인한다(expectation, 짧은 timeout).
 - `MarkdownPreviewManagerTests`: 같은 URL 두 번 → 창 하나, symlink 경로 → 같은 창,
   `closeAll` 후 비어 있음, `isPreviewWindow` 판정.
+- `MarkdownPreviewWindowControllerTests`: 링크 정책(`route`)의 각 분기, 저장된 창 크기 읽기,
+  창 제목·subtitle.
+- `AppDelegatePreviewMenuTests`: 메뉴 판정 함수(`previewMenuState`)가 프리뷰가 key일 때 pane
+  액션을 끄고 ⌘W 제목을 바꾸는지. key window를 실제로 바꾸는 부분과 `WindowManager.removeWindow`
+  연결은 §10에서 확인한다.
 
 실제 동작 검증은 §10.
 
@@ -335,10 +342,13 @@ Cmd+클릭 (leftMouseUp)
 
 1. swift-markdown 0.9.0이 termy 빌드(Xcode 26.6, Swift 6 언어 모드,
    `-skipPackagePluginValidation`)에서 resolve·컴파일되는가.
-2. `allowsContentJavaScript = false`인 상태에서 `.defaultClient` content world의
-   `evaluateJavaScript` / `callAsyncJavaScript`가 동작하는가(스크롤 유지). 안 되면 JS를 켜고 CSP
-   `script-src 'none'`으로 페이지 script를 막는 쪽으로 바꾼다.
-3. WKWebView의 `prefers-color-scheme`가 `NSApp.appearance`(termy 라이트/다크 설정)를 따르는가.
+2. ~~`allowsContentJavaScript = false`인 상태에서 `.defaultClient` content world의
+   `callAsyncJavaScript`가 동작하는가(스크롤 유지).~~ **확인함(2026-10-12)**: 독립 실행 probe에서
+   페이지 `<script>`는 실행되지 않았고, `.defaultClient`의 `scrollTo(0, 1234)` 후 `scrollY`가
+   1234로 읽혔다.
+3. ~~WKWebView의 `prefers-color-scheme`가 `NSApp.appearance`를 따르는가.~~ **확인함(2026-10-12)**:
+   `NSApp.appearance`가 `.darkAqua`이면 `matchMedia('(prefers-color-scheme: dark)')`가 true,
+   `.aqua`이면 false였다. 앱 실행 중 테마를 바꿨을 때 따라가는지는 §10에서 확인한다.
 
 ## 10. 실제 동작 검증
 
