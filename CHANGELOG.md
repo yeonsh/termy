@@ -6,6 +6,14 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.12 — 2026-10-12
+
+- Typing Korean in the middle of a line no longer hides the rest of the
+  line. When you moved the cursor back into a Claude Code prompt or a
+  shell command and started a Hangul syllable, everything to the right of
+  the cursor disappeared until the syllable was finished. Now only the
+  cell under the syllable you're composing is covered.
+
 ## 0.2.11 — 2026-10-12
 
 - Cmd+click a Markdown file path in a pane — a spec or plan Claude Code
