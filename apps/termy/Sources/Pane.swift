@@ -403,8 +403,13 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     }
 
     /// Where a relative markdown path printed in this pane most likely
-    /// points: the agent's cwd (hook-reported — Claude Code prints paths
-    /// relative to it), then the shell's, then the shell's repo root.
+    /// points: the shell's cwd, then the agent's (hook-reported), then the
+    /// shell's repo root. While an agent runs the shell cwd is where it was
+    /// launched, which is what it prints paths relative to. The shell goes
+    /// first because the agent cwd outlives the agent: after `exit` and
+    /// `cd other-project`, `README.md` must not open the old project's file.
+    /// Scrollback from that older session still resolves through the agent
+    /// cwd.
     func markdownBaseDirectories() -> [String] {
         Self.markdownBaseDirectories(
             agentCwd: MissionControlModel.shared.snapshot(paneId: paneId)?.lastCwd,
@@ -419,7 +424,7 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         workTreeRoot: String?
     ) -> [String] {
         var result: [String] = []
-        for directory in [agentCwd, shellCwd, workTreeRoot] {
+        for directory in [shellCwd, agentCwd, workTreeRoot] {
             guard let directory, !directory.isEmpty, !result.contains(directory) else { continue }
             result.append(directory)
         }
