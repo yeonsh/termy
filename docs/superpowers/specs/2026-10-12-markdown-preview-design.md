@@ -293,9 +293,16 @@ final class MarkdownFileWatcher {
 - 링크 정책(`decidePolicyFor navigationAction`):
   - `.other`는 대상이 문서 자신(`file` URL이고 path가 문서 path와 같음)일 때만 허용한다. 우리가
     부른 `loadHTMLString`이 이 경우다(테스트 host에서 request URL이 baseURL, 즉 문서 URL 그대로임을
-    확인했다). WebKit은 context menu의 "Open Link"와 링크·파일 drag-and-drop도 `.other`로 보내므로,
-    그 밖의 `.other`는 아래 `.linkActivated`와 똑같이 처리한다. 그래서 프리뷰 창 자체가 다른
-    페이지나 파일로 바뀌지 않는다.
+    확인했다). WebKit은 context menu의 "Open Link"도 `.other`로 보내므로, 그 밖의 `.other`는 아래
+    `.linkActivated`와 똑같이 처리한다. 그래서 프리뷰 창 자체가 다른 페이지나 파일로 바뀌지 않는다.
+- 파일 drop: WKWebView는 최신 SDK로 빌드한 앱에서 drop으로 페이지를 불러오는 동작(Load drop
+  action)을 기본으로 끈다(`WKWebViewMac.mm`의 `DropToNavigateDisallowedByDefault`). 그래서 파일
+  drop은 navigation이 되지 않고 위 링크 정책에도 오지 않는다(2026-10-12 실제 앱에서 drop 시
+  navigation 0건으로 확인). 대신 `MarkdownPreviewWebView`(WKWebView subclass)가
+  `draggingEntered` / `draggingUpdated` / `performDragOperation`에서 drag pasteboard의 file URL을
+  직접 읽는다. md 파일이 하나라도 있으면 `.copy`로 받아 각각을 `MarkdownPreviewManager.shared.open`
+  으로 열고, file URL은 있는데 md가 없으면 거절한다(`[]` / `false`). file URL이 없는 drag는
+  WebKit에 그대로 넘긴다.
   - `.reload`(context menu의 Reload)는 취소한다. base URL을 다시 불러오면 원본 `.md`가 plain
     text로 보이기 때문이다. live reload는 `.reload`가 아니라 `loadHTMLString`을 다시 부른다.
   - 같은 문서의 fragment 이동(fragment를 뗀 URL이 현재 문서 URL과 같음): 허용(WebKit이 스크롤).
@@ -408,19 +415,20 @@ Cmd+클릭 (leftMouseUp)
 확인할 수 없고, Debug 빌드(`-derivedDataPath build/DerivedData-debug`)를 만든 뒤 사용자가
 아래 목록을 확인한다.
 
-- [ ] Claude Code가 출력한 상대 경로 `.md`를 Cmd+클릭 → 프리뷰 창이 뜬다.
-- [ ] 같은 경로를 다시 Cmd+클릭 → 새 창 없이 기존 창이 앞으로 온다.
-- [ ] 다른 `.md` 경로 → 창이 하나 더 뜬다.
-- [ ] 좁은 pane에서 두 줄로 나뉜 긴 경로를 Cmd+클릭 → 열린다(안 되면 기록).
-- [ ] 없는 `.md` 경로 → beep, 창 없음.
-- [ ] 표·체크리스트·코드 블록이 제대로 보인다. 라이트/다크 전환을 따른다.
-- [ ] agent가 파일을 고치면 스크롤 위치를 유지한 채 갱신된다.
-- [ ] 프리뷰에 포커스를 두고 ⌘W → 프리뷰만 닫힌다. File 메뉴 제목이 "Close Preview"다.
-- [ ] 프리뷰에 포커스를 두고 ⌘T / split 단축키 → 아무 일도 없다.
-- [ ] 프리뷰 안 `https` 링크 → 브라우저, 상대 `.md` 링크 → 새 프리뷰 창, `#heading` 링크 → 이동.
+- [x] Claude Code가 출력한 상대 경로 `.md`를 Cmd+클릭 → 프리뷰 창이 뜬다.
+- [x] 같은 경로를 다시 Cmd+클릭 → 새 창 없이 기존 창이 앞으로 온다.
+- [x] 다른 `.md` 경로 → 창이 하나 더 뜬다.
+- [x] 좁은 pane에서 두 줄로 나뉜 긴 경로를 Cmd+클릭 → 열린다(안 되면 기록).
+- [x] 없는 `.md` 경로 → beep, 창 없음.
+- [x] 표·체크리스트·코드 블록이 제대로 보인다. 라이트/다크 전환을 따른다.
+- [x] agent가 파일을 고치면 스크롤 위치를 유지한 채 갱신된다.
+- [x] 프리뷰에 포커스를 두고 ⌘W → 프리뷰만 닫힌다. File 메뉴 제목이 "Close Preview"다.
+- [x] 프리뷰에 포커스를 두고 ⌘T / split 단축키 → 아무 일도 없다.
+- [x] 프리뷰 안 `https` 링크 → 브라우저, 상대 `.md` 링크 → 새 프리뷰 창, `#heading` 링크 → 이동.
 - [ ] 메인 창을 모두 닫음 → 프리뷰도 닫히고 앱이 종료된다.
-- [ ] 한국어 요약 줄(`…/x.md에 저장했습니다.`)에서 경로를 Cmd+클릭 → 열린다.
-- [ ] Claude Code fullscreen에서 md 경로를 Cmd+클릭한 직후 일반 클릭이 Claude Code에 제대로 전달된다.
-- [ ] 프리뷰 안 링크를 우클릭 → "Open Link" → https는 브라우저, md는 새 프리뷰, 그 밖은 아무 일 없음. 프리뷰 창 자체는 다른 페이지로 바뀌지 않는다.
-- [ ] 파일을 프리뷰 창에 drag → 프리뷰 창이 바뀌지 않는다(md면 새 프리뷰).
-- [ ] 모니터가 둘 이상일 때 프리뷰가 클릭한 termy 창이 있는 화면에 뜬다.
+- [x] 한국어 요약 줄(`…/x.md에 저장했습니다.`)에서 경로를 Cmd+클릭 → 열린다.
+- [x] Claude Code fullscreen에서 md 경로를 Cmd+클릭한 직후 일반 클릭이 Claude Code에 제대로 전달된다.
+- [x] 프리뷰 안 링크를 우클릭 → "Open Link" → https는 브라우저, md는 새 프리뷰, 그 밖은 아무 일 없음. 프리뷰 창 자체는 다른 페이지로 바뀌지 않는다.
+- [ ] md 파일을 프리뷰 창에 drag → 그 파일의 프리뷰가 열린다(이미 열려 있으면 앞으로). md가 아닌
+      파일은 금지 커서가 뜨고 아무 일도 없다. 어느 경우든 원래 프리뷰 창의 내용은 바뀌지 않는다.
+- [x] 모니터가 둘 이상일 때 프리뷰가 클릭한 termy 창이 있는 화면에 뜬다.

@@ -6,7 +6,8 @@
 // go through, links leave for the browser or open another preview, nothing
 // else happens. Live reloads keep the reader's place by reading and
 // restoring `scrollY` from the `.defaultClient` content world, which the
-// page JavaScript switch doesn't affect.
+// page JavaScript switch doesn't affect. Markdown files dropped onto the
+// window open in their own previews (`MarkdownPreviewWebView`).
 
 import AppKit
 import WebKit
@@ -29,7 +30,7 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
     /// Called from `windowWillClose`; the manager forgets the window here.
     var onClose: ((MarkdownPreviewWindowController) -> Void)?
 
-    let webView: WKWebView
+    let webView: MarkdownPreviewWebView
     private let defaults: UserDefaults
     private var watcher: MarkdownFileWatcher?
     private var lastMarkdown = ""
@@ -49,10 +50,15 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.websiteDataStore = .nonPersistent()
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = MarkdownPreviewWebView(frame: .zero, configuration: configuration)
         // Force Touch previews load link targets without asking
         // `decidePolicyFor`.
         webView.allowsLinkPreview = false
+        webView.onDropMarkdownFiles = { urls in
+            for url in urls {
+                MarkdownPreviewManager.shared.open(url)
+            }
+        }
         self.webView = webView
 
         let window = NSWindow(
@@ -192,6 +198,13 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
             documentURL: fileURL,
             isRegularFile: MarkdownLinkResolver.fileExistsAsRegularFile
         )
+        // PROBE (temporary)
+        NSLog("PREVIEW-NAV type=%ld url=%@ filePath=%@ doc=%@ route=%@",
+              navigationAction.navigationType.rawValue,
+              navigationAction.request.url?.absoluteString ?? "nil",
+              (navigationAction.request.url as NSURL?)?.filePathURL?.path ?? "nil",
+              fileURL.path,
+              String(describing: route))
         switch route {
         case .allow:
             return .allow
