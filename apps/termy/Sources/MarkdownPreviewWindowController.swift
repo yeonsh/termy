@@ -29,12 +29,19 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
     /// Called from `windowWillClose`; the manager forgets the window here.
     var onClose: ((MarkdownPreviewWindowController) -> Void)?
 
-    private let webView: WKWebView
+    let webView: WKWebView
     private let defaults: UserDefaults
     private var watcher: MarkdownFileWatcher?
     private var lastMarkdown = ""
     private var hasLoaded = false
     private var pendingScrollY: Double?
+    /// Bumped per render; a render that finds a newer one gives up, so the
+    /// newest HTML always wins.
+    private var renderGeneration = 0
+    /// Counts started loads, so a scroll read can tell a load began under it.
+    private var loadCount = 0
+    /// The newest load; only its callbacks may restore or drop the scroll.
+    private var currentNavigation: WKNavigation?
 
     init(fileURL: URL, defaults: UserDefaults = .standard) {
         self.fileURL = fileURL
@@ -110,26 +117,41 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
             title: fileURL.lastPathComponent,
             banner: banner
         )
+        renderGeneration += 1
+        let generation = renderGeneration
         guard hasLoaded else {
             hasLoaded = true
-            webView.loadHTMLString(html, baseURL: fileURL)
+            startLoad(html)
             return
         }
         Task { [weak self] in
             guard let self else { return }
-            let scrollY = try? await self.webView.callAsyncJavaScript(
-                "return window.scrollY;",
-                contentWorld: .defaultClient
-            ) as? Double
-            self.pendingScrollY = scrollY
-            self.webView.loadHTMLString(html, baseURL: self.fileURL)
+            // A page that is still loading has no real position; keep the
+            // one saved before that load started.
+            if !self.webView.isLoading {
+                let loadsBefore = self.loadCount
+                let scrollY = try? await self.webView.callAsyncJavaScript(
+                    "return window.scrollY;",
+                    contentWorld: .defaultClient
+                ) as? Double
+                if let scrollY, loadsBefore == self.loadCount {
+                    self.pendingScrollY = scrollY
+                }
+            }
+            guard generation == self.renderGeneration else { return }
+            self.startLoad(html)
         }
+    }
+
+    private func startLoad(_ html: String) {
+        loadCount += 1
+        currentNavigation = webView.loadHTMLString(html, baseURL: fileURL)
     }
 
     // MARK: - WKNavigationDelegate
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard let scrollY = pendingScrollY else { return }
+        guard navigation === currentNavigation, let scrollY = pendingScrollY else { return }
         pendingScrollY = nil
         Task {
             _ = try? await webView.callAsyncJavaScript(
@@ -138,6 +160,23 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
                 contentWorld: .defaultClient
             )
         }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        dropPendingScroll(for: navigation)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        dropPendingScroll(for: navigation)
+    }
+
+    /// A failed newest load must not leak its saved position into the next one.
+    private func dropPendingScroll(for navigation: WKNavigation?) {
+        if navigation === currentNavigation { pendingScrollY = nil }
     }
 
     func webView(

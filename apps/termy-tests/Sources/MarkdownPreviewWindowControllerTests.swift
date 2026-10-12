@@ -90,4 +90,65 @@ final class MarkdownPreviewWindowControllerTests: XCTestCase {
         XCTAssertEqual(controller.window?.subtitle, (dir.path as NSString).abbreviatingWithTildeInPath)
         XCTAssertEqual(controller.window?.representedURL, url)
     }
+
+    // MARK: - Live reload
+
+    /// The app delegate quits when the last visible window closes; keep one up.
+    private static let sentinel: NSWindow = {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        return window
+    }()
+
+    private func eval(_ controller: MarkdownPreviewWindowController, _ js: String) async -> Any? {
+        (try? await controller.webView.callAsyncJavaScript(js, contentWorld: .defaultClient)) ?? nil
+    }
+
+    private func waitUntil(timeout: TimeInterval = 15, _ condition: () async -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return false
+    }
+
+    private func longMarkdown(version: Int) -> String {
+        "# VERSION-\(version)\n\n" + (1...300).map { "Paragraph \($0) of the long document.\n" }.joined(separator: "\n")
+    }
+
+    func test_liveReload_keepsScrollPositionAndShowsNewestContent() async throws {
+        Self.sentinel.orderFront(nil)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("long.md")
+        try longMarkdown(version: 1).write(to: url, atomically: true, encoding: .utf8)
+
+        let controller = MarkdownPreviewWindowController(fileURL: url, defaults: makeDefaults())
+        defer { controller.close() }
+        controller.window?.orderFront(nil)
+
+        let loaded = await waitUntil { (await self.eval(controller, "return document.body.innerText.includes('VERSION-1');") as? Bool) == true }
+        XCTAssertTrue(loaded, "first load")
+        _ = await eval(controller, "window.scrollTo(0, 2000);")
+        let scrolled = await waitUntil { abs(((await self.eval(controller, "return window.scrollY;")) as? Double ?? 0) - 2000) < 2 }
+        XCTAssertTrue(scrolled, "scrolled to 2000")
+
+        try longMarkdown(version: 2).write(to: url, atomically: true, encoding: .utf8)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        try longMarkdown(version: 3).write(to: url, atomically: true, encoding: .utf8)
+
+        let showsNewest = await waitUntil { (await self.eval(controller, "return document.body.innerText.includes('VERSION-3');") as? Bool) == true }
+        XCTAssertTrue(showsNewest, "newest content")
+        let restored = await waitUntil { abs(((await self.eval(controller, "return window.scrollY;")) as? Double ?? 0) - 2000) < 2 }
+        XCTAssertTrue(restored, "scroll restored")
+        // Stays put once things settle.
+        try await Task.sleep(nanoseconds: 500_000_000)
+        let finalY = await eval(controller, "return window.scrollY;") as? Double ?? -1
+        XCTAssertEqual(finalY, 2000, accuracy: 2)
+    }
 }
