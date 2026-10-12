@@ -50,6 +50,9 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.websiteDataStore = .nonPersistent()
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        // Force Touch previews load link targets without asking
+        // `decidePolicyFor`.
+        webView.allowsLinkPreview = false
         self.webView = webView
 
         let window = NSWindow(
@@ -211,11 +214,17 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
         isRegularFile: (String) -> Bool
     ) -> LinkRoute {
         switch navigationType {
-        case .other, .reload:
-            // Our own `loadHTMLString` and the context menu's Reload. Page
-            // JS is off and raw HTML is escaped, so the page itself can't
-            // start one of these.
-            return .allow
+        case .other:
+            // Our own loadHTMLString targets the document itself. Any other
+            // `.other` is WebKit acting for the user (context-menu Open Link,
+            // a drop), so route it like a click.
+            guard let url else { return .cancel }
+            if url.isFileURL, url.path == documentURL.path { return .allow }
+            return linkRoute(for: url, documentURL: documentURL, isRegularFile: isRegularFile)
+        case .reload:
+            // Would load the base URL itself, the raw `.md` as plain text.
+            // Live reload renders anew instead.
+            return .cancel
         case .linkActivated:
             guard let url else { return .cancel }
             return linkRoute(for: url, documentURL: documentURL, isRegularFile: isRegularFile)

@@ -23,9 +23,22 @@ final class MarkdownPreviewWindowControllerTests: XCTestCase {
         UserDefaults(suiteName: "MarkdownPreviewWindowControllerTests-\(UUID().uuidString)")!
     }
 
-    func test_route_allowsOwnLoadsAndReload() {
+    /// Reload would load the base URL itself: the raw `.md` as plain text.
+    func test_route_allowsOwnLoadsAndCancelsReload() {
         XCTAssertEqual(route(.other, "file:///proj/docs/spec.md"), .allow)
-        XCTAssertEqual(route(.reload, "file:///proj/docs/spec.md"), .allow)
+        XCTAssertEqual(route(.reload, "file:///proj/docs/spec.md"), .cancel)
+    }
+
+    /// WebKit files the context menu's Open Link and drops under `.other`
+    /// too; those must not navigate the preview away from the document.
+    func test_route_routesOtherNavigationsLikeClicks() {
+        XCTAssertEqual(route(.other, "https://example.com/a"), .openExternally(URL(string: "https://example.com/a")!))
+        XCTAssertEqual(
+            route(.other, "file:///proj/docs/plan.md", existing: ["/proj/docs/plan.md"]),
+            .preview(URL(fileURLWithPath: "/proj/docs/plan.md").resolvingSymlinksInPath())
+        )
+        XCTAssertEqual(route(.other, "file:///etc/hosts", existing: ["/etc/hosts"]), .cancel)
+        XCTAssertEqual(route(.other, nil), .cancel)
     }
 
     func test_route_sendsWebLinksToBrowser() {
@@ -89,6 +102,19 @@ final class MarkdownPreviewWindowControllerTests: XCTestCase {
         XCTAssertEqual(controller.window?.title, "spec.md")
         XCTAssertEqual(controller.window?.subtitle, (dir.path as NSString).abbreviatingWithTildeInPath)
         XCTAssertEqual(controller.window?.representedURL, url)
+    }
+
+    /// Force Touch link previews load the target outside `decidePolicyFor`.
+    func test_webViewHasNoLinkPreview() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("spec.md")
+        try "# Hi\n".write(to: url, atomically: true, encoding: .utf8)
+
+        let controller = MarkdownPreviewWindowController(fileURL: url, defaults: makeDefaults())
+        defer { controller.close() }
+        XCTAssertFalse(controller.webView.allowsLinkPreview)
     }
 
     // MARK: - Live reload
