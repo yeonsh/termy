@@ -6,6 +6,8 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.11 — 2026-10-12
+
 - Cmd+click a Markdown file path in a pane — a spec or plan Claude Code
   just wrote, for example — to open it rendered in its own window. Tables,
   task lists and code blocks look the way they do on GitHub, and the
@@ -13,6 +15,8 @@ extracts the matching section into the Sparkle appcast `<description>`.
   the file, the preview updates in place and keeps your scroll position.
   Clicking a path to a file that doesn't exist beeps. ⌘W closes the
   preview without touching your panes.
+- Drop a Markdown file onto a preview window to open it in a preview of
+  its own.
 
 ## 0.2.10 — 2026-10-10
 
