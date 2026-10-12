@@ -18,9 +18,8 @@ final class MarkdownPreviewManagerTests: XCTestCase {
     }()
 
     override func setUp() async throws {
-        manager = MarkdownPreviewManager(
-            defaults: UserDefaults(suiteName: "MarkdownPreviewManagerTests-\(UUID().uuidString)")!
-        )
+        // In memory, so runs don't leave plists in ~/Library/Preferences.
+        manager = MarkdownPreviewManager(defaults: InMemoryUserDefaults())
         Self.sentinel.orderFront(nil)
         dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

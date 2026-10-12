@@ -19,8 +19,9 @@ final class MarkdownPreviewWindowControllerTests: XCTestCase {
         )
     }
 
+    /// In memory, so runs don't leave plists in ~/Library/Preferences.
     private func makeDefaults() -> UserDefaults {
-        UserDefaults(suiteName: "MarkdownPreviewWindowControllerTests-\(UUID().uuidString)")!
+        InMemoryUserDefaults()
     }
 
     /// Reload would load the base URL itself: the raw `.md` as plain text.
