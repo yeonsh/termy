@@ -117,6 +117,12 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         terminal.onClickInBounds = { [weak self] in
             self?.onPaneClicked?()
         }
+        terminal.markdownBaseDirectories = { [weak self] in
+            self?.markdownBaseDirectories() ?? []
+        }
+        terminal.onOpenMarkdownFile = { url in
+            _ = MarkdownPreviewManager.shared.open(url)
+        }
         applyTheme()
         applyActiveAppearance(false)
 
@@ -394,6 +400,30 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
 
     nonisolated func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
         // v1.1: propagate to tab label when informative.
+    }
+
+    /// Where a relative markdown path printed in this pane most likely
+    /// points: the agent's cwd (hook-reported — Claude Code prints paths
+    /// relative to it), then the shell's, then the shell's repo root.
+    func markdownBaseDirectories() -> [String] {
+        Self.markdownBaseDirectories(
+            agentCwd: MissionControlModel.shared.snapshot(paneId: paneId)?.lastCwd,
+            shellCwd: currentCwd,
+            workTreeRoot: GitBranch.workTreeRoot(for: currentCwd)
+        )
+    }
+
+    nonisolated static func markdownBaseDirectories(
+        agentCwd: String?,
+        shellCwd: String,
+        workTreeRoot: String?
+    ) -> [String] {
+        var result: [String] = []
+        for directory in [agentCwd, shellCwd, workTreeRoot] {
+            guard let directory, !directory.isEmpty, !result.contains(directory) else { continue }
+            result.append(directory)
+        }
+        return result
     }
 
     /// OSC 7 is how modern shells (zsh's default, bash with termsupport,

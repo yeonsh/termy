@@ -9,11 +9,23 @@
 // `Terminal.link(at:mode:)` API, then hand it to NSWorkspace. The event is
 // consumed only when we actually open a URL; otherwise it propagates
 // normally so selection, mouse-reporting, etc. keep working.
+//
+// Cmd+click on a markdown file path (`docs/spec.md`, `./x.md:12`, …) opens
+// it in a preview window instead: `linkClickAction` resolves the path
+// against the pane's cwd candidates and the Pane opens the preview.
 
 import AppKit
 import Carbon.HIToolbox
 import CoreText
 import SwiftTerm
+
+/// What a Cmd+click on a terminal link does.
+enum LinkClickAction: Equatable {
+    case previewMarkdown(URL)
+    case beep
+    case openURL(URL)
+    case ignore
+}
 
 final class TermyTerminalView: LocalProcessTerminalView {
     /// SwiftTerm's `TerminalOptions.default.scrollback` is 500 lines, which
@@ -145,6 +157,14 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// could run its multi-click selection code.
     var onClickInBounds: (() -> Void)?
 
+    /// Directories a relative markdown path is resolved against, most
+    /// likely first. Set by Pane; without it only absolute and `~/` paths
+    /// resolve.
+    var markdownBaseDirectories: (() -> [String])?
+
+    /// Opens a resolved markdown file in a preview window. Set by Pane.
+    var onOpenMarkdownFile: ((URL) -> Void)?
+
     /// Pane writes the focus-state caret color here instead of mutating
     /// `caretColor` directly. We mirror it onto `caretColor` except while
     /// an IME composition is in flight, where the cursor block would
@@ -239,18 +259,60 @@ final class TermyTerminalView: LocalProcessTerminalView {
         guard let raw = terminal.link(at: .screen(pos), mode: .explicitAndImplicit) else {
             return false
         }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        guard let url = Self.openableURL(from: trimmed) else { return false }
-        NSWorkspace.shared.open(url)
-        return true
+        let action = Self.linkClickAction(
+            for: raw,
+            baseDirectories: markdownBaseDirectories?() ?? [],
+            homeDirectory: NSHomeDirectory(),
+            isRegularFile: MarkdownLinkResolver.fileExistsAsRegularFile
+        )
+        switch action {
+        case .previewMarkdown(let url):
+            onOpenMarkdownFile?(url)
+            return true
+        case .beep:
+            // Consumed so SwiftTerm's own mouseUp doesn't act on it too.
+            NSSound.beep()
+            return true
+        case .openURL(let url):
+            NSWorkspace.shared.open(url)
+            return true
+        case .ignore:
+            return false
+        }
+    }
+
+    /// Markdown files first (`file://` ones included, so they preview
+    /// instead of launching the default app), then schemed URLs; any
+    /// other path stays a no-op.
+    nonisolated static func linkClickAction(
+        for linkText: String,
+        baseDirectories: [String],
+        homeDirectory: String,
+        isRegularFile: (String) -> Bool
+    ) -> LinkClickAction {
+        let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .ignore }
+        switch MarkdownLinkResolver.resolve(
+            linkText: trimmed,
+            baseDirectories: baseDirectories,
+            homeDirectory: homeDirectory,
+            isRegularFile: isRegularFile
+        ) {
+        case .file(let url):
+            return .previewMarkdown(url)
+        case .missing:
+            return .beep
+        case .notMarkdown:
+            return openableURL(from: trimmed).map(LinkClickAction.openURL) ?? .ignore
+        }
     }
 
     /// A click the monitor above lets through reaches SwiftTerm's own
     /// `mouseUp`, which opens the link under it. Since SwiftTerm 1.20
     /// (1483b09) that default opener also opens any existing file path —
     /// launching it outright if it's an app or script. Hold SwiftTerm's path
-    /// to the same scheme allowlist so a path-shaped click stays a no-op.
+    /// to the same scheme allowlist so a path-shaped click stays a no-op;
+    /// markdown paths never get here because the monitor consumes them.
     override func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
         let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = Self.openableURL(from: trimmed) else { return }

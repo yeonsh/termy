@@ -389,4 +389,61 @@ final class TermyTerminalViewTests: XCTestCase {
             context: nil, eventNumber: 0, clickCount: 1, pressure: 1
         )
     }
+
+    // MARK: - Cmd+click link actions
+
+    private func clickAction(_ text: String, existing: Set<String> = []) -> LinkClickAction {
+        TermyTerminalView.linkClickAction(
+            for: text,
+            baseDirectories: ["/proj"],
+            homeDirectory: "/Users/me",
+            isRegularFile: { existing.contains($0) }
+        )
+    }
+
+    func test_linkClickAction_existingMarkdownOpensPreview() {
+        XCTAssertEqual(
+            clickAction("docs/a.md", existing: ["/proj/docs/a.md"]),
+            .previewMarkdown(URL(fileURLWithPath: "/proj/docs/a.md").resolvingSymlinksInPath())
+        )
+        XCTAssertEqual(
+            clickAction("file:///proj/docs/a.md", existing: ["/proj/docs/a.md"]),
+            .previewMarkdown(URL(fileURLWithPath: "/proj/docs/a.md").resolvingSymlinksInPath())
+        )
+    }
+
+    func test_linkClickAction_missingMarkdownBeeps() {
+        XCTAssertEqual(clickAction("docs/none.md"), .beep)
+    }
+
+    func test_linkClickAction_webURLOpensBrowser() {
+        XCTAssertEqual(clickAction("https://example.com"), .openURL(URL(string: "https://example.com")!))
+    }
+
+    func test_linkClickAction_webURLEndingInMdOpensBrowser() {
+        let link = "https://github.com/o/r/blob/main/README.md"
+        XCTAssertEqual(clickAction(link), .openURL(URL(string: link)!))
+    }
+
+    func test_linkClickAction_otherPathsAreIgnored() {
+        XCTAssertEqual(clickAction("src/main.swift", existing: ["/proj/src/main.swift"]), .ignore)
+        XCTAssertEqual(clickAction("   "), .ignore)
+    }
+
+    /// Review Focus 1: Ink hard-wraps long lines by moving the cursor, so
+    /// the second row is not a soft-wrapped continuation. SwiftTerm's
+    /// `heuristicImplicitGroup` is what joins them; pin that it does.
+    @MainActor
+    func test_linkLookup_joinsInkStyleHardWrappedPath() {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        let terminal = view.getTerminal()
+        terminal.resize(cols: 40, rows: 10)
+        // Row 0 fills all 40 columns; Ink then does CR, cursor-down, and
+        // indents the continuation by two columns.
+        view.feed(text: "  docs/superpowers/specs/2026-10-12-mark\r\u{1b}[1B\u{1b}[2Cdown-preview-design.md")
+
+        let path = "docs/superpowers/specs/2026-10-12-markdown-preview-design.md"
+        XCTAssertEqual(terminal.link(at: .screen(Position(col: 10, row: 0)), mode: .explicitAndImplicit), path)
+        XCTAssertEqual(terminal.link(at: .screen(Position(col: 5, row: 1)), mode: .explicitAndImplicit), path)
+    }
 }
