@@ -106,6 +106,11 @@ final class WindowManager {
         // panes that no longer exist anywhere.
         Notifier.shared.pruneWaitingPanes(livePaneIds: MissionControlModel.shared.livePaneIds)
         sessionAutosaver?.requestSave()
+        // Previews belong to the main windows. With none left, close them
+        // too so "closing the last window quits termy" still holds.
+        if controllers.isEmpty {
+            MarkdownPreviewManager.shared.closeAll()
+        }
     }
 
     // MARK: - Cross-window routing

@@ -139,6 +139,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: - Menu action forwarding
 
     private var activeController: MainWindowController? {
+        // A focused markdown preview has no panes; without this, pane
+        // commands would fall through to the first main window's panes.
+        if MarkdownPreviewManager.isPreviewWindow(NSApp.keyWindow) {
+            return nil
+        }
         if let winCtrl = NSApp.keyWindow?.windowController as? MainWindowController {
             return winCtrl
         }
@@ -162,6 +167,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @IBAction func closePane(_ sender: Any?) {
+        // ⌘W on a focused preview closes the preview, never a pane.
+        if let keyWindow = NSApp.keyWindow, MarkdownPreviewManager.isPreviewWindow(keyWindow) {
+            keyWindow.performClose(sender)
+            return
+        }
         activeController?.closePane(sender)
     }
 
@@ -306,8 +316,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         default:
             break
         }
-        return true
+        let previewState = Self.previewMenuState(
+            for: menuItem.action,
+            previewIsKey: MarkdownPreviewManager.isPreviewWindow(NSApp.keyWindow)
+        )
+        if let title = previewState.title {
+            menuItem.title = title
+        }
+        return previewState.isEnabled
     }
+
+    /// Enablement, and the ⌘W title, when a markdown preview may be the
+    /// key window. Pure so the pane-action list is testable.
+    static func previewMenuState(for action: Selector?, previewIsKey: Bool) -> (isEnabled: Bool, title: String?) {
+        if action == #selector(AppDelegate.closePane(_:)) {
+            return (true, previewIsKey ? "Close Preview" : "Close Pane")
+        }
+        guard previewIsKey, let action else { return (true, nil) }
+        return (!paneScopedActions.contains(action), nil)
+    }
+
+    /// Every action that goes through `activeController` (except
+    /// `closePane`, which closes the preview instead). `activeController`
+    /// is nil while a preview is key, so these would do nothing.
+    private static let paneScopedActions: Set<Selector> = [
+        #selector(AppDelegate.newPane(_:)),
+        #selector(AppDelegate.splitColumn(_:)),
+        #selector(AppDelegate.splitRow(_:)),
+        #selector(AppDelegate.toggleMaximizePane(_:)),
+        #selector(AppDelegate.focusPrevPane(_:)),
+        #selector(AppDelegate.focusNextPane(_:)),
+        #selector(AppDelegate.focusPaneLeft(_:)),
+        #selector(AppDelegate.focusPaneRight(_:)),
+        #selector(AppDelegate.focusPaneUp(_:)),
+        #selector(AppDelegate.focusPaneDown(_:)),
+        #selector(AppDelegate.cycleFilterPrev(_:)),
+        #selector(AppDelegate.cycleFilterNext(_:)),
+        #selector(AppDelegate.showProjectSwitcher(_:)),
+        #selector(AppDelegate.showKeyboardShortcuts(_:)),
+        #selector(AppDelegate.showFontSettings(_:)),
+        #selector(AppDelegate.increaseFontSize(_:)),
+        #selector(AppDelegate.decreaseFontSize(_:)),
+        #selector(AppDelegate.selectFilter0(_:)),
+        #selector(AppDelegate.selectFilter1(_:)),
+        #selector(AppDelegate.selectFilter2(_:)),
+        #selector(AppDelegate.selectFilter3(_:)),
+        #selector(AppDelegate.selectFilter4(_:)),
+        #selector(AppDelegate.selectFilter5(_:)),
+        #selector(AppDelegate.selectFilter6(_:)),
+        #selector(AppDelegate.selectFilter7(_:)),
+        #selector(AppDelegate.selectFilter8(_:)),
+        #selector(AppDelegate.selectFilter9(_:)),
+        #selector(AppDelegate.cycleDashboardPrev(_:)),
+        #selector(AppDelegate.cycleDashboardNext(_:)),
+        #selector(AppDelegate.cycleWaitingPane(_:)),
+        #selector(AppDelegate.selectDashboard1(_:)),
+        #selector(AppDelegate.selectDashboard2(_:)),
+        #selector(AppDelegate.selectDashboard3(_:)),
+        #selector(AppDelegate.selectDashboard4(_:)),
+        #selector(AppDelegate.selectDashboard5(_:)),
+        #selector(AppDelegate.selectDashboard6(_:)),
+        #selector(AppDelegate.selectDashboard7(_:)),
+        #selector(AppDelegate.selectDashboard8(_:)),
+        #selector(AppDelegate.selectDashboard9(_:)),
+    ]
 
     // MARK: - Menu bar
 
