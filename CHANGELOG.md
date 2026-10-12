@@ -6,6 +6,14 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+- Cmd+click a Markdown file path in a pane — a spec or plan Claude Code
+  just wrote, for example — to open it rendered in its own window. Tables,
+  task lists and code blocks look the way they do on GitHub, and the
+  preview follows termy's light or dark appearance. When an agent edits
+  the file, the preview updates in place and keeps your scroll position.
+  Clicking a path to a file that doesn't exist beeps. ⌘W closes the
+  preview without touching your panes.
+
 ## 0.2.10 — 2026-10-10
 
 - Updating termy no longer ends your Claude Code and Codex sessions. When
