@@ -513,4 +513,62 @@ final class TermyTerminalViewTests: XCTestCase {
             "link text: \(link)"
         )
     }
+
+    // MARK: - IME marked-text overlay
+
+    /// Claude Code prompt `> 하하 호호` with the cursor moved back to the
+    /// start of the text, then a Hangul syllable composed there. SwiftTerm
+    /// 1.20's overlay painted the terminal background from the caret to the
+    /// right edge, so `하하 호호` vanished until the syllable committed. Only
+    /// the cells under the composed text may be covered.
+    @MainActor
+    func test_markedTextOverlay_coversOnlyTheComposedText() throws {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 200))
+        view.nativeBackgroundColor = .red
+        view.feed(text: "> 하하 호호\r\u{1b}[2C")
+        // SwiftTerm moves the caret to column 2 on its throttled display pass.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        view.setMarkedText("가", selectedRange: NSRange(location: 1, length: 0),
+                           replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        let overlay = try XCTUnwrap(view.subviews.lazy.compactMap { $0 as? NSTextView }.first)
+        let layoutManager = try XCTUnwrap(overlay.layoutManager)
+        let container = try XCTUnwrap(overlay.textContainer)
+        let glyphRange = layoutManager.glyphRange(for: container)
+        var lineCount = 0
+        layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { _, _, _, _, _ in lineCount += 1 }
+        XCTAssertEqual(lineCount, 1, "the composed syllable must stay on the caret's row")
+
+        // SwiftTerm excludes the row's text left of the caret from the
+        // overlay's first line, so this is the caret's x: column 2.
+        let exclusion = try XCTUnwrap(container.exclusionPaths.first).bounds
+        let caretX = overlay.frame.minX + exclusion.width
+        let cellWidth = caretX / 2
+        let row = overlay.frame.midY
+
+        let glyphs = overlay.convert(layoutManager.boundingRect(forGlyphRange: glyphRange, in: container), to: view)
+        XCTAssertGreaterThan(Self.overlayAlpha(overlay, at: NSPoint(x: glyphs.midX, y: row), in: view), 0,
+                             "the composed syllable is drawn")
+        XCTAssertGreaterThan(Self.overlayAlpha(overlay, at: NSPoint(x: caretX + 2 * cellWidth - 1, y: row), in: view), 0,
+                             "the whole 2-cell slot of the 하 under the caret is covered")
+        XCTAssertEqual(Self.overlayAlpha(overlay, at: NSPoint(x: caretX + 2.5 * cellWidth, y: row), in: view), 0,
+                       "the next 하 stays visible")
+        XCTAssertEqual(Self.overlayAlpha(overlay, at: NSPoint(x: view.bounds.maxX - 20, y: row), in: view), 0)
+    }
+
+    /// Alpha the overlay shows at `point` (in `view` coordinates); 0 when the
+    /// point lies outside the overlay or its layer mask. `cacheDisplay`
+    /// ignores layer masks, so the mask is applied here.
+    @MainActor
+    private static func overlayAlpha(_ overlay: NSView, at point: NSPoint, in view: NSView) -> CGFloat {
+        let local = overlay.convert(point, from: view)
+        guard overlay.bounds.contains(local),
+              overlay.layer?.mask.map({ local.x >= $0.frame.minX && local.x < $0.frame.maxX }) ?? true,
+              let rep = overlay.bitmapImageRepForCachingDisplay(in: overlay.bounds) else { return 0 }
+        overlay.cacheDisplay(in: overlay.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / overlay.bounds.width
+        let y = overlay.isFlipped ? local.y : overlay.bounds.height - local.y
+        return rep.colorAt(x: Int(local.x * scale), y: Int(y * scale))?.alphaComponent ?? 0
+    }
 }

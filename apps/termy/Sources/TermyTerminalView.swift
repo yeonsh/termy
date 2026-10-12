@@ -718,7 +718,60 @@ final class TermyTerminalView: LocalProcessTerminalView {
             return
         }
         super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        maskMarkedTextOverlay()
         imeCompositionActive = hasMarkedText()
+    }
+
+    /// SwiftTerm 1.20's marked-text overlay spans the whole row and fills
+    /// each line fragment with the terminal background. On the caret's row
+    /// that fragment runs from the caret to the right edge, so composing in
+    /// the middle of a line (cursor moved back into a Claude Code prompt)
+    /// blanks out everything right of the caret until the syllable commits.
+    ///
+    /// Mask a single-line overlay down to the cells the composed text covers.
+    /// Whole cells, because SwiftTerm centers a wide glyph in its slot while
+    /// the overlay draws the composed one left-aligned and narrower; stopping
+    /// at the composed glyph leaves the right edge of the syllable underneath
+    /// showing. The overlay keeps SwiftTerm's geometry: narrowing its text
+    /// container makes TextKit push the line below the caret's exclusion
+    /// path, and resizing the view on every update drew the composing
+    /// syllable over the previous character live. A wrapped composition
+    /// already fills the rest of its first row and is left unmasked.
+    private func maskMarkedTextOverlay() {
+        guard let overlay = subviews.lazy.compactMap({ $0 as? NSTextView }).first,
+              let layoutManager = overlay.layoutManager,
+              let container = overlay.textContainer else { return }
+        overlay.wantsLayer = true
+        guard let layer = overlay.layer else { return }
+        var lineCount = 0
+        var text = NSRect.zero
+        layoutManager.enumerateLineFragments(forGlyphRange: layoutManager.glyphRange(for: container)) { _, usedRect, _, _, _ in
+            lineCount += 1
+            text = usedRect
+        }
+        var visibleWidth = overlay.bounds.width
+        if lineCount == 1, let cell = cellSizeInPixels(source: terminal), cell.width > 0 {
+            let cellWidth = CGFloat(cell.width) / (window?.backingScaleFactor ?? 1)
+            // The composed text starts at the caret, except that SwiftTerm
+            // clamps a column-0 caret to the overlay's inset.
+            let caretX = text.minX > 0 ? overlay.frame.minX + text.minX : 0
+            let cells = ceil((overlay.frame.minX + text.maxX - caretX) / cellWidth - 0.01)
+            visibleWidth = caretX + cells * cellWidth - overlay.frame.minX
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if visibleWidth < overlay.bounds.width {
+            let mask = layer.mask ?? CALayer()
+            mask.backgroundColor = NSColor.black.cgColor
+            // Taller than the overlay, which AppKit may round up to whole
+            // points between updates.
+            let height = overlay.bounds.height
+            mask.frame = CGRect(x: 0, y: -height, width: visibleWidth, height: 3 * height)
+            layer.mask = mask
+        } else {
+            layer.mask = nil
+        }
+        CATransaction.commit()
     }
 
     override func unmarkText() {
@@ -790,6 +843,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
         // private `updateMarkedTextOverlay`, which re-reads `caretView.frame`
         // and repositions the NSTextField overlay to the now-current caret.
         super.setMarkedText(text, selectedRange: range, replacementRange: NSRange(location: NSNotFound, length: 0))
+        maskMarkedTextOverlay()
     }
 
     nonisolated static func shouldBypassKittyEncoder(text: String, kittyFlags: KittyKeyboardFlags) -> Bool {
