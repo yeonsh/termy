@@ -13,8 +13,9 @@ final class MarkdownPreviewManager {
 
     private(set) var controllers: [String: MarkdownPreviewWindowController] = [:]
     private let defaults: UserDefaults
-    /// Top-left for the next window in the cascade.
-    private var nextTopLeft: NSPoint = .zero
+    /// Keys of the open previews, oldest first; a new window cascades from
+    /// the last one.
+    private var openOrder: [String] = []
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -22,6 +23,14 @@ final class MarkdownPreviewManager {
 
     nonisolated static func key(for url: URL) -> String {
         url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    /// A frame of `size` centered in `visibleFrame`. One that doesn't fit
+    /// keeps its top-left (and title bar) on screen.
+    nonisolated static func centeredFrame(size: NSSize, in visibleFrame: NSRect) -> NSRect {
+        let x = max(visibleFrame.minX, visibleFrame.midX - size.width / 2)
+        let y = min(visibleFrame.midY - size.height / 2, visibleFrame.maxY - size.height)
+        return NSRect(origin: NSPoint(x: x.rounded(), y: y.rounded()), size: size)
     }
 
     /// True when `window` belongs to a markdown preview.
@@ -39,19 +48,33 @@ final class MarkdownPreviewManager {
         }
         let controller = MarkdownPreviewWindowController(fileURL: URL(fileURLWithPath: key), defaults: defaults)
         controller.onClose = { [weak self] _ in
-            _ = self?.controllers.removeValue(forKey: key)
+            guard let self else { return }
+            controllers.removeValue(forKey: key)
+            openOrder.removeAll { $0 == key }
         }
         if let window = controller.window {
-            if controllers.isEmpty {
-                window.center()
-                nextTopLeft = window.cascadeTopLeft(from: .zero)
-            } else {
-                nextTopLeft = window.cascadeTopLeft(from: nextTopLeft)
-            }
+            place(window)
         }
         controllers[key] = controller
+        openOrder.append(key)
         controller.showWindow(nil)
         return controller
+    }
+
+    /// Cascades a new window from the newest open preview; the first one is
+    /// centered on the screen of the window the click came from.
+    private func place(_ window: NSWindow) {
+        if let newest = openOrder.last.flatMap({ controllers[$0]?.window }) {
+            // `cascadeTopLeft(from:)` puts the window at the given point and
+            // returns the next one in the cascade; the second call moves it
+            // there.
+            let topLeft = NSPoint(x: newest.frame.minX, y: newest.frame.maxY)
+            _ = window.cascadeTopLeft(from: window.cascadeTopLeft(from: topLeft))
+        } else if let screen = NSApp.keyWindow?.screen ?? NSScreen.main {
+            window.setFrame(Self.centeredFrame(size: window.frame.size, in: screen.visibleFrame), display: false)
+        } else {
+            window.center()
+        }
     }
 
     /// Closes every preview window.

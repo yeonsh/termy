@@ -74,6 +74,51 @@ final class MarkdownPreviewManagerTests: XCTestCase {
         XCTAssertTrue(manager.controllers.isEmpty)
     }
 
+    func test_centeredFrame_centersInVisibleFrame() {
+        XCTAssertEqual(
+            MarkdownPreviewManager.centeredFrame(
+                size: NSSize(width: 800, height: 600),
+                in: NSRect(x: 3840, y: 100, width: 1600, height: 1000)
+            ),
+            NSRect(x: 4240, y: 300, width: 800, height: 600)
+        )
+    }
+
+    /// A window taller or wider than the screen keeps its title bar reachable.
+    func test_centeredFrame_keepsTopLeftOnScreenWhenTooBig() {
+        XCTAssertEqual(
+            MarkdownPreviewManager.centeredFrame(
+                size: NSSize(width: 1600, height: 932),
+                in: NSRect(x: 0, y: 0, width: 1440, height: 875)
+            ),
+            NSRect(x: 0, y: -57, width: 1600, height: 932)
+        )
+    }
+
+    func test_firstPreviewIsCenteredOnTheClickedWindowsScreen() throws {
+        let screen = try XCTUnwrap(NSApp.keyWindow?.screen ?? NSScreen.main)
+        let window = try XCTUnwrap(manager.open(try makeFile("a.md")).window)
+        XCTAssertEqual(
+            window.frame,
+            MarkdownPreviewManager.centeredFrame(size: window.frame.size, in: screen.visibleFrame)
+        )
+    }
+
+    /// The cascade follows the newest preview that is still open, not a
+    /// point left over from one already closed.
+    func test_newPreviewCascadesFromNewestOpenPreview() throws {
+        let a = try XCTUnwrap(manager.open(try makeFile("a.md")).window)
+        let bController = manager.open(try makeFile("b.md"))
+        let b = try XCTUnwrap(bController.window)
+        XCTAssertGreaterThan(b.frame.minX, a.frame.minX)
+        XCTAssertLessThan(b.frame.maxY, a.frame.maxY)
+
+        let bFrame = b.frame
+        bController.close()
+        let c = try XCTUnwrap(manager.open(try makeFile("c.md")).window)
+        XCTAssertEqual(c.frame, bFrame)
+    }
+
     func test_isPreviewWindow() throws {
         let controller = manager.open(try makeFile("a.md"))
         XCTAssertTrue(MarkdownPreviewManager.isPreviewWindow(controller.window))
