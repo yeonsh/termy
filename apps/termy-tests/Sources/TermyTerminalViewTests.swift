@@ -487,4 +487,30 @@ final class TermyTerminalViewTests: XCTestCase {
         XCTAssertEqual(terminal.link(at: .screen(Position(col: 10, row: 0)), mode: .explicitAndImplicit), path)
         XCTAssertEqual(terminal.link(at: .screen(Position(col: 5, row: 1)), mode: .explicitAndImplicit), path)
     }
+
+    /// The Korean summary line an agent prints after writing a spec: SwiftTerm
+    /// hands over the path with the particle and the rest of the sentence
+    /// still attached, and the click must still open the preview.
+    @MainActor
+    func test_cmdClickOnPathInKoreanSentence_opensPreview() throws {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 200))
+        let terminal = view.getTerminal()
+        terminal.resize(cols: 100, rows: 10)
+        view.feed(text: "스펙을 docs/superpowers/specs/x-design.md에 저장했습니다.")
+
+        // "스펙을 " takes 7 columns, so column 12 is inside the path.
+        let link = try XCTUnwrap(terminal.link(at: .screen(Position(col: 12, row: 0)), mode: .explicitAndImplicit))
+        XCTAssertTrue(link.hasPrefix("docs/superpowers/specs/x-design.md"), link)
+        let expected = "/proj/docs/superpowers/specs/x-design.md"
+        XCTAssertEqual(
+            TermyTerminalView.linkClickAction(
+                for: link,
+                baseDirectories: ["/proj"],
+                homeDirectory: "/Users/me",
+                isRegularFile: { $0 == expected }
+            ),
+            .previewMarkdown(URL(fileURLWithPath: expected).resolvingSymlinksInPath()),
+            "link text: \(link)"
+        )
+    }
 }

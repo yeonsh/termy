@@ -69,9 +69,29 @@ final class MarkdownLinkResolverTests: XCTestCase {
         XCTAssertEqual(resolve("notes.markdown", existing: ["/proj/notes.markdown"]), file("/proj/notes.markdown"))
     }
 
+    /// SwiftTerm's path regex runs on through Hangul particles (`\w`), `**`
+    /// and trailing words ending in `.`, so agent summaries hand over these.
+    func test_textGluedAfterTheExtensionIsCut() {
+        let texts = [
+            "docs/a.md에",
+            "docs/a.md에 저장했습니다.",
+            "docs/a.md를",
+            "docs/a.md now.",
+            "docs/a.md**",
+            "docs/a.md:12에서",
+        ]
+        for text in texts {
+            XCTAssertEqual(resolve(text, existing: ["/proj/docs/a.md"]), file("/proj/docs/a.md"), text)
+        }
+        XCTAssertEqual(resolve("notes.MARKDOWN을", existing: ["/proj/notes.MARKDOWN"]), file("/proj/notes.MARKDOWN"))
+    }
+
     func test_nonMarkdownPathIsNotMarkdown() {
         XCTAssertEqual(resolve("src/main.swift", existing: ["/proj/src/main.swift"]), .notMarkdown)
         XCTAssertEqual(resolve("docs/a.md.bak", existing: []), .notMarkdown)
+        XCTAssertEqual(resolve("README.md.bak", existing: []), .notMarkdown)
+        XCTAssertEqual(resolve("docs/a.mdx", existing: ["/proj/docs/a.mdx"]), .notMarkdown)
+        XCTAssertEqual(resolve("docs/a.md-old/b.txt", existing: []), .notMarkdown)
     }
 
     func test_webURLEndingInMdIsNotMarkdown() {
@@ -120,5 +140,28 @@ final class MarkdownLinkResolverTests: XCTestCase {
         try FileManager.default.createDirectory(at: fake, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         XCTAssertFalse(MarkdownLinkResolver.fileExistsAsRegularFile(fake.path))
+    }
+
+    /// Reading a FIFO blocks until a writer shows up — on the main thread.
+    func test_fifoIsNotARegularFile() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fifo = dir.appendingPathComponent("pipe.md")
+        XCTAssertEqual(Darwin.mkfifo(fifo.path, 0o644), 0)
+        XCTAssertFalse(MarkdownLinkResolver.fileExistsAsRegularFile(fifo.path))
+    }
+
+    func test_regularFileAndSymlinkToOneAreRegularFiles() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let real = dir.appendingPathComponent("real.md")
+        try "# x\n".write(to: real, atomically: true, encoding: .utf8)
+        let link = dir.appendingPathComponent("link.md")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        XCTAssertTrue(MarkdownLinkResolver.fileExistsAsRegularFile(real.path))
+        XCTAssertTrue(MarkdownLinkResolver.fileExistsAsRegularFile(link.path))
+        XCTAssertFalse(MarkdownLinkResolver.fileExistsAsRegularFile(dir.appendingPathComponent("none.md").path))
     }
 }

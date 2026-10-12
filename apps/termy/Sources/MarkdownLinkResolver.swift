@@ -3,7 +3,8 @@
 // Decides whether a Cmd+clicked terminal link names a markdown file termy
 // should preview, and which file on disk that is. SwiftTerm hands over the
 // raw matched text — `docs/x.md`, `./x.md:12`, `file:///…/x.md`, often with
-// prose punctuation stuck to it — and a relative path is relative to
+// prose punctuation or the rest of a Korean sentence (`x.md에 저장했습니다.`)
+// stuck to it — and a relative path is relative to
 // whatever cwd the agent printed it from, so callers pass candidate base
 // directories in priority order and the first one holding the file wins.
 
@@ -24,6 +25,9 @@ enum MarkdownLinkResolver {
     private static let leadingPunctuation: Set<Character> = ["(", "[", "`", "'", "\""]
     private static let trailingPunctuation: Set<Character> = [".", ",", ";", ":", "!", "?", ")", "]", "`", "'", "\""]
 
+    /// Resolves `linkText` to a markdown file. A relative path is tried
+    /// against `baseDirectories` in order and the first base holding the
+    /// file wins, so callers list the most likely base first.
     static func resolve(
         linkText: String,
         baseDirectories: [String],
@@ -54,8 +58,9 @@ enum MarkdownLinkResolver {
     }
 
     /// The path in `linkText` when it names a markdown file: surrounding
-    /// punctuation, `file://`, `#fragment` and `:line[:col]` removed. nil
-    /// for any other extension and for web URLs.
+    /// punctuation, `file://`, `#fragment`, `:line[:col]` and text glued
+    /// after the extension removed. nil for any other extension and for
+    /// web URLs.
     static func markdownPath(from linkText: String) -> String? {
         var text = Substring(linkText.trimmingCharacters(in: .whitespacesAndNewlines))
         while let first = text.first, leadingPunctuation.contains(first) {
@@ -77,15 +82,32 @@ enum MarkdownLinkResolver {
         }
         path = stripLineSuffix(path)
 
-        guard extensions.contains((path as NSString).pathExtension.lowercased()) else { return nil }
+        if !hasMarkdownExtension(path) {
+            // SwiftTerm's path regex keeps matching into Hangul particles
+            // (`\w`), `**`, and trailing words ending in `.`; cut at the
+            // first .md/.markdown that isn't followed by another file-name
+            // character. A glued `:12에서` goes with the rest.
+            guard let range = path.range(
+                of: #"^.*?\.(md|markdown)(?![A-Za-z0-9._/-])"#,
+                options: [.regularExpression, .caseInsensitive]
+            ) else { return nil }
+            path = String(path[range])
+        }
+        guard hasMarkdownExtension(path) else { return nil }
         return path
     }
 
-    /// `isRegularFile` for real use: something exists at `path` and it is
-    /// not a directory.
+    /// `isRegularFile` for real use: `path`, symlinks followed, is a
+    /// regular file. A FIFO or device named `x.md` would block the
+    /// synchronous read on the main thread.
     static func fileExistsAsRegularFile(_ path: String) -> Bool {
-        var isDirectory: ObjCBool = false
-        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && !isDirectory.boolValue
+        var info = stat()
+        guard stat(path, &info) == 0 else { return false }
+        return (info.st_mode & S_IFMT) == S_IFREG
+    }
+
+    private static func hasMarkdownExtension(_ path: String) -> Bool {
+        extensions.contains((path as NSString).pathExtension.lowercased())
     }
 
     /// Drops an editor-style `:12` or `:12:3` suffix.
