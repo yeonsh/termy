@@ -198,13 +198,6 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
             documentURL: fileURL,
             isRegularFile: MarkdownLinkResolver.fileExistsAsRegularFile
         )
-        // PROBE (temporary)
-        NSLog("PREVIEW-NAV type=%ld url=%@ filePath=%@ doc=%@ route=%@",
-              navigationAction.navigationType.rawValue,
-              navigationAction.request.url?.absoluteString ?? "nil",
-              (navigationAction.request.url as NSURL?)?.filePathURL?.path ?? "nil",
-              fileURL.path,
-              String(describing: route))
         switch route {
         case .allow:
             return .allow
