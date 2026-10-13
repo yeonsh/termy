@@ -552,6 +552,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         menu.addItem(.separator())
 
+        // No target: the key markdown preview answers it, so the item is
+        // disabled while a terminal window is key.
+        let showInFinder = menu.addItem(
+            withTitle: "Show in Finder",
+            action: #selector(MarkdownPreviewWindowController.showInFinder(_:)),
+            keyEquivalent: "r"
+        )
+        showInFinder.keyEquivalentModifierMask = [.command, .option]
+
+        menu.addItem(.separator())
+
         let closePane = menu.addItem(
             withTitle: "Close Pane",
             action: #selector(AppDelegate.closePane(_:)),

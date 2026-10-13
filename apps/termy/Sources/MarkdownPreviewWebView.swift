@@ -1,7 +1,8 @@
 // MarkdownPreviewWebView.swift
 //
-// The preview's WKWebView, plus one job WebKit won't do: open markdown
-// files dropped onto it. Apps built against current SDKs get WKWebView's
+// The preview's WKWebView, plus a hook for the controller's context-menu
+// items and one job WebKit won't do: open markdown files dropped onto it.
+// Apps built against current SDKs get WKWebView's
 // `DropToNavigateDisallowedByDefault` behavior — the "load" drop action is
 // masked off — so a dropped file never becomes a navigation that
 // `MarkdownPreviewWindowController.route` could send to a preview. File
@@ -13,6 +14,13 @@ import WebKit
 final class MarkdownPreviewWebView: WKWebView {
     /// Opens dropped markdown files. Set by the preview controller.
     var onDropMarkdownFiles: (([URL]) -> Void)?
+    /// Adds items to WebKit's context menu. Set by the preview controller.
+    var onWillOpenMenu: ((NSMenu) -> Void)?
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        onWillOpenMenu?(menu)
+    }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         guard let files = Self.fileURLs(on: sender.draggingPasteboard) else {

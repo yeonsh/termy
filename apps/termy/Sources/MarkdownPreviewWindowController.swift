@@ -7,13 +7,14 @@
 // else happens. Live reloads keep the reader's place by reading and
 // restoring `scrollY` from the `.defaultClient` content world, which the
 // page JavaScript switch doesn't affect. Markdown files dropped onto the
-// window open in their own previews (`MarkdownPreviewWebView`).
+// window open in their own previews (`MarkdownPreviewWebView`). Show in
+// Finder (File menu, context menu) reveals the file.
 
 import AppKit
 import WebKit
 
 @MainActor
-final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate {
+final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, NSMenuItemValidation {
     static let defaultContentSize = NSSize(width: 820, height: 900)
     static let contentSizeDefaultsKey = "MarkdownPreview.contentSize"
     static let deletedBanner = "This file was deleted. The preview will reload if it comes back."
@@ -24,6 +25,11 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
         case cancel
         case openExternally(URL)
         case preview(URL)
+    }
+
+    enum FinderReveal: Equatable {
+        case selectFile(URL)
+        case openFolder(URL)
     }
 
     let fileURL: URL
@@ -77,6 +83,9 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
 
         window.delegate = self
         webView.navigationDelegate = self
+        webView.onWillOpenMenu = { [weak self] menu in
+            self?.addShowInFinder(to: menu)
+        }
         reload(after: nil)
         watcher = MarkdownFileWatcher(fileURL: fileURL) { [weak self] change in
             self?.reload(after: change)
@@ -264,6 +273,44 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
         default:
             return .cancel
         }
+    }
+
+    // MARK: - Show in Finder
+
+    /// File ▸ Show in Finder reaches this through the responder chain while
+    /// the preview is key; the context-menu item targets it directly.
+    @objc func showInFinder(_ sender: Any?) {
+        switch finderReveal {
+        case .selectFile(let url)?:
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        case .openFolder(let url)?:
+            NSWorkspace.shared.open(url)
+        case nil:
+            break
+        }
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard menuItem.action == #selector(showInFinder(_:)) else { return true }
+        return finderReveal != nil
+    }
+
+    private var finderReveal: FinderReveal? {
+        Self.finderReveal(for: fileURL, exists: FileManager.default.fileExists(atPath:))
+    }
+
+    /// The file itself, or the folder it lived in once it's deleted (the
+    /// preview stays open for a file that may come back). Pure for testing.
+    nonisolated static func finderReveal(for fileURL: URL, exists: (String) -> Bool) -> FinderReveal? {
+        if exists(fileURL.path) { return .selectFile(fileURL) }
+        let folder = fileURL.deletingLastPathComponent()
+        return exists(folder.path) ? .openFolder(folder) : nil
+    }
+
+    private func addShowInFinder(to menu: NSMenu) {
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        let item = menu.addItem(withTitle: "Show in Finder", action: #selector(showInFinder(_:)), keyEquivalent: "")
+        item.target = self
     }
 
     // MARK: - NSWindowDelegate

@@ -118,6 +118,64 @@ final class MarkdownPreviewWindowControllerTests: XCTestCase {
         XCTAssertFalse(controller.webView.allowsLinkPreview)
     }
 
+    // MARK: - Show in Finder
+
+    /// `spec.md` in a fresh temp folder.
+    private func makeMarkdownFile() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("spec.md")
+        try "# Hi\n".write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    func test_finderReveal_selectsFileAndFallsBackToItsFolder() {
+        func reveal(existing: Set<String>) -> MarkdownPreviewWindowController.FinderReveal? {
+            MarkdownPreviewWindowController.finderReveal(for: document, exists: { existing.contains($0) })
+        }
+        XCTAssertEqual(reveal(existing: ["/proj/docs/spec.md", "/proj/docs"]), .selectFile(document))
+        // Deleted while previewed: the folder it lived in.
+        XCTAssertEqual(reveal(existing: ["/proj/docs"]), .openFolder(URL(fileURLWithPath: "/proj/docs", isDirectory: true)))
+        XCTAssertNil(reveal(existing: []))
+    }
+
+    func test_contextMenuEndsWithShowInFinder() throws {
+        let url = try makeMarkdownFile()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = MarkdownPreviewWindowController(fileURL: url, defaults: makeDefaults())
+        defer { controller.close() }
+
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Reload", action: nil, keyEquivalent: "")
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ))
+        controller.webView.willOpenMenu(menu, with: event)
+
+        XCTAssertEqual(menu.items.first?.title, "Reload")
+        let item = try XCTUnwrap(menu.items.last)
+        XCTAssertEqual(item.title, "Show in Finder")
+        XCTAssertEqual(item.action, #selector(MarkdownPreviewWindowController.showInFinder(_:)))
+        XCTAssertTrue(item.target === controller)
+    }
+
+    /// A preview outlives its file; once the folder is gone too there is
+    /// nothing left to show.
+    func test_showInFinderDisabledOnceFolderIsGone() throws {
+        let url = try makeMarkdownFile()
+        let controller = MarkdownPreviewWindowController(fileURL: url, defaults: makeDefaults())
+        defer { controller.close() }
+        let item = NSMenuItem(
+            title: "Show in Finder",
+            action: #selector(MarkdownPreviewWindowController.showInFinder(_:)),
+            keyEquivalent: ""
+        )
+        XCTAssertTrue(controller.validateMenuItem(item))
+        try FileManager.default.removeItem(at: url.deletingLastPathComponent())
+        XCTAssertFalse(controller.validateMenuItem(item))
+    }
+
     // MARK: - Live reload
 
     /// The app delegate quits when the last visible window closes; keep one up.

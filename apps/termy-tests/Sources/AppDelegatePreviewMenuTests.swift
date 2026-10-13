@@ -47,4 +47,14 @@ final class AppDelegatePreviewMenuTests: XCTestCase {
             XCTAssertTrue(state(action, previewIsKey: true).isEnabled, "\(action)")
         }
     }
+
+    /// No target: the key preview's controller answers it through the
+    /// responder chain, so the item does nothing while a terminal is key.
+    func test_fileMenuShowInFinderGoesToKeyPreview() throws {
+        let file = try XCTUnwrap(NSApp.mainMenu?.items.first { $0.submenu?.title == "File" }?.submenu)
+        let item = try XCTUnwrap(file.items.first {
+            $0.action == #selector(MarkdownPreviewWindowController.showInFinder(_:))
+        })
+        XCTAssertNil(item.target)
+    }
 }
