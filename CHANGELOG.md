@@ -6,6 +6,13 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.13 — 2026-10-13
+
+- Open the folder of the Markdown file you're previewing: File ▸ Show in
+  Finder (⌥⌘R), or right-click the preview and choose Show in Finder.
+  Finder opens with the file selected. If the file has been deleted
+  since, the folder it was in opens instead.
+
 ## 0.2.12 — 2026-10-12
 
 - Typing Korean in the middle of a line no longer hides the rest of the
