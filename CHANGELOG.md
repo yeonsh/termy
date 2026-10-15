@@ -6,6 +6,15 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.14 — 2026-10-15
+
+- Each pane now shows on its own when its agent is working.
+  While an agent is thinking, a bar in the project's color slides back and
+  forth along the bottom edge of that pane's header, the strip that shows
+  the folder name and git branch. The bar goes away as soon as the agent
+  stops to wait for you or finishes. With Reduce Motion turned on in
+  System Settings, the bar stays still instead of sliding.
+
 ## 0.2.13 — 2026-10-13
 
 - Open the folder of the Markdown file you're previewing: File ▸ Show in
