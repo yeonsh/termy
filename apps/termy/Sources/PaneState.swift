@@ -53,6 +53,14 @@ enum PaneState: String, Sendable, Codable {
     case errored         = "ERRORED"
 }
 
+extension PaneState {
+    /// True for every state the UI shows as THINK. POSSIBLY_WAITING is an
+    /// internal hedge the user never sees, so it renders as THINK too.
+    var displaysAsThinking: Bool {
+        self == .thinking || self == .possiblyWaiting
+    }
+}
+
 /// Why a pane is in `.waiting`. Codex paths set this; Claude paths leave nil
 /// and rely on `notificationReason` for the legacy reason strings.
 enum WaitSource: String, Sendable, Codable {

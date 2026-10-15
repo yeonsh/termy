@@ -66,10 +66,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self?.windowManager.focusPane(byId: paneId)
         }
         // Single funnel for pane-state updates: HookDaemon → the shared
-        // MissionControlModel → Notifier. Wired once, app-wide.
-        MissionControlModel.shared.onSnapshotUpdate = { snapshot in
+        // MissionControlModel → Notifier + pane headers. Wired once, app-wide.
+        MissionControlModel.shared.onSnapshotUpdate = { [weak self] snapshot in
             Notifier.shared.handle(snapshot)
             Updater.shared.gate.reevaluate()
+            self?.windowManager.applyAgentState(snapshot.state, toPaneId: snapshot.paneId)
         }
         MissionControlModel.shared.onLivePanesChanged = {
             Updater.shared.gate.reevaluate()

@@ -253,6 +253,14 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         workspace.panes.contains { $0.paneId == paneId }
     }
 
+    /// Forward an agent state to the pane if this window owns it.
+    @discardableResult
+    func applyAgentState(_ state: PaneState, toPaneId paneId: String) -> Bool {
+        guard let pane = workspace.panes.first(where: { $0.paneId == paneId }) else { return false }
+        pane.applyAgentState(state)
+        return true
+    }
+
     /// Snapshot this window's restorable state. Returns nil for a paneless
     /// window (nothing worth restoring). `includeAgentResume` adds each
     /// pane's live agent session — only the update-relaunch save asks.

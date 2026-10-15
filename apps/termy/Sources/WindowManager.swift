@@ -127,6 +127,13 @@ final class WindowManager {
         _ = owner.focusLocalPane(byId: paneId)
     }
 
+    /// Route a pane's agent state to whichever window owns the pane.
+    func applyAgentState(_ state: PaneState, toPaneId paneId: String) {
+        for controller in controllers where controller.applyAgentState(state, toPaneId: paneId) {
+            return
+        }
+    }
+
     // MARK: - Cascade / clamp (pure helpers — unit tested)
 
     static let defaultWindowSize = CGSize(width: 1200, height: 760)

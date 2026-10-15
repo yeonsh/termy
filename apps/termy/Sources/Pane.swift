@@ -361,6 +361,11 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
 
     // MARK: - Header updates
 
+    /// Mirror the agent's state onto the header (THINK activity bar).
+    func applyAgentState(_ state: PaneState) {
+        headerView.setThinking(state.displaysAsThinking)
+    }
+
     private func installHeadWatcher(for cwd: String) {
         if headWatcher == nil {
             headWatcher = GitHeadWatcher { [weak self] in
@@ -496,6 +501,7 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
 
 final class PaneHeaderView: NSView {
     private let label = NSTextField(labelWithString: "")
+    let activityBar = ThinkingActivityBar()
 
     private var project: String = ""
     private var branch: String?
@@ -515,6 +521,16 @@ final class PaneHeaderView: NSView {
             border.trailingAnchor.constraint(equalTo: trailingAnchor),
             border.bottomAnchor.constraint(equalTo: bottomAnchor),
             border.heightAnchor.constraint(equalToConstant: 1)
+        ])
+
+        // THINK activity bar rides on top of the bottom border.
+        activityBar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(activityBar)
+        NSLayoutConstraint.activate([
+            activityBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            activityBar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            activityBar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            activityBar.heightAnchor.constraint(equalToConstant: 3)
         ])
 
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -544,10 +560,16 @@ final class PaneHeaderView: NSView {
         applyTheme(appearance: appearance)
     }
 
+    func setThinking(_ thinking: Bool) {
+        activityBar.setActive(thinking)
+    }
+
     private func applyTheme(appearance: NSAppearance?) {
         let theme = PaneStyling.theme(for: appearance)
         let accent = PaneStyling.accentColor(for: project, appearance: appearance)
         layer?.backgroundColor = accent.withAlphaComponent(theme.headerTintAlpha).cgColor
+        // Same hue as the tint, fully opaque, so the bar reads over it.
+        activityBar.color = accent.withAlphaComponent(1)
     }
 
     private func rebuildLabel() {
