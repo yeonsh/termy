@@ -15,6 +15,25 @@ import Foundation
 enum AgentKind: String, Sendable, Codable, Hashable {
     case claude
     case codex
+    case antigravity
+
+    /// Wire-level `agent` string emitted by termy-hook and synthetic session events.
+    var wireName: String {
+        switch self {
+        case .claude:      return "claude-code"
+        case .codex:       return "codex"
+        case .antigravity: return "antigravity"
+        }
+    }
+
+    /// Human-readable agent name used in notifications and UI copy.
+    var displayName: String {
+        switch self {
+        case .claude:      return "Claude"
+        case .codex:       return "Codex"
+        case .antigravity: return "Antigravity"
+        }
+    }
 
     /// Map the wire-level `agent` string emitted by termy-hook to a kind.
     /// Synthetic events (`agent == "termy"`) are inherited from the snapshot
@@ -22,9 +41,10 @@ enum AgentKind: String, Sendable, Codable, Hashable {
     /// rather than coercing termy → .claude.
     static func from(rawAgent: String) -> AgentKind? {
         switch rawAgent {
-        case "claude-code": return .claude
-        case "codex":       return .codex
-        default:            return nil
+        case "claude-code":          return .claude
+        case "codex":                return .codex
+        case "antigravity", "agy":   return .antigravity
+        default:                     return nil
         }
     }
 }

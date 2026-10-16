@@ -176,13 +176,19 @@ actor ForegroundProcessWatcher {
     }
 
     /// Map a process basename / executable name to a known agent.
-    /// Lowercase comparison so `Codex`, `codex-cli`, etc. all match.
+    /// Lowercase comparison so `Codex`, `codex-cli`, `agy`, etc. all match.
     static func classifyAgent(by name: String) -> AgentKind? {
         let normalized = name.lowercased()
         // Check codex first because some users alias `claude → codex` for
         // experimentation; we trust the actual binary name, not the alias.
         if normalized == "codex" || normalized.hasPrefix("codex-") {
             return .codex
+        }
+        if normalized == "agy"
+            || normalized.hasPrefix("agy-")
+            || normalized == "antigravity-cli"
+            || normalized.hasPrefix("antigravity-cli-") {
+            return .antigravity
         }
         if normalized == "claude" || normalized.hasPrefix("claude-") {
             return .claude
@@ -210,6 +216,12 @@ actor ForegroundProcessWatcher {
                 || basename.hasPrefix("codex-")
                 || normalized.contains("@openai/codex") {
                 return (index, .codex)
+            }
+            if basename == "agy"
+                || basename.hasPrefix("agy-")
+                || basename == "antigravity-cli"
+                || basename.hasPrefix("antigravity-cli-") {
+                return (index, .antigravity)
             }
             if basename == "claude"
                 || basename.hasPrefix("claude-")

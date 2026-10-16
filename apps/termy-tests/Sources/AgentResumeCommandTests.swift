@@ -33,6 +33,25 @@ final class AgentResumeCommandTests: XCTestCase {
         )
     }
 
+    func test_antigravity_noFlags() {
+        XCTAssertEqual(
+            AgentResumeCommand.make(record(.antigravity, id: "2d76b53d-b010-411b-b2c2-54ad397534f3")),
+            "agy --conversation 2d76b53d-b010-411b-b2c2-54ad397534f3"
+        )
+    }
+
+    func test_antigravity_putsFlagsAfterConversationId() {
+        let r = record(
+            .antigravity,
+            id: "2d76b53d-b010-411b-b2c2-54ad397534f3",
+            flags: ["--model", "gemini-2.5-pro", "--dangerously-skip-permissions"]
+        )
+        XCTAssertEqual(
+            AgentResumeCommand.make(r),
+            "agy --conversation 2d76b53d-b010-411b-b2c2-54ad397534f3 --model gemini-2.5-pro --dangerously-skip-permissions"
+        )
+    }
+
     // Review Focus 3
     func test_quotesToolPatternWithSpacesAndParens() {
         let r = record(.claude, id: "s1", flags: ["--allowedTools", "Bash(git log:*)", "Edit"])

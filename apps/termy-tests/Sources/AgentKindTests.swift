@@ -19,6 +19,20 @@ final class AgentKindTests: XCTestCase {
         XCTAssertEqual(AgentKind.from(rawAgent: "codex"), .codex)
     }
 
+    func test_from_antigravity_returnsAntigravity() {
+        XCTAssertEqual(AgentKind.from(rawAgent: "antigravity"), .antigravity)
+        XCTAssertEqual(AgentKind.from(rawAgent: "agy"), .antigravity)
+    }
+
+    func test_wireName_and_displayName() {
+        XCTAssertEqual(AgentKind.claude.wireName, "claude-code")
+        XCTAssertEqual(AgentKind.claude.displayName, "Claude")
+        XCTAssertEqual(AgentKind.codex.wireName, "codex")
+        XCTAssertEqual(AgentKind.codex.displayName, "Codex")
+        XCTAssertEqual(AgentKind.antigravity.wireName, "antigravity")
+        XCTAssertEqual(AgentKind.antigravity.displayName, "Antigravity")
+    }
+
     func test_from_termy_returnsNil() {
         // Synthetic events leave kind unresolved — daemon inherits from snapshot.
         XCTAssertNil(AgentKind.from(rawAgent: "termy"))
@@ -451,6 +465,153 @@ final class AgentKindTests: XCTestCase {
         XCTAssertEqual(after.state, .waiting)
         XCTAssertEqual(after.waitSource, .permission)
         XCTAssertTrue(after.needsAttention)
+    }
+
+    // MARK: - Antigravity lifecycle & state machine
+
+    func test_antigravitySessionStart_resetsFromAnyState() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .antigravity)
+        s.state = .thinking
+        s.needsAttention = true
+        s.notificationReason = "ask_user_question"
+        var meta = HookEvent.Meta()
+        meta.sessionId = "conv-123"
+        meta.cwd = "/Users/u/proj"
+        let event = HookEvent(
+            event: .sessionStart,
+            paneId: "p1",
+            projectId: nil,
+            ts: 1.0,
+            agent: "antigravity",
+            meta: meta
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.agentKind, .antigravity)
+        XCTAssertEqual(after.state, .idle)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertNil(after.notificationReason)
+        XCTAssertEqual(after.lastSessionId, "conv-123")
+        XCTAssertEqual(after.lastCwd, "/Users/u/proj")
+    }
+
+    func test_antigravityPreInvocation_setsThinking() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .antigravity)
+        s.state = .waiting
+        s.needsAttention = true
+        s.notificationReason = "ask_user_question"
+        s.waitSource = .askUserQuestion
+        let event = HookEvent(
+            event: .preInvocation,
+            paneId: "p1",
+            projectId: nil,
+            ts: 2.0,
+            agent: "antigravity",
+            meta: HookEvent.Meta()
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .thinking)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertNil(after.notificationReason)
+        XCTAssertNil(after.waitSource)
+    }
+
+    func test_antigravityStop_cascadeDone_setsTurnEndWaiting() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .antigravity)
+        s.state = .thinking
+        var meta = HookEvent.Meta()
+        meta.reason = "CASCADE_DONE"
+        let event = HookEvent(
+            event: .stop,
+            paneId: "p1",
+            projectId: nil,
+            ts: 3.0,
+            agent: "antigravity",
+            meta: meta
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertNil(after.waitSource)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertNil(after.notificationReason)
+    }
+
+    func test_antigravityStop_errorReason_setsErrored() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .antigravity)
+        s.state = .thinking
+        var meta = HookEvent.Meta()
+        meta.reason = "ERROR"
+        let event = HookEvent(
+            event: .stop,
+            paneId: "p1",
+            projectId: nil,
+            ts: 3.0,
+            agent: "antigravity",
+            meta: meta
+        )
+        let after = PaneStateMachine.apply(event, to: s)
+        XCTAssertEqual(after.state, .errored)
+        XCTAssertFalse(after.turnOpen)
+        XCTAssertNil(after.waitSource)
+    }
+
+    func test_antigravityAskQuestion_preservesWaitingAcrossTerminalStepStop_andResumesOnPostToolUse() {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .antigravity)
+        s.state = .thinking
+
+        // 1. PreToolUse(ask_question) enters WAITING with needsAttention = true.
+        var preMeta = HookEvent.Meta()
+        preMeta.toolName = "ask_question"
+        let preEvent = HookEvent(
+            event: .preToolUse,
+            paneId: "p1",
+            projectId: nil,
+            ts: 10.0,
+            agent: "antigravity",
+            meta: preMeta
+        )
+        let afterPre = PaneStateMachine.apply(preEvent, to: s)
+        XCTAssertEqual(afterPre.state, .waiting)
+        XCTAssertTrue(afterPre.needsAttention)
+        XCTAssertEqual(afterPre.notificationReason, "ask_user_question")
+        XCTAssertNil(afterPre.waitSource)
+        let initialEnteredAt = afterPre.enteredStateAt
+
+        // 2. Stop(TERMINAL_STEP_TYPE) fires immediately while waiting for user answer;
+        //    must preserve ask_user_question waiting state and enteredStateAt (no double-chime).
+        var stopMeta = HookEvent.Meta()
+        stopMeta.reason = "TERMINAL_STEP_TYPE"
+        let stopEvent = HookEvent(
+            event: .stop,
+            paneId: "p1",
+            projectId: nil,
+            ts: 10.5,
+            agent: "antigravity",
+            meta: stopMeta
+        )
+        let afterStop = PaneStateMachine.apply(stopEvent, to: afterPre)
+        XCTAssertEqual(afterStop.state, .waiting)
+        XCTAssertTrue(afterStop.needsAttention)
+        XCTAssertEqual(afterStop.notificationReason, "ask_user_question")
+        XCTAssertNil(afterStop.waitSource)
+        XCTAssertEqual(afterStop.enteredStateAt, initialEnteredAt)
+
+        // 3. PostToolUse(ask_question) fires when the user submits the answer;
+        //    must resume THINKING.
+        var postMeta = HookEvent.Meta()
+        postMeta.toolName = "ask_question"
+        let postEvent = HookEvent(
+            event: .postToolUse,
+            paneId: "p1",
+            projectId: nil,
+            ts: 20.0,
+            agent: "antigravity",
+            meta: postMeta
+        )
+        let afterPost = PaneStateMachine.apply(postEvent, to: afterStop)
+        XCTAssertEqual(afterPost.state, .thinking)
+        XCTAssertFalse(afterPost.needsAttention)
+        XCTAssertNil(afterPost.notificationReason)
+        XCTAssertNil(afterPost.waitSource)
     }
 
     // MARK: - Helpers

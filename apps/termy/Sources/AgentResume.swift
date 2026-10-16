@@ -33,6 +33,8 @@ enum AgentResumeCommand {
             // `codex resume [OPTIONS] [SESSION_ID] [PROMPT]` — options go
             // first so nothing after the id can read as a prompt.
             words = ["codex", "resume"] + flags + [id]
+        case .antigravity:
+            words = ["agy", "--conversation", id] + flags
         }
         return words.joined(separator: " ")
     }

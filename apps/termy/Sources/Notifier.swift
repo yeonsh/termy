@@ -138,22 +138,23 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func notificationTitle(for snap: PaneSnapshot) -> String {
-        let project = snap.projectId?.isEmpty == false ? snap.projectId! : "Claude"
+        let project = snap.projectId?.isEmpty == false ? snap.projectId! : snap.agentKind.displayName
         return "\(project) needs you"
     }
 
     private func notificationBody(for snap: PaneSnapshot) -> String {
+        let agentName = snap.agentKind.displayName
         // Codex panes carry waitSource; map it to user-facing copy first.
         if let source = snap.waitSource {
             switch source {
             case .permission:           return "Waiting for your approval."
-            case .askUserQuestion:      return "Codex is asking a question."
+            case .askUserQuestion:      return "\(agentName) is asking a question."
             case .turnEnd:
                 if let msg = snap.lastAssistantMessage, !msg.isEmpty {
                     return String(msg.prefix(140))
                 }
-                return "Codex finished — your turn."
-            case .promotedFromPossible: return "Codex has been quiet for a while — check on it."
+                return "\(agentName) finished — your turn."
+            case .promotedFromPossible: return "\(agentName) has been quiet for a while — check on it."
             }
         }
         if let reason = snap.notificationReason {
@@ -161,14 +162,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             case "permission":         return "Waiting for your approval."
             case "idle":               return "Still idle — check what's pending."
             case "mcp_elicit":         return "An MCP tool is asking for input."
-            case "ask_user_question":  return "Claude is asking a question."
+            case "ask_user_question":  return "\(agentName) is asking a question."
             default:                   break
             }
         }
         if let msg = snap.lastAssistantMessage, !msg.isEmpty {
             return String(msg.prefix(140))
         }
-        return "Claude is waiting for your response."
+        return "\(agentName) is waiting for your response."
     }
 
     // MARK: - UNUserNotificationCenterDelegate

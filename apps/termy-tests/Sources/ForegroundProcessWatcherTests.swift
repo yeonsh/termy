@@ -23,9 +23,17 @@ final class ForegroundProcessWatcherTests: XCTestCase {
         XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "claude"), .claude)
     }
 
+    func test_classifyAgent_antigravity() {
+        XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "agy"), .antigravity)
+        XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "agy-darwin-arm64"), .antigravity)
+        XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "antigravity-cli"), .antigravity)
+        XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "antigravity-cli-darwin"), .antigravity)
+    }
+
     func test_classifyAgent_caseInsensitive() {
         XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "Codex"), .codex)
         XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "CLAUDE"), .claude)
+        XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "AGY"), .antigravity)
     }
 
     func test_classifyAgent_shell_returnsNil() {

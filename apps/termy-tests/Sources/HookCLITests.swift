@@ -52,4 +52,44 @@ final class HookCLITests: XCTestCase {
         XCTAssertNil(HookCLI.parse(["termy-hook"]))
         XCTAssertNil(HookCLI.parse(["termy-hook", "--agent", "codex"]))
     }
+
+    func test_agentAntigravity_normalizesToAntigravity() {
+        let parsedFull = HookCLI.parse(["termy-hook", "--agent", "antigravity", "PreInvocation"])
+        XCTAssertEqual(parsedFull?.agent, "antigravity")
+        XCTAssertEqual(parsedFull?.event, "PreInvocation")
+
+        let parsedShort = HookCLI.parse(["termy-hook", "--agent", "agy", "Stop"])
+        XCTAssertEqual(parsedShort?.agent, "antigravity")
+        XCTAssertEqual(parsedShort?.event, "Stop")
+    }
+
+    func test_slimMeta_normalizesAntigravityFields() throws {
+        let stdinJSON = """
+        {
+          "conversationId": "conv-abc-123",
+          "workspacePaths": ["/Users/u/proj/termy", "/Users/u/other"],
+          "transcriptPath": "/Users/u/.gemini/antigravity-cli/brain/conv-abc-123/transcript.jsonl",
+          "terminationReason": "CASCADE_DONE",
+          "toolCall": {
+            "name": "ask_question",
+            "id": "call-99",
+            "args": { "question": "Proceed?" }
+          },
+          "error": "network timeout"
+        }
+        """.data(using: .utf8)!
+        let raw = try XCTUnwrap(JSONSerialization.jsonObject(with: stdinJSON) as? [String: Any])
+        let meta = HookCLI.slimMeta(raw)
+        XCTAssertEqual(meta["session_id"], "conv-abc-123")
+        XCTAssertEqual(meta["cwd"], "/Users/u/proj/termy")
+        XCTAssertEqual(
+            meta["transcript_path"],
+            "/Users/u/.gemini/antigravity-cli/brain/conv-abc-123/transcript.jsonl"
+        )
+        XCTAssertEqual(meta["reason"], "CASCADE_DONE")
+        XCTAssertEqual(meta["tool_name"], "ask_question")
+        XCTAssertEqual(meta["tool_use_id"], "call-99")
+        XCTAssertTrue(meta["tool_input"]?.contains("Proceed?") == true)
+        XCTAssertEqual(meta["error"], "network timeout")
+    }
 }

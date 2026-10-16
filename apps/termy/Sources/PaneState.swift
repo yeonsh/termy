@@ -163,6 +163,12 @@ enum PaneStateMachine {
     /// informational-notification overwrite and the idle_prompt stale clear.
     private static let blockingReasons: Set<String> = ["permission", "mcp_elicit", "ask_user_question"]
 
+    /// Matches interactive user-question tools across agents:
+    /// Claude Code / Codex (`AskUserQuestion`) and Antigravity (`ask_question`).
+    private static func isAskUserQuestionTool(_ toolName: String?) -> Bool {
+        toolName == "AskUserQuestion" || toolName == "ask_question"
+    }
+
     static func apply(_ event: HookEvent, to previous: PaneSnapshot) -> PaneSnapshot {
         var next = previous
         next.updatedAt = Date()
@@ -203,18 +209,19 @@ enum PaneStateMachine {
         case .sessionStart:
             // A fresh agent invocation has just started.
             //
-            // Codex panes: hard-reset to IDLE regardless of prior state.
-            // Codex has no SessionEnd hook event — Phase 4's foreground-
-            // process detector synthesizes one but can miss edges
-            // (rapid-fire `/exit` + relaunch, daemon restart). Treating
-            // every Codex SessionStart as a clean reset stops stale
-            // THINK/WAIT chips from surviving across sessions.
+            // Codex / Antigravity panes: hard-reset to IDLE regardless of
+            // prior state. Neither has a native SessionEnd hook event —
+            // Phase 4's foreground-process detector synthesizes one but can
+            // miss edges (rapid-fire `/exit` + relaunch, daemon restart).
+            // Treating every Codex / Antigravity SessionStart as a clean
+            // reset stops stale THINK/WAIT chips from surviving across
+            // sessions.
             //
             // Claude panes: only promote from .initializing. Mid-work
             // sessions (resume after compact, etc.) keep their state so
             // the dashboard doesn't flicker on every plugin handshake.
             let resolvedKind = event.agentKind ?? previous.agentKind
-            if resolvedKind == .codex {
+            if resolvedKind == .codex || resolvedKind == .antigravity {
                 next.state = .idle
                 next.needsAttention = false
                 next.notificationReason = nil
@@ -233,19 +240,58 @@ enum PaneStateMachine {
             next.enteredStateAt = next.updatedAt
             next.turnOpen = true
 
-        case .stop:
-            next.lastAssistantMessage = event.meta.lastAssistantMessage
-            next.state = .waiting
-            // waitSource is the Codex-only typed reason (see PaneState.swift).
-            // Claude paths leave it nil and continue using notificationReason
-            // for legacy reason strings; Notifier reads waitSource as Codex,
-            // so tagging Claude WAITs with .turnEnd would mis-attribute the
-            // notification copy.
-            if (event.agentKind ?? previous.agentKind) == .codex {
-                next.waitSource = .turnEnd
+        case .preInvocation:
+            // Antigravity fires PreInvocation before each model call (both on
+            // initial user prompt and when continuing after tool execution).
+            next.needsAttention = false
+            next.notificationReason = nil
+            next.waitSource = nil
+            next.turnOpen = true
+            if previous.state != .thinking {
+                next.state = .thinking
+                next.enteredStateAt = next.updatedAt
             }
-            next.enteredStateAt = next.updatedAt
+
+        case .postInvocation:
+            // Antigravity fires PostInvocation when a batch of tool calls
+            // finishes. Keep the turn open and promote INIT/IDLE to THINKING.
+            next.turnOpen = true
+            if previous.state == .initializing || previous.state == .idle {
+                next.state = .thinking
+                next.enteredStateAt = next.updatedAt
+            }
+
+        case .stop:
+            let resolvedKind = event.agentKind ?? previous.agentKind
+            next.lastAssistantMessage = event.meta.lastAssistantMessage
             next.turnOpen = false
+            if resolvedKind == .antigravity, event.meta.reason == "ERROR" {
+                next.state = .errored
+                next.waitSource = nil
+                next.enteredStateAt = next.updatedAt
+            } else if resolvedKind == .antigravity,
+                      event.meta.reason == "TERMINAL_STEP_TYPE",
+                      previous.state == .waiting,
+                      previous.notificationReason == "ask_user_question" {
+                // PreToolUse(ask_question) already transitioned this pane to
+                // WAITING with needsAttention = true. Preserve the existing
+                // WAITING state and enteredStateAt so Notifier doesn't chime
+                // a second time when Stop(TERMINAL_STEP_TYPE) follows.
+                next.state = .waiting
+                next.needsAttention = true
+                next.notificationReason = "ask_user_question"
+            } else {
+                next.state = .waiting
+                // waitSource is the Codex-only typed reason (see PaneState.swift).
+                // Claude and Antigravity paths leave it nil and continue using
+                // notificationReason for legacy reason strings; Notifier reads
+                // waitSource as Codex, so tagging non-Codex WAITs with .turnEnd
+                // would mis-attribute the notification copy.
+                if resolvedKind == .codex {
+                    next.waitSource = .turnEnd
+                }
+                next.enteredStateAt = next.updatedAt
+            }
 
         case .stopFailure:
             // Abnormal turn termination (rate-limit, mid-turn crash). Unlike
@@ -357,7 +403,7 @@ enum PaneStateMachine {
 
         case .preToolUse:
             next.turnOpen = true
-            if event.meta.toolName == "AskUserQuestion" {
+            if Self.isAskUserQuestionTool(event.meta.toolName) {
                 next.state = .waiting
                 next.needsAttention = true
                 next.notificationReason = "ask_user_question"
@@ -386,13 +432,13 @@ enum PaneStateMachine {
 
         case .postToolUse:
             next.turnOpen = true
-            if event.meta.toolName == "AskUserQuestion",
+            if Self.isAskUserQuestionTool(event.meta.toolName),
                previous.state == .waiting,
                previous.waitSource == .askUserQuestion
                 || previous.notificationReason == "ask_user_question" {
                 // Match either typed source (Codex) or legacy reason string
-                // (Claude) — entry sites diverge by agent but recovery is
-                // symmetric.
+                // (Claude / Antigravity) — entry sites diverge by agent but
+                // recovery is symmetric.
                 next.state = .thinking
                 next.needsAttention = false
                 next.notificationReason = nil

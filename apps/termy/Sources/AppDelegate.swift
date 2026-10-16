@@ -98,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             FullDiskAccess.promptIfNeeded()
             HookInstaller.promptIfNeeded()
             CodexHookInstaller.promptIfNeeded()
+            AntigravityHookInstaller.promptIfNeeded()
         }
 
         // Instantiating SPUStandardUpdaterController on first access starts
@@ -281,6 +282,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         CodexHookInstaller.showPromptFromMenu()
     }
 
+    @IBAction func openAntigravityHookInstallerPrompt(_ sender: Any?) {
+        AntigravityHookInstaller.showPromptFromMenu()
+    }
+
     @IBAction func useLightAppearance(_ sender: Any?) {
         AppAppearancePreference.light.apply()
     }
@@ -456,6 +461,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             keyEquivalent: ""
         )
         codexInstaller.target = self
+        let antigravityInstaller = menu.addItem(
+            withTitle: "Antigravity Hooks…",
+            action: #selector(AppDelegate.openAntigravityHookInstallerPrompt(_:)),
+            keyEquivalent: ""
+        )
+        antigravityInstaller.target = self
         menu.addItem(.separator())
         let servicesItem = menu.addItem(withTitle: "Services", action: nil, keyEquivalent: "")
         let servicesMenu = NSMenu(title: "Services")

@@ -25,6 +25,8 @@ enum HookEventKind: String, Codable {
     case subagentStop         = "SubagentStop"
     case notification         = "Notification"
     case permissionRequest    = "PermissionRequest" // Codex-only WAIT trigger
+    case preInvocation        = "PreInvocation"     // Antigravity model invocation start
+    case postInvocation       = "PostInvocation"    // Antigravity tool batch end
     case ptyExit              = "PtyExit" // synthetic from PtyController on pty EOF
 }
 
@@ -34,10 +36,10 @@ struct HookEvent: Codable {
     let paneId: String?          // from $TERMY_PANE_ID
     let projectId: String?       // from $TERMY_PROJECT_ID
     let ts: Double               // unix seconds (sub-second resolution on synthetic events)
-    /// Wire label for the source. "claude-code" / "codex" for hook-originated
-    /// events, "termy" for synthetic ones (PtyExit, fg-process synthesis).
-    /// Use `agentKind` for typed dispatch — `nil` means "synthetic, inherit
-    /// the pane's existing kind".
+    /// Wire label for the source. "claude-code" / "codex" / "antigravity" for
+    /// hook-originated events, "termy" for synthetic ones (PtyExit, fg-process
+    /// synthesis). Use `agentKind` for typed dispatch — `nil` means "synthetic,
+    /// inherit the pane's existing kind".
     let agent: String
     let meta: Meta
 
@@ -58,8 +60,9 @@ struct HookEvent: Codable {
     struct Meta: Codable {
         var sessionId: String?
         var cwd: String?
+        var transcriptPath: String?          // Antigravity transcript_path
         var source: String?                  // SessionStart: "startup" | "resume" | "compact"
-        var reason: String?                  // SessionEnd: "clear" | "exit" | ...; Notification: "permission" | "idle" | "mcp_elicit"
+        var reason: String?                  // SessionEnd: "clear" | "exit" | ...; Notification: "permission" | "idle" | "mcp_elicit"; Antigravity Stop: "CASCADE_DONE" | "TERMINAL_STEP_TYPE" | "ERROR" | ...
         /// Claude Code's Notification payload carries `notification_type`
         /// (permission_prompt, idle_prompt, ...) and no `reason`.
         var notificationType: String?        // Notification
@@ -72,6 +75,7 @@ struct HookEvent: Codable {
         var toolName: String?                // Pre/PostToolUse
         var toolUseId: String?               // Pre/PostToolUse
         var toolInput: String?               // Pre/PostToolUse, truncated
+        var error: String?                   // Antigravity PostToolUse error
         var exitCode: Int32?                 // PtyExit
 
         /// Normalized Notification reason: an explicit `reason` (legacy
@@ -92,6 +96,7 @@ struct HookEvent: Codable {
         enum CodingKeys: String, CodingKey {
             case sessionId = "session_id"
             case cwd
+            case transcriptPath = "transcript_path"
             case source
             case reason
             case notificationType = "notification_type"
@@ -101,6 +106,7 @@ struct HookEvent: Codable {
             case toolName = "tool_name"
             case toolUseId = "tool_use_id"
             case toolInput = "tool_input"
+            case error
             case exitCode = "exit_code"
         }
     }

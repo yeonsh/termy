@@ -89,4 +89,28 @@ final class AgentResumeFlagsTests: XCTestCase {
             ["--model", "sonnet", "--allowedTools", "Bash(sleep:*)"]
         )
     }
+
+    func test_antigravity_keepsCarryableFlagsAndDropsConversationAndPrompt() {
+        let argv = [
+            "/Users/u/.antigravity/antigravity-cli/bin/agy",
+            "--conversation", "old-conv-id",
+            "--continue",
+            "--dangerously-skip-permissions",
+            "--model", "gemini-2.5-pro",
+            "--effort=high",
+            "--mode", "plan",
+            "--add-dir", "/tmp/extra",
+            "-p", "one-shot prompt",
+        ]
+        XCTAssertEqual(
+            AgentResumeFlags.extract(kind: .antigravity, argv: argv),
+            [
+                "--dangerously-skip-permissions",
+                "--model", "gemini-2.5-pro",
+                "--effort=high",
+                "--mode", "plan",
+                "--add-dir", "/tmp/extra",
+            ]
+        )
+    }
 }

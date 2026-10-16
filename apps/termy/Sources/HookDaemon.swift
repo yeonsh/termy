@@ -200,7 +200,7 @@ actor HookDaemon {
             paneId: paneId,
             projectId: projectId,
             ts: Date().timeIntervalSince1970,
-            agent: agent == .codex ? "codex" : "claude-code",
+            agent: agent.wireName,
             meta: HookEvent.Meta()
         )
         await ingest(event)

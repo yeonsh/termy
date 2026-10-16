@@ -48,10 +48,28 @@ enum AgentResumeFlags {
         "--add-dir": .one,
     ]
 
+    /// Checked against `agy --help`.
+    private static let antigravity: [String: Arity] = [
+        "--dangerously-skip-permissions": .none,
+        "--remote-control": .none,
+        "--sandbox": .none,
+        "--add-dir": .one,
+        "--agent": .one,
+        "--effort": .one,
+        "--mode": .one,
+        "--model": .one,
+        "--project": .one,
+    ]
+
     static func extract(kind: AgentKind, argv: [String]) -> [String] {
         guard let entry = ForegroundProcessWatcher.agentEntrypoint(in: argv) else { return [] }
         let args = Array(argv.dropFirst(entry.index + 1))
-        let table = (kind == .claude) ? claude : codex
+        let table: [String: Arity]
+        switch kind {
+        case .claude:      table = claude
+        case .codex:       table = codex
+        case .antigravity: table = antigravity
+        }
         var kept: [String] = []
         var i = 0
         while i < args.count {

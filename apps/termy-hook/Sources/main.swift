@@ -25,61 +25,14 @@ import Darwin
 /// Budget covers: connect + send + close.
 let writeDeadline: TimeInterval = 0.1
 
-/// Fields we forward to the daemon. Dropping the rest keeps events.jsonl
-/// small — raw SessionStart with an active plugin can be >150KB.
-/// Keys match HookEvent.Meta in the host app.
-let forwardedKeys: Set<String> = [
-    "session_id", "cwd", "source", "reason", "notification_type",
-    "prompt", "last_assistant_message", "stop_hook_active",
-    "tool_name", "tool_use_id", "tool_input",
-    "exit_code"
-]
-/// Hard cap per string field — CC payloads sometimes include prompts or
-/// assistant messages in the 10-100KB range. Truncate for the wire.
-let maxStringBytes = 4096
-
 // MARK: - Helpers
 
 func socketPath() -> String {
     "/tmp/termy-\(getuid()).sock"
 }
 
-/// Slim a payload dict down to our forwarded keys, truncating big strings.
-///
-/// Note: the daemon's HookEvent.Meta types every forwarded field as
-/// `String?` for simplicity on the Swift side. CC sometimes sends
-/// structured objects (e.g. `tool_input` for PreToolUse / PostToolUse is
-/// a dict like `{"command": "echo hi", "description": "..."}`). We must
-/// coerce non-string values to a JSON-encoded string BEFORE shipping, or
-/// the daemon's Codable decoder crashes and the event is dropped.
 func slim(_ raw: [String: Any]) -> [String: Any] {
-    var out: [String: Any] = [:]
-    for key in forwardedKeys {
-        guard let value = raw[key] else { continue }
-        out[key] = coerceToString(value)
-    }
-    return out
-}
-
-/// Coerce any Foundation-JSON-decoded value to a String for the wire.
-/// The daemon types every forwarded `meta` field as `String?`, so we must
-/// flatten here — and we MUST NOT throw or abort, no matter what CC fed us.
-///
-/// Crash observed in the wild: `JSONSerialization.data(withJSONObject:)`
-/// raises an NSException when passed a scalar top-level (bool/number/null).
-/// We guard with `isValidJSONObject` first, and fall back to
-/// `String(describing:)` for anything else.
-func coerceToString(_ value: Any) -> String {
-    if let s = value as? String {
-        return String(s.prefix(maxStringBytes))
-    }
-    if JSONSerialization.isValidJSONObject(value),
-       let data = try? JSONSerialization.data(withJSONObject: value, options: []),
-       let json = String(data: data, encoding: .utf8) {
-        return String(json.prefix(maxStringBytes))
-    }
-    // Booleans, numbers, NSNull, everything else.
-    return String(describing: value).prefix(maxStringBytes).description
+    HookCLI.slimMeta(raw)
 }
 
 /// Best-effort breadcrumb when send() can't deliver. Writes one line to
@@ -213,6 +166,11 @@ guard let parsed = HookCLI.parse(CommandLine.arguments) else {
     exit(0)
 }
 let eventName = parsed.event
+
+// Antigravity CLI requires hook commands to output a valid JSON object on stdout.
+if parsed.agent == "antigravity", let emptyJSON = "{}\n".data(using: .utf8) {
+    try? FileHandle.standardOutput.write(contentsOf: emptyJSON)
+}
 
 // Read stdin with a tight timeout so we never block CC.
 let stdinData: Data = {
