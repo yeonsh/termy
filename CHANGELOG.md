@@ -6,6 +6,18 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.15 — 2026-10-16
+
+- Antigravity CLI (`agy`) now works with termy alongside Claude Code and
+  Codex. Panes running `agy` show their live state (IDLE, THINK, WAIT,
+  ERR) in the dashboard and on the pane header, play notifications when
+  `agy` asks a question or finishes a turn, and reopen the same
+  conversation (`agy --conversation`) after a termy update.
+- If `agy` is installed, termy offers to set up its hooks on launch, or
+  you can install and remove them anytime from termy ▸ Antigravity
+  Hooks…. Your other entries in `~/.gemini/config/hooks.json` stay
+  untouched.
+
 ## 0.2.14 — 2026-10-15
 
 - Each pane now shows on its own when its agent is working.
