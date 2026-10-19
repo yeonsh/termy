@@ -762,6 +762,19 @@ final class AgentKindTests: XCTestCase {
         XCTAssertEqual(done.enteredStateAt, entered)
     }
 
+    // protects=the 30s IDLE timer starts from the turn's actual end even when
+    // the answer and the turn end land in one derive window;
+    // fails_when=WAIT(permission) → succeeded keeps the permission timestamp;
+    // no_claim=that opencode emits these two phases back-to-back.
+    func test_opencodeAgentStatus_succeededAfterPermission_refreshesEnteredStateAt() {
+        let before = opencodeSnapshot(.waiting, reason: "permission", attention: true, turnOpen: true)
+        let after = PaneStateMachine.apply(opencodeStatus("succeeded"), to: before)
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertNil(after.notificationReason)
+        XCTAssertGreaterThan(after.enteredStateAt, before.enteredStateAt)
+    }
+
     func test_opencodeAgentStatus_questionAfterPermission_staysWaiting() {
         let after = PaneStateMachine.apply(opencodeStatus("question"),
                                            to: opencodeSnapshot(.waiting, reason: "permission", attention: true, turnOpen: true))

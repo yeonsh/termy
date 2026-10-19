@@ -15,7 +15,7 @@
 
 - pane에서 `opencode`를 실행하면 1초 안에 IDLE 칩이 뜬다.
 - prompt를 보내면 THINK가 되고, 권한 요청이나 question 도구가 뜨면 WAIT로 바뀌며 알림음이 울린다. 답하면 다시 THINK가 된다.
-- turn이 성공하면 WAIT가 되고 알림음이 울리며, 30초 뒤 IDLE이 된다. 실패하면 ERR, 사용자가 Esc로 멈추면 알림 없이 IDLE이 된다.
+- turn이 성공하면 WAIT가 되고 알림음이 울리며, 30초 뒤 IDLE이 된다. 실패하면 ERR, 사용자가 Esc를 두 번 눌러 멈추면 알림 없이 IDLE이 된다.
 - termy 밖(Ghostty 등)에서 띄운 opencode는 termy에 아무것도 보내지 않는다.
 - plugin은 termy ▸ OpenCode Plugin… 메뉴에서 설치하고 해제한다.
 
@@ -279,12 +279,14 @@ plugin은 기존 `termy-hook`을 그대로 쓴다. socket 기록 · 100ms deadli
 | `running` | `.thinking` | false | nil | nil | true | state가 바뀔 때만 |
 | `permission` | `.waiting` | true | `"permission"` | nil | true | 이전이 WAIT(`"permission"`)가 아닐 때만 |
 | `question` | `.waiting` | true | `"ask_user_question"` | nil | true | 이전이 WAIT(`"ask_user_question"`)가 아닐 때만 |
-| `succeeded` | `.waiting` | false | nil | nil | false | 이전이 `.waiting`이 아닐 때만 |
+| `succeeded` | `.waiting` | false | nil | nil | false | 이전이 WAIT(`notificationReason == nil`)일 때만 유지 |
 | `failed` | `.errored` | false | nil | nil | false | state가 바뀔 때만 |
 | `idle` | `.idle` | false | nil | nil | false | state가 바뀔 때만 |
 | 그 밖 | 그대로 | 그대로 | 그대로 | 그대로 | 그대로 | 그대로 |
 
 표의 "이전"과 "바뀔 때"는 세션 id 변경 리셋(`PaneState.swift:192-200`)이 적용된 **뒤의** 상태를 기준으로 한다. 알려진 reason이면 state · needsAttention · notificationReason · waitSource · turnOpen은 항상 표의 값으로 쓰고, enteredStateAt만 조건에 따라 바꾼다. 세션 A가 WAIT(`"permission"`)인 pane에 세션 B의 `permission`이 오면, 리셋 뒤 INIT에서 다시 WAIT로 들어가 needsAttention이 true가 된다. 이 경우 알림음은 울리지 않는다(아래 "세션 전환으로 생긴 WAIT").
+
+`succeeded`의 enteredStateAt은 이전이 WAIT이어도 `notificationReason`이 남아 있으면 갱신한다. 권한 · 질문 대기의 오래된 시각이 남은 채 turn-end WAIT로 바뀌면 `HookDaemon.tickIdle`의 sleep/wake guard(`since < 120`)가 만료를 막을 수 있기 때문이다. 이미 조용한 turn-end WAIT(`notificationReason == nil`)에 `succeeded`가 또 오면 갱신하지 않는다.
 
 이 표를 따르면 기존 부품이 그대로 동작한다.
 
@@ -407,7 +409,7 @@ opencode DB는 사용자 것을 그대로 쓴다(2026-10-19 결정). 임시 `OPE
 12. `AgentResumeCapture.record`는 opencode foreground + session id가 있어도 nil을 돌려준다.
 13. `Pane.shellEnvironment`가 `OPENCODE_TERMINAL` · `OPENCODE_SESSION_ID`를 지우고 `OPENCODE_CONFIG_DIR`은 남긴다.
 14. §6의 S1~S6 결과가 이 문서에 적혀 있다.
-15. 실제 termy 빌드에서 수동 확인(구현 계획 마지막 태스크): opencode 실행 → IDLE, prompt → THINK, 권한 요청 → WAIT + 알림음, 승인 → THINK, 완료 → WAIT + 알림음 → 30초 뒤 IDLE, Esc 중단 → 알림 없이 IDLE, 기다리는 탭으로 전환 → WAIT이지만 알림음 없음, termy 밖 터미널의 opencode → termy 변화 없음.
+15. 실제 termy 빌드에서 수동 확인(구현 계획 마지막 태스크): opencode 실행 → IDLE, prompt → THINK, 권한 요청 → WAIT + 알림음, 승인 → THINK, 완료 → WAIT + 알림음 → 30초 뒤 IDLE, Esc 두 번으로 중단 → 알림 없이 IDLE, 기다리는 탭으로 전환 → WAIT이지만 알림음 없음, termy 밖 터미널의 opencode → termy 변화 없음.
 16. §8 표의 각 행(테스트 class 또는 class 안의 opencode 구역)은 머리 주석에 그 행의 card(`protects` / `fails_when` / `no_claim`)를 적는다. 행의 card와 다른 것을 지키는 테스트에만 개별 card를 붙인다.
 17. 기존 테스트가 모두 통과한다(`xcodebuild test`, 전체 suite).
 18. `WaitAlertRule.shouldAlert`는 (a) 같은 세션에서 WAIT로 들어오면 true, (b) 이미 WAIT면 false, (c) 직전 id와 새 id가 둘 다 있고 다르면 false, (d) 직전 id가 없으면(첫 이벤트, agent 전환 뒤) true다. `Notifier.handle`은 알림음 · dock bounce · 배너를 이 함수가 true일 때만 낸다.
@@ -417,7 +419,7 @@ opencode DB는 사용자 것을 그대로 쓴다(2026-10-19 결정). 임시 `OPE
 | 층 | 무엇 | 위치 | 개수 |
 |---|---|---|---|
 | Unit | `AgentKind` opencode 매핑 | `apps/termy-tests/Sources/AgentKindTests.swift` | +2 |
-| Unit | `AgentStatus` 디코드, reason 여섯 개 + 모르는 값, 중복 시 enteredStateAt 유지, permission 뒤 question, 세션 전환, synthetic SessionStart | `AgentKindTests.swift` | +12 |
+| Unit | `AgentStatus` 디코드, reason 여섯 개 + 모르는 값, 중복 시 enteredStateAt 유지, permission 뒤 question, 세션 전환, synthetic SessionStart | `AgentKindTests.swift` | +13 |
 | Unit | 프로세스 이름 · argv 감지 | `ForegroundProcessWatcherTests.swift` | +2 |
 | Unit | `--agent opencode` 파싱, payload slim | `HookCLITests.swift` | +2 |
 | Unit | 재개 제외 | `AgentResumeCaptureTests.swift` | +1 |
