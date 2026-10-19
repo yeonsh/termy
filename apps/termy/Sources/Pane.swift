@@ -225,10 +225,13 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     // MARK: - Shell
 
     /// Variables that describe the *launching* agent session (termy started
-    /// from inside Claude Code / Codex), not the user's configuration. Left in
-    /// place, a `claude` started in a pane runs as a child session and writes
-    /// no transcript, so `--resume` fails. A blanket `CLAUDE_CODE_*` strip
-    /// would also drop settings users set on purpose (e.g. `CLAUDE_CODE_NO_FLICKER`).
+    /// from inside Claude Code / Codex / opencode), not the user's
+    /// configuration. Left in place, a `claude` started in a pane runs as a
+    /// child session and writes no transcript, so `--resume` fails. A blanket
+    /// `CLAUDE_CODE_*` strip would also drop settings users set on purpose
+    /// (e.g. `CLAUDE_CODE_NO_FLICKER`). opencode sets its markers on shell
+    /// tool children (`packages/core/src/shell.ts`); keep values the user
+    /// configured themselves, such as `OPENCODE_CONFIG_DIR`.
     static let agentSessionMarkerEnvKeys: [String] = [
         "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_CHILD_SESSION",
         "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_SESSION_ATTENDED",
@@ -242,6 +245,7 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         "ANTIGRAVITY_LS_VERSION", "ANTIGRAVITY_PROJECT_ID",
         "ANTIGRAVITY_APP_DATA_DIR", "ANTIGRAVITY_SOURCE_METADATA",
         "ANTIGRAVITY_LS_ADDRESS", "ANTIGRAVITY_CSRF_TOKEN",
+        "OPENCODE_TERMINAL", "OPENCODE_SESSION_ID",
     ]
 
     /// Environment handed to a pane's login shell.

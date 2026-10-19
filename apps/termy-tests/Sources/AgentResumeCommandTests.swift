@@ -82,4 +82,19 @@ final class AgentResumeCommandTests: XCTestCase {
             #"'sandbox_permissions=["disk-full-read-access"]'"#
         )
     }
+
+    // MARK: - OpenCode
+
+    // protects=the command form a later resume task would turn on, and keeps
+    // make's switch exhaustive; fails_when=the command differs;
+    // no_claim=resume behavior (out of scope).
+    // Unreachable today: AgentResumeCapture never records opencode. The case
+    // exists to keep `make`'s switch exhaustive; this pins the command a later
+    // resume task would turn on.
+    func test_opencode_unreachableCommand_usesSessionFlag() {
+        XCTAssertEqual(
+            AgentResumeCommand.make(record(.opencode, id: "ses_0123456789abcdefABCDEFGHIJ")),
+            "opencode --session ses_0123456789abcdefABCDEFGHIJ"
+        )
+    }
 }
