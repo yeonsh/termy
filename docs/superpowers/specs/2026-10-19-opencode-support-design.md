@@ -376,6 +376,21 @@ opencode DB는 사용자 것을 그대로 쓴다(2026-10-19 결정). 임시 `OPE
 
 판정: S1~S3 중 하나라도 실패하면 구현을 멈추고 보고한다(서버 plugin이나 SSE 방식으로 다시 설계해야 함). S4에서 종료 이벤트가 계산보다 늦게 오면, 종료 이벤트 핸들러 안에서도 `schedule()`을 부르도록 바꾸고 그 사실을 이 절에 적는다. S5 · S6 실패는 해당 기능을 범위 밖으로 옮기고 이 문서에 적는다.
 
+### 결과(2026-10-19, opencode v2.0.32)
+
+임시 `XDG_CONFIG_HOME=/tmp/termy-oc-spike/config`와 `--standalone`으로 tmux(`oc-spike`)에서 확인했다. 사용자 DB는 그대로 썼고, spike 세션(`ses_eae7f6094ffeY72bscwPGnTr9b`)은 확인 뒤 지웠다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| S1 | 통과 | `opencode plugin list`의 `SOURCE`에 `/tmp/termy-oc-spike/config/opencode/plugins/termy-spike`가 나왔고, TUI 기동 뒤 `log.jsonl` 첫 줄이 `{"t":"setup",…}`였다. |
+| S2 | 통과 | setup 줄의 `"pane":"spike-pane"`이 `env TERMY_PANE_ID=spike-pane`과 같았다. |
+| S3 | 통과 | `spawn.log`에 `{"hello":1}`이 남았고, 없는 경로 spawn은 `{"t":"missing-error","e":"Error: ENOENT…"}`로만 기록되며 예외가 나가지 않았다. 직렬 queue의 세 자식은 `order.log`에 `1`, `2`, `3` 순서로 남았다. |
+| S4 | 통과 | prompt 한 번에 `started`(seq 2) → status `running` view(seq 3) → `succeeded`(seq 14) → status `idle` view(seq 15) 순서였고, 같은 이벤트(`session.execution.succeeded`)의 exec 줄이 미룬 view 줄보다 먼저였다. route는 `{"type":"session","sessionID":"ses_…"}`였다. 종료 이벤트가 계산보다 늦지 않아 glue에 `schedule()`을 더 넣지 않았다. |
+| S5 | 통과 | 권한 창이 떠 있는 동안 `permission.list`가 1, 승인 뒤 0이었다. question 도구가 떠 있는 동안 `form.list`가 1, 답한 뒤 0이었다. Esc는 TUI가 "esc again to interrupt"를 요구해 두 번 눌렀고, `session.execution.interrupted`가 `reason:"user"`로 왔다. |
+| S6 | 통과 | TUI가 떠 있는 채로 `tui.js` 끝에 빈 줄을 더하자 `{"t":"cleanup"}` 다음 `{"t":"setup"}`이 다시 찍혔다. |
+
+추가 관찰: plugin이 로드된 직후에는 data store 이벤트가 없어 `ctx.data.listen`이 불리지 않았다. glue의 시작 시 `schedule()`이 현재 phase를 한 번 보내므로 문제되지 않는다. `process.cwd()`는 symlink가 풀린 `/private/tmp/…`로 보였다(payload의 cwd로만 쓰인다).
+
 ## 7. 수용 기준
 
 1. `AgentKind.from(rawAgent: "opencode") == .opencode`, `wireName == "opencode"`, `displayName == "OpenCode"`.
