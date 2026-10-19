@@ -24,6 +24,35 @@ import AppKit
 import Foundation
 import UserNotifications
 
+/// Decides whether a pane entering WAITING should play the sound, bounce the
+/// dock, and post a banner.
+///
+/// A session switch is silent because opencode users move between tabs and
+/// sessions only by their own action — they are already looking at the pane.
+/// HookDaemon.ingest emits only the final snapshot and Notifier remembers only
+/// the previous state, so without this rule IDLE(A) → WAIT(B) would chime.
+enum WaitAlertRule {
+    struct Observation: Equatable {
+        var state: PaneState
+        var sessionId: String?
+    }
+
+    /// True when a pane starts needing the user: it enters WAITING from a
+    /// non-WAITING state without switching between two known sessions.
+    static func shouldAlert(previous: Observation?, next: Observation) -> Bool {
+        guard next.state == .waiting else { return false }
+        if let previous, previous.state == .waiting {
+            return false
+        }
+        if let previousId = previous?.sessionId,
+           let nextId = next.sessionId,
+           previousId != nextId {
+            return false
+        }
+        return true
+    }
+}
+
 @MainActor
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
@@ -31,7 +60,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Wired by AppDelegate so notification taps can focus the right pane.
     var onFocusPane: ((String) -> Void)?
 
-    private var previousStates: [String: PaneState] = [:]
+    private var previousStates: [String: WaitAlertRule.Observation] = [:]
     /// Pane ids currently in WAITING. Used to drive the dock badge count so
     /// the badge only shows when there is real work pending.
     private var waitingPaneIds: Set<String> = []
@@ -55,8 +84,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// single funnel for WAIT detection since AsyncStream<DaemonUpdate> only
     /// supports one consumer.
     func handle(_ snap: PaneSnapshot) {
+        let current = WaitAlertRule.Observation(state: snap.state, sessionId: snap.lastSessionId)
         let prev = previousStates[snap.paneId]
-        previousStates[snap.paneId] = snap.state
+        previousStates[snap.paneId] = current
 
         let wasWaiting = waitingPaneIds.contains(snap.paneId)
         let isWaiting = snap.state == .waiting
@@ -69,9 +99,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             updateDockBadge()
         }
 
-        // Only *entering* WAITING is a notification event. Staying waiting
-        // or leaving it isn't.
-        guard isWaiting, prev != .waiting else { return }
+        // Only *entering* WAITING is a notification event. Staying waiting,
+        // leaving it, or moving onto a different session that is already
+        // waiting (a user tab switch) isn't.
+        guard WaitAlertRule.shouldAlert(previous: prev, next: current) else { return }
 
         // Sound fires unconditionally — a short audible cue works even when
         // termy is active (user may be in another window/pane) and doesn't

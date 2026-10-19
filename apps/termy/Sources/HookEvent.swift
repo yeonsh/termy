@@ -27,6 +27,7 @@ enum HookEventKind: String, Codable {
     case permissionRequest    = "PermissionRequest" // Codex-only WAIT trigger
     case preInvocation        = "PreInvocation"     // Antigravity model invocation start
     case postInvocation       = "PostInvocation"    // Antigravity tool batch end
+    case agentStatus          = "AgentStatus" // opencode TUI plugin: derived pane status in meta.reason
     case ptyExit              = "PtyExit" // synthetic from PtyController on pty EOF
 }
 
@@ -62,7 +63,7 @@ struct HookEvent: Codable {
         var cwd: String?
         var transcriptPath: String?          // Antigravity transcript_path
         var source: String?                  // SessionStart: "startup" | "resume" | "compact"
-        var reason: String?                  // SessionEnd: "clear" | "exit" | ...; Notification: "permission" | "idle" | "mcp_elicit"; Antigravity Stop: "CASCADE_DONE" | "TERMINAL_STEP_TYPE" | "ERROR" | ...
+        var reason: String?                  // SessionEnd: "clear" | "exit" | ...; Notification: "permission" | "idle" | "mcp_elicit"; AgentStatus: "idle" | "running" | "permission" | "question" | "succeeded" | "failed"; Antigravity Stop: "CASCADE_DONE" | "TERMINAL_STEP_TYPE" | "ERROR" | ...
         /// Claude Code's Notification payload carries `notification_type`
         /// (permission_prompt, idle_prompt, ...) and no `reason`.
         var notificationType: String?        // Notification

@@ -92,4 +92,22 @@ final class HookCLITests: XCTestCase {
         XCTAssertTrue(meta["tool_input"]?.contains("Proceed?") == true)
         XCTAssertEqual(meta["error"], "network timeout")
     }
+
+    // MARK: - OpenCode
+
+    // protects=--agent opencode and the AgentStatus payload (reason,
+    // session_id, cwd) pass through unchanged; fails_when=the agent is
+    // rewritten or a field is dropped; no_claim=delivery over the socket
+    // (the existing termy-hook path).
+    func test_agentOpenCode_passesThroughAsWireName() {
+        XCTAssertEqual(
+            HookCLI.parse(["termy-hook", "--agent", "opencode", "AgentStatus"]),
+            ParsedHookArgs(agent: "opencode", event: "AgentStatus")
+        )
+    }
+
+    func test_slimMeta_keepsOpenCodeAgentStatusFields() {
+        let raw: [String: Any] = ["reason": "permission", "session_id": "ses_x", "cwd": "/w"]
+        XCTAssertEqual(HookCLI.slimMeta(raw), ["reason": "permission", "session_id": "ses_x", "cwd": "/w"])
+    }
 }

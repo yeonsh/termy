@@ -9,6 +9,7 @@
 //   termy-hook SessionStart                        # Claude Code (default)
 //   termy-hook --agent codex PermissionRequest     # Codex CLI
 //   termy-hook --agent claude SessionEnd           # explicit, equivalent to default
+//   termy-hook --agent opencode AgentStatus        # opencode TUI plugin
 //
 // The `--agent` flag stamps the wire-level `agent` field so the daemon can
 // dispatch on AgentKind. Defaulting to "claude-code" preserves existing

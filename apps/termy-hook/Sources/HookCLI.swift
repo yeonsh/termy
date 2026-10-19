@@ -40,6 +40,7 @@ enum HookCLI {
     ///   termy-hook --agent claude SessionEnd           → agent="claude-code"
     ///   termy-hook --agent antigravity PreInvocation   → agent="antigravity"
     ///   termy-hook --agent agy PreInvocation           → agent="antigravity"
+    ///   termy-hook --agent opencode AgentStatus        → agent="opencode"
     static func parse(_ argv: [String]) -> ParsedHookArgs? {
         var agent = "claude-code"
         var positional: [String] = []
