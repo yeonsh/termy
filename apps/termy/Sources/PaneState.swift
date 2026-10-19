@@ -537,7 +537,12 @@ enum PaneStateMachine {
             if entered { next.enteredStateAt = next.updatedAt }
 
         case "succeeded":
-            let entered = next.state != .waiting
+            // Refresh the timestamp unless this is already a silent
+            // turn-end WAIT. A permission/question wait that jumps straight
+            // to succeeded must restart the 30s IDLE timer: the old
+            // timestamp can be >120s old, which HookDaemon.tickIdle treats
+            // as a sleep/wake gap and never expires.
+            let entered = !(next.state == .waiting && next.notificationReason == nil)
             next.state = .waiting
             next.needsAttention = false
             next.notificationReason = nil
