@@ -6,6 +6,8 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.16 — 2026-10-19
+
 - OpenCode now works with termy alongside Claude Code, Codex and
   Antigravity CLI. Panes running `opencode` show their live state (IDLE,
   THINK, WAIT, ERR) in the dashboard and on the pane header, and play
