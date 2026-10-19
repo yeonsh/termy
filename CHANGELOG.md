@@ -6,6 +6,15 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+- OpenCode now works with termy alongside Claude Code, Codex and
+  Antigravity CLI. Panes running `opencode` show their live state (IDLE,
+  THINK, WAIT, ERR) in the dashboard and on the pane header, and play
+  notifications when OpenCode asks for permission, asks a question, or
+  finishes a turn.
+- Install the termy plugin for OpenCode from termy ▸ OpenCode Plugin….
+  It adds one file, `~/.config/opencode/plugins/termy/tui.js`. OpenCode
+  sessions that are already open pick it up right away.
+
 ## 0.2.15 — 2026-10-16
 
 - Antigravity CLI (`agy`) now works with termy alongside Claude Code and

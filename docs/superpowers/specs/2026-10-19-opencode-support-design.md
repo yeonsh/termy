@@ -1,7 +1,7 @@
 # opencode 지원(pane 상태 표시) — 설계 문서
 
 - 날짜: 2026-10-19
-- 상태: 범위 승인(2026-10-18, 결정 D1~D3), 초안 검토 중
+- 상태: 구현 완료(2026-10-19), 실제 앱 수동 확인 대기
 - 범위: termy pane에서 실행한 opencode v2 TUI의 상태(THINK · WAIT · IDLE · ERR)와 알림을 Claude Code · Codex · agy와 같은 방식으로 보여 준다
 - 결정 기록(gstack decision log): `1fda879c`(첫 지원 범위), `1fde11b6`(화면에 보이는 세션만 추적), `24d7757e`(interrupted는 알림 없이 IDLE), `04f28106`(세션 전환으로 생긴 WAIT는 알리지 않음), `e79a31af`(spike는 사용자 DB + 임시 XDG config)
 
