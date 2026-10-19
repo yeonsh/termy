@@ -99,6 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             HookInstaller.promptIfNeeded()
             CodexHookInstaller.promptIfNeeded()
             AntigravityHookInstaller.promptIfNeeded()
+            OpenCodePluginInstaller.refreshIfInstalled()
         }
 
         // Instantiating SPUStandardUpdaterController on first access starts
@@ -286,6 +287,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         AntigravityHookInstaller.showPromptFromMenu()
     }
 
+    @IBAction func openOpenCodePluginInstallerPrompt(_ sender: Any?) {
+        OpenCodePluginInstaller.showPromptFromMenu()
+    }
+
     @IBAction func useLightAppearance(_ sender: Any?) {
         AppAppearancePreference.light.apply()
     }
@@ -467,6 +472,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             keyEquivalent: ""
         )
         antigravityInstaller.target = self
+        let openCodeInstaller = menu.addItem(
+            withTitle: "OpenCode Plugin…",
+            action: #selector(AppDelegate.openOpenCodePluginInstallerPrompt(_:)),
+            keyEquivalent: ""
+        )
+        openCodeInstaller.target = self
         menu.addItem(.separator())
         let servicesItem = menu.addItem(withTitle: "Services", action: nil, keyEquivalent: "")
         let servicesMenu = NSMenu(title: "Services")
