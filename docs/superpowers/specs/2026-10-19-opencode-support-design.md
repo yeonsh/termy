@@ -399,7 +399,7 @@ opencode DB는 사용자 것을 그대로 쓴다(2026-10-19 결정). 임시 `OPE
 2. `classifyAgent(by:)`가 `"opencode"`, `"opencode-dev"`, `"OpenCode"`에 `.opencode`를, `"opencoder"`에 nil을 돌려준다.
 3. `HookEvent`가 `{"event":"AgentStatus","agent":"opencode","meta":{"reason":"running","session_id":"ses_x"}}`를 디코드하고 `agentKind == .opencode`다.
 4. §4.4 표의 여섯 reason이 각각 표대로 state · needsAttention · notificationReason · waitSource · turnOpen을 만든다. 모르는 reason은 snapshot을 바꾸지 않는다(updatedAt 제외).
-5. WAIT(`"permission"`)에 `permission`이 또 오면 enteredStateAt이 바뀌지 않는다. WAIT에 `succeeded`가 또 와도 마찬가지다.
+5. WAIT(`"permission"`)에 `permission`이 또 오면 enteredStateAt이 바뀌지 않는다. turn-end WAIT(`notificationReason == nil`)에 `succeeded`가 또 와도 마찬가지다. WAIT(`"permission"` · `"ask_user_question"`) 뒤 첫 `succeeded`는 시각을 갱신한다(§4.4).
 6. session_id가 다른 `running`이 오면 상태가 INIT으로 초기화된 뒤 THINK가 되고 `lastSessionId`가 새 id가 된다.
 7. opencode pane에서 synthetic SessionStart는 INIT만 IDLE로 올리고, THINK인 pane은 THINK로 둔다.
 8. `termyPhase` · `termyEmission`이 §4.2 표의 아홉 줄을 모두 만족한다. `termyView`는 자식 세션의 permission, synthetic이 아닌 pending, session이 아닌 라우트를 반영하고, `termyPayload`는 480바이트를 넘으면 cwd를 뺀다(모두 JavaScriptCore로 평가).
@@ -492,7 +492,7 @@ JavaScriptCore 테스트는 번들의 `tui.js`를 읽어 `// #region termy-pure`
 | `apps/termy-hook/Sources/HookCLI.swift:37-42` | 사용 예 주석만 |
 | `apps/termy-hook/Sources/main.swift:8-15` | 사용 예 주석만 |
 | `project.yml:75-77` | `termy` target `sources`에 `opencode-plugin` 폴더 리소스 |
-| `apps/termy-tests/Sources/AgentKindTests.swift` | +14 테스트 |
+| `apps/termy-tests/Sources/AgentKindTests.swift` | +15 테스트 |
 | `apps/termy-tests/Sources/ForegroundProcessWatcherTests.swift` | +2 |
 | `apps/termy-tests/Sources/HookCLITests.swift` | +2 |
 | `apps/termy-tests/Sources/AgentResumeCaptureTests.swift` | +1 |
