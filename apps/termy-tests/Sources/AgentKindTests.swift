@@ -656,4 +656,144 @@ final class AgentKindTests: XCTestCase {
         XCTAssertEqual(AgentKind.opencode.wireName, "opencode")
         XCTAssertEqual(AgentKind.opencode.displayName, "OpenCode")
     }
+
+    // MARK: - OpenCode AgentStatus
+
+    // protects=the §4.4 transition table and its enteredStateAt rules;
+    // fails_when=a state/field differs from the table, or a duplicate event
+    // moves enteredStateAt; no_claim=when the plugin sends each reason
+    // (spike S4/S5, Task 4 Step 7).
+    private func opencodeStatus(_ reason: String?, sessionId: String? = "ses_a") -> HookEvent {
+        var meta = HookEvent.Meta()
+        meta.reason = reason
+        meta.sessionId = sessionId
+        return HookEvent(event: .agentStatus, paneId: "p1", projectId: nil, ts: 1.0, agent: "opencode", meta: meta)
+    }
+
+    private func opencodeSnapshot(
+        _ state: PaneState, reason: String? = nil, attention: Bool = false, turnOpen: Bool = false
+    ) -> PaneSnapshot {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .opencode)
+        s.state = state
+        s.notificationReason = reason
+        s.needsAttention = attention
+        s.turnOpen = turnOpen
+        s.lastSessionId = "ses_a"
+        s.enteredStateAt = Date(timeIntervalSince1970: 100)
+        return s
+    }
+
+    func test_hookEvent_decodesOpenCodeAgentStatus() throws {
+        let json = #"{"event":"AgentStatus","pane_id":"p1","project_id":null,"ts":1,"agent":"opencode","meta":{"reason":"running","session_id":"ses_x"}}"#
+        let e = try JSONDecoder().decode(HookEvent.self, from: Data(json.utf8))
+        XCTAssertEqual(e.event, .agentStatus)
+        XCTAssertEqual(e.agentKind, .opencode)
+        XCTAssertEqual(e.meta.reason, "running")
+        XCTAssertEqual(e.meta.sessionId, "ses_x")
+    }
+
+    func test_opencodeAgentStatus_running_setsThinking() {
+        let after = PaneStateMachine.apply(opencodeStatus("running"),
+                                           to: opencodeSnapshot(.waiting, reason: "permission", attention: true, turnOpen: true))
+        XCTAssertEqual(after.state, .thinking)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertNil(after.notificationReason)
+        XCTAssertNil(after.waitSource)
+        XCTAssertTrue(after.turnOpen)
+    }
+
+    // protects=permission wait raises attention; fails_when=state stays THINK or attention false;
+    // no_claim=that the plugin detects permissions (Task 1 S5, Task 6 M3)
+    func test_opencodeAgentStatus_permission_entersWaitingWithAttention() {
+        let after = PaneStateMachine.apply(opencodeStatus("permission"), to: opencodeSnapshot(.thinking, turnOpen: true))
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertTrue(after.needsAttention)
+        XCTAssertEqual(after.notificationReason, "permission")
+        XCTAssertNil(after.waitSource)
+        XCTAssertTrue(after.turnOpen)
+    }
+
+    func test_opencodeAgentStatus_question_entersWaitingAskUserQuestion() {
+        let after = PaneStateMachine.apply(opencodeStatus("question"), to: opencodeSnapshot(.thinking, turnOpen: true))
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertTrue(after.needsAttention)
+        XCTAssertEqual(after.notificationReason, "ask_user_question")
+        XCTAssertTrue(after.turnOpen)
+    }
+
+    func test_opencodeAgentStatus_succeeded_entersTurnEndWaiting() {
+        let after = PaneStateMachine.apply(opencodeStatus("succeeded"), to: opencodeSnapshot(.thinking, turnOpen: true))
+        XCTAssertEqual(after.state, .waiting)
+        XCTAssertFalse(after.needsAttention)   // lets HookDaemon.tickIdle move it to IDLE after 30s
+        XCTAssertNil(after.notificationReason)
+        XCTAssertNil(after.waitSource)
+        XCTAssertFalse(after.turnOpen)
+    }
+
+    func test_opencodeAgentStatus_failed_setsErrored() {
+        let after = PaneStateMachine.apply(opencodeStatus("failed"), to: opencodeSnapshot(.thinking, turnOpen: true))
+        XCTAssertEqual(after.state, .errored)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertFalse(after.turnOpen)
+    }
+
+    func test_opencodeAgentStatus_idle_setsIdleWithoutAttention() {
+        let after = PaneStateMachine.apply(opencodeStatus("idle"), to: opencodeSnapshot(.thinking, turnOpen: true))
+        XCTAssertEqual(after.state, .idle)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertNil(after.notificationReason)
+        XCTAssertFalse(after.turnOpen)
+    }
+
+    func test_opencodeAgentStatus_unknownReason_keepsState() {
+        let before = opencodeSnapshot(.thinking, turnOpen: true)
+        let after = PaneStateMachine.apply(opencodeStatus("compacting"), to: before)
+        XCTAssertEqual(after.state, .thinking)
+        XCTAssertTrue(after.turnOpen)
+        XCTAssertEqual(after.enteredStateAt, before.enteredStateAt)
+    }
+
+    func test_opencodeAgentStatus_repeatedWait_keepsEnteredStateAt() {
+        let entered = Date(timeIntervalSince1970: 100)
+        let perm = PaneStateMachine.apply(opencodeStatus("permission"),
+                                          to: opencodeSnapshot(.waiting, reason: "permission", attention: true, turnOpen: true))
+        XCTAssertEqual(perm.enteredStateAt, entered)
+        let done = PaneStateMachine.apply(opencodeStatus("succeeded"), to: opencodeSnapshot(.waiting))
+        XCTAssertEqual(done.enteredStateAt, entered)
+    }
+
+    func test_opencodeAgentStatus_questionAfterPermission_staysWaiting() {
+        let after = PaneStateMachine.apply(opencodeStatus("question"),
+                                           to: opencodeSnapshot(.waiting, reason: "permission", attention: true, turnOpen: true))
+        XCTAssertEqual(after.state, .waiting)   // Notifier chimes only on entering WAITING
+        XCTAssertTrue(after.needsAttention)
+        XCTAssertEqual(after.notificationReason, "ask_user_question")
+    }
+
+    func test_opencodeAgentStatus_newSessionId_resetsThenApplies() {
+        let before = opencodeSnapshot(.thinking, turnOpen: true)
+        let after = PaneStateMachine.apply(opencodeStatus("running", sessionId: "ses_b"), to: before)
+        XCTAssertEqual(after.state, .thinking)
+        XCTAssertEqual(after.lastSessionId, "ses_b")
+        // Same-session THINK → THINK keeps enteredStateAt; a reset to INIT
+        // first makes this a fresh entry into THINK.
+        XCTAssertGreaterThan(after.enteredStateAt, before.enteredStateAt)
+
+        // The reset clears attention, so a new session's permission must
+        // raise it again even though the pane was already WAIT(permission).
+        let waiting = opencodeSnapshot(.waiting, reason: "permission", attention: true, turnOpen: true)
+        let other = PaneStateMachine.apply(opencodeStatus("permission", sessionId: "ses_b"), to: waiting)
+        XCTAssertEqual(other.state, .waiting)
+        XCTAssertTrue(other.needsAttention)
+        XCTAssertEqual(other.notificationReason, "permission")
+        XCTAssertEqual(other.lastSessionId, "ses_b")
+    }
+
+    func test_opencodeSyntheticSessionStart_promotesOnlyFromInit() {
+        let start = HookEvent(event: .sessionStart, paneId: "p1", projectId: nil, ts: 1.0,
+                              agent: "opencode", meta: HookEvent.Meta())
+        let fresh = PaneSnapshot.empty(paneId: "p1", projectId: nil, agentKind: .opencode)
+        XCTAssertEqual(PaneStateMachine.apply(start, to: fresh).state, .idle)
+        XCTAssertEqual(PaneStateMachine.apply(start, to: opencodeSnapshot(.thinking, turnOpen: true)).state, .thinking)
+    }
 }

@@ -32,6 +32,12 @@
 //   ERRORED   ──(SessionStart)───────────▶ INIT
 //   *(codex)  ──(SessionStart)───────────▶ IDLE          (hard reset)
 //
+//   *(opencode) ──(AgentStatus running)─────────────▶ THINKING
+//   *(opencode) ──(AgentStatus permission|question)─▶ WAITING ♪
+//   *(opencode) ──(AgentStatus succeeded)───────────▶ WAITING ♪ (→ IDLE after 30s)
+//   *(opencode) ──(AgentStatus failed)──────────────▶ ERRORED
+//   *(opencode) ──(AgentStatus idle)────────────────▶ IDLE (no chime)
+//
 // ♪ = Notifier plays a sound and raises needsAttention.
 //
 // POSSIBLY_WAITING is rendered as THINK in the dashboard chip — invisible to
@@ -220,6 +226,12 @@ enum PaneStateMachine {
             // Claude panes: only promote from .initializing. Mid-work
             // sessions (resume after compact, etc.) keep their state so
             // the dashboard doesn't flicker on every plugin handshake.
+            //
+            // opencode is deliberately in the Claude group, not the
+            // hard-reset one: `opencode -c --prompt …` can start working
+            // before the watcher's synthetic SessionStart arrives (up to 1s
+            // late), and a hard reset would overwrite the plugin's THINK.
+            // The plugin syncs stale chips itself when it starts.
             let resolvedKind = event.agentKind ?? previous.agentKind
             if resolvedKind == .codex || resolvedKind == .antigravity {
                 next.state = .idle
@@ -401,6 +413,9 @@ enum PaneStateMachine {
             next.waitSource = .permission
             next.enteredStateAt = next.updatedAt
 
+        case .agentStatus:
+            Self.applyAgentStatus(event.meta.reason, to: &next)
+
         case .preToolUse:
             next.turnOpen = true
             if Self.isAskUserQuestionTool(event.meta.toolName) {
@@ -485,5 +500,73 @@ enum PaneStateMachine {
         }
 
         return next
+    }
+
+    /// Level-triggered opencode status. The plugin sends the current phase,
+    /// so every known reason overwrites the table's fields; only
+    /// `enteredStateAt` depends on whether this is a fresh entry. Compare
+    /// against `next`, not `previous`: a session-id change has already reset
+    /// the snapshot to INIT, and that counts as a fresh entry.
+    private static func applyAgentStatus(_ reason: String?, to next: inout PaneSnapshot) {
+        switch reason {
+        case "running":
+            let entered = next.state != .thinking
+            next.state = .thinking
+            next.needsAttention = false
+            next.notificationReason = nil
+            next.waitSource = nil
+            next.turnOpen = true
+            if entered { next.enteredStateAt = next.updatedAt }
+
+        case "permission":
+            let entered = !(next.state == .waiting && next.notificationReason == "permission")
+            next.state = .waiting
+            next.needsAttention = true
+            next.notificationReason = "permission"
+            next.waitSource = nil
+            next.turnOpen = true
+            if entered { next.enteredStateAt = next.updatedAt }
+
+        case "question":
+            let entered = !(next.state == .waiting && next.notificationReason == "ask_user_question")
+            next.state = .waiting
+            next.needsAttention = true
+            next.notificationReason = "ask_user_question"
+            next.waitSource = nil
+            next.turnOpen = true
+            if entered { next.enteredStateAt = next.updatedAt }
+
+        case "succeeded":
+            let entered = next.state != .waiting
+            next.state = .waiting
+            next.needsAttention = false
+            next.notificationReason = nil
+            next.waitSource = nil
+            next.turnOpen = false
+            if entered { next.enteredStateAt = next.updatedAt }
+
+        case "failed":
+            let entered = next.state != .errored
+            next.state = .errored
+            next.needsAttention = false
+            next.notificationReason = nil
+            next.waitSource = nil
+            next.turnOpen = false
+            if entered { next.enteredStateAt = next.updatedAt }
+
+        case "idle":
+            let entered = next.state != .idle
+            next.state = .idle
+            next.needsAttention = false
+            next.notificationReason = nil
+            next.waitSource = nil
+            next.turnOpen = false
+            if entered { next.enteredStateAt = next.updatedAt }
+
+        default:
+            // Unknown reason: leave the snapshot untouched. Lets a newer
+            // plugin vocabulary coexist with an older termy.
+            break
+        }
     }
 }
