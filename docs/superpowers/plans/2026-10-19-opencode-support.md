@@ -154,7 +154,7 @@ sleep 15; tmux capture-pane -p -t oc-spike | tail -20
 tmux send-keys -t oc-spike 'Use the question tool to ask me to choose between A and B.' Enter
 ```
 
-question 화면이 떠 있는 동안 `forms`가 1 이상이어야 한다. 답한 뒤에는 0이어야 한다. 마지막으로 오래 걸리는 prompt(`Count from 1 to 300, one number per line.`)를 보내고 2초 뒤 `tmux send-keys -t oc-spike Escape`를 보내, `exec interrupted`와 `reason`(예: `user`)을 확인한다. 권한 창이 뜨지 않으면 opencode v2 permission 문서(https://opencode.ai/v2/docs/config/)를 보고 `work/opencode.json`에서 read를 `ask`로 설정해 다시 해 본다.
+question 화면이 떠 있는 동안 `forms`가 1 이상이어야 한다. 답한 뒤에는 0이어야 한다. 마지막으로 오래 걸리는 prompt(`Count from 1 to 300, one number per line.`)를 보내고 2초 뒤 `tmux send-keys -t oc-spike Escape`를 0.4초 간격으로 두 번 보내, `exec interrupted`와 `reason`(예: `user`)을 확인한다. 권한 창이 뜨지 않으면 opencode v2 permission 문서(https://opencode.ai/v2/docs/config/)를 보고 `work/opencode.json`에서 read를 `ask`로 설정해 다시 해 본다.
 
 - [x] **Step 7: S6 확인(파일 갱신 시 다시 로드)**
 
@@ -772,7 +772,7 @@ Task 1 tmux 형식(Interfaces)으로 띄우고 아래 순서로 보낸다. 단�
 
 1. `Reply with the single word ok.`
 2. `Read the file .env and tell me its first line.` → 권한 승인
-3. `Count from 1 to 300, one number per line.` → 2초 뒤 `tmux send-keys -t oc-spike Escape`
+3. `Count from 1 to 300, one number per line.` → 2초 뒤 Escape를 두 번(0.4초 간격)
 4. spawn 실패 뒤 복구(Review Focus 5): `mv "$SPIKE/fake-hook.sh" "$SPIKE/fake-hook.sh.off"` → `Reply with the single word ok.` → 끝나면 `mv "$SPIKE/fake-hook.sh.off" "$SPIKE/fake-hook.sh"` → `Reply with the single word yes.`
 
 이어서 세션을 끄고 `TERMY_PANE_ID` 없이 한 번 더 띄운 뒤 prompt 하나(`Reply with the single word ok.`)를 보낸다. tmux server는 이 세션이 도는 pane의 실제 `TERMY_PANE_ID`를 물려받으므로 반드시 `-u`로 지운다.
@@ -1051,7 +1051,7 @@ git commit -m "docs(changelog): opencode pane 상태 표시 항목을 추가"
 | M2 | `Reply with the single word ok.` | THINK → WAIT + Glass 알림음, 배너 "OpenCode is waiting for your response." → 약 30초 뒤 IDLE |
 | M3 | `.env`가 있는 저장소에서 `Read the file .env` | WAIT + 알림음, 배너 "Waiting for your approval." → 승인하면 THINK |
 | M4 | `Use the question tool to ask me to choose between A and B.` | WAIT + 알림음, 배너 "OpenCode is asking a question." → 답하면 THINK |
-| M5 | 긴 작업 중 Esc | 알림음 없이 IDLE |
+| M5 | 긴 작업 중 Esc 두 번 | 알림음 없이 IDLE |
 | M6 | `/exit` 또는 Ctrl+C | INIT(칩이 사라짐) |
 | M7 | 같은 저장소의 다른 pane에서도 opencode 실행 | 두 pane이 각자의 상태를 보여 줌 |
 | M8 | Ghostty 등 termy 밖에서 opencode로 prompt 하나 | termy 변화 없음, `/tmp/termy-hook-debug.log`에 새 줄 없음 |
