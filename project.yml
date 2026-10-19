@@ -75,6 +75,9 @@ targets:
     sources:
       - path: apps/termy/Sources
       - path: apps/termy/Resources/Assets.xcassets
+      - path: apps/termy/Resources/opencode-plugin
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: SwiftTerm
         product: SwiftTerm
