@@ -1,7 +1,7 @@
 # opencode 지원(pane 상태 표시) — 설계 문서
 
 - 날짜: 2026-10-19
-- 상태: 구현 완료(2026-10-19), 실제 앱 수동 확인 대기
+- 상태: 구현 완료(2026-10-19), 실제 앱 확인 완료(2026-10-19, 사용자 확인: 정상 동작)
 - 범위: termy pane에서 실행한 opencode v2 TUI의 상태(THINK · WAIT · IDLE · ERR)와 알림을 Claude Code · Codex · agy와 같은 방식으로 보여 준다
 - 결정 기록(gstack decision log): `1fda879c`(첫 지원 범위), `1fde11b6`(화면에 보이는 세션만 추적), `24d7757e`(interrupted는 알림 없이 IDLE), `04f28106`(세션 전환으로 생긴 WAIT는 알리지 않음), `e79a31af`(spike는 사용자 DB + 임시 XDG config)
 
@@ -409,7 +409,7 @@ opencode DB는 사용자 것을 그대로 쓴다(2026-10-19 결정). 임시 `OPE
 12. `AgentResumeCapture.record`는 opencode foreground + session id가 있어도 nil을 돌려준다.
 13. `Pane.shellEnvironment`가 `OPENCODE_TERMINAL` · `OPENCODE_SESSION_ID`를 지우고 `OPENCODE_CONFIG_DIR`은 남긴다.
 14. §6의 S1~S6 결과가 이 문서에 적혀 있다.
-15. 실제 termy 빌드에서 수동 확인(구현 계획 마지막 태스크): opencode 실행 → IDLE, prompt → THINK, 권한 요청 → WAIT + 알림음, 승인 → THINK, 완료 → WAIT + 알림음 → 30초 뒤 IDLE, Esc 두 번으로 중단 → 알림 없이 IDLE, 기다리는 탭으로 전환 → WAIT이지만 알림음 없음, termy 밖 터미널의 opencode → termy 변화 없음.
+15. 실제 termy 빌드에서 수동 확인(구현 계획 마지막 태스크): opencode 실행 → IDLE, prompt → THINK, 권한 요청 → WAIT + 알림음, 승인 → THINK, 완료 → WAIT + 알림음 → 30초 뒤 IDLE, Esc 두 번으로 중단 → 알림 없이 IDLE, 기다리는 탭으로 전환 → WAIT이지만 알림음 없음, termy 밖 터미널의 opencode → termy 변화 없음. 2026-10-19 사용자 확인: 정상 동작.
 16. §8 표의 각 행(테스트 class 또는 class 안의 opencode 구역)은 머리 주석에 그 행의 card(`protects` / `fails_when` / `no_claim`)를 적는다. 행의 card와 다른 것을 지키는 테스트에만 개별 card를 붙인다.
 17. 기존 테스트가 모두 통과한다(`xcodebuild test`, 전체 suite).
 18. `WaitAlertRule.shouldAlert`는 (a) 같은 세션에서 WAIT로 들어오면 true, (b) 이미 WAIT면 false, (c) 직전 id와 새 id가 둘 다 있고 다르면 false, (d) 직전 id가 없으면(첫 이벤트, agent 전환 뒤) true다. `Notifier.handle`은 알림음 · dock bounce · 배너를 이 함수가 true일 때만 낸다.

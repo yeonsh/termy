@@ -1036,7 +1036,9 @@ git add CHANGELOG.md docs/superpowers/specs/2026-10-19-opencode-support-design.m
 git commit -m "docs(changelog): opencode pane 상태 표시 항목을 추가"
 ```
 
-- [ ] **Step 4: 실제 앱 수동 확인(사용자)**
+- [x] **Step 4: 실제 앱 수동 확인(사용자)**
+
+결과(2026-10-19): 사용자가 실제 앱에서 M1~M9 흐름이 정상 동작함을 확인했다.
 
 이 세션은 termy 안에서 돌기 때문에 agent가 새 빌드를 띄울 수 없다. 사용자에게 아래 절차를 넘기고 결과를 받는다.
 
@@ -1061,6 +1063,6 @@ git commit -m "docs(changelog): opencode pane 상태 표시 항목을 추가"
 
 5. 끝나면 Debug 빌드를 끄고 `/Applications/termy.app`을 다시 연다. 0.2.15에는 opencode 설치기가 없어서 plugin 파일은 Debug 빌드 경로를 계속 가리킨다. 그대로 둬도 0.2.15는 `AgentStatus`를 디코드하지 못해 무시할 뿐이다. 새 버전을 배포하기 전에는 Debug 빌드 메뉴에서 Uninstall하거나 `rm -rf ~/.config/opencode/plugins/termy`로 지운다.
 
-- [ ] **Step 5: 결과 기록**
+- [x] **Step 5: 결과 기록**
 
-M1~M9 결과를 spec 머리 상태 줄과 §7 수용 기준 15번 옆에 적고 commit한다(`docs(spec): opencode 실제 앱 확인 결과를 기록`). 실패한 항목이 있으면 원인을 조사하고 수정 태스크를 따로 만든다.
+결과(2026-10-19): 사용자 확인에서 정상 동작. M1~M9 개별 결과는 사용자 보고로 확인했고, `failed`(ERR)는 단위 테스트(`test_opencodeAgentStatus_failed_setsErrored`)로만 확인했다. spec 머리 상태 줄과 §7 수용 기준 15번에 반영했다.
