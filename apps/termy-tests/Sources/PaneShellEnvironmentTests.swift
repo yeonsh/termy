@@ -23,6 +23,7 @@ final class PaneShellEnvironmentTests: XCTestCase {
         "ANTIGRAVITY_LS_VERSION", "ANTIGRAVITY_PROJECT_ID",
         "ANTIGRAVITY_APP_DATA_DIR", "ANTIGRAVITY_SOURCE_METADATA",
         "ANTIGRAVITY_LS_ADDRESS", "ANTIGRAVITY_CSRF_TOKEN",
+        "OPENCODE_TERMINAL", "OPENCODE_SESSION_ID",
     ]
 
     private func make(_ base: [String: String]) -> [String: String] {
@@ -75,5 +76,21 @@ final class PaneShellEnvironmentTests: XCTestCase {
 
     func testLcAllPreservedWhenPresent() {
         XCTAssertEqual(make(["LC_ALL": "ko_KR.UTF-8"])["LC_ALL"], "ko_KR.UTF-8")
+    }
+
+    // MARK: - OpenCode
+
+    // protects=opencode's shell-tool markers are stripped while the user's own
+    // opencode configuration survives; fails_when=a marker remains or user
+    // configuration is removed; no_claim=whether opencode adds other markers.
+    func testKeepsOpenCodeUserConfiguration() {
+        let env = make([
+            "OPENCODE_CONFIG_DIR": "/Users/x/oc",
+            "OPENCODE_SERVER_PASSWORD": "pw",
+            "OPENCODE_TERMINAL": "1",
+        ])
+        XCTAssertEqual(env["OPENCODE_CONFIG_DIR"], "/Users/x/oc")
+        XCTAssertEqual(env["OPENCODE_SERVER_PASSWORD"], "pw")
+        XCTAssertNil(env["OPENCODE_TERMINAL"])
     }
 }

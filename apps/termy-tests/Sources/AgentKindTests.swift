@@ -642,4 +642,18 @@ final class AgentKindTests: XCTestCase {
             meta: meta
         )
     }
+
+    // MARK: - OpenCode
+
+    // protects=the wire string ↔ .opencode mapping and display name;
+    // fails_when=a different kind is returned or a name differs;
+    // no_claim=that opencode actually sends this string (the plugin decides).
+    func test_from_opencode_returnsOpenCode() {
+        XCTAssertEqual(AgentKind.from(rawAgent: "opencode"), .opencode)
+    }
+
+    func test_opencode_wireNameAndDisplayName() {
+        XCTAssertEqual(AgentKind.opencode.wireName, "opencode")
+        XCTAssertEqual(AgentKind.opencode.displayName, "OpenCode")
+    }
 }

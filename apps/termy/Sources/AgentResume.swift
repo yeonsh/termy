@@ -35,6 +35,8 @@ enum AgentResumeCommand {
             words = ["codex", "resume"] + flags + [id]
         case .antigravity:
             words = ["agy", "--conversation", id] + flags
+        case .opencode:
+            words = ["opencode", "--session", id] + flags
         }
         return words.joined(separator: " ")
     }
@@ -72,6 +74,7 @@ enum AgentResumeCapture {
         snapshot: PaneSnapshot?
     ) -> AgentResumeRecord? {
         guard let kind = foregroundAgent,
+              kind != .opencode, // termy does not resume opencode sessions yet (spec 2026-10-19 §2).
               let snapshot,
               snapshot.agentKind == kind,
               snapshot.state != .initializing,

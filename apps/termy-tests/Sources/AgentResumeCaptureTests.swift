@@ -121,4 +121,18 @@ final class AgentResumeCaptureTests: XCTestCase {
         XCTAssertEqual(p.cwd, "/pane")
         XCTAssertNil(p.startupInput)
     }
+
+    // MARK: - OpenCode
+
+    // protects=opencode never produces a resume record, keeping make's switch
+    // exhaustive; fails_when=a record is produced;
+    // no_claim=resume behavior (out of scope).
+    func test_opencodeForeground_isNil() {
+        // termy does not resume opencode sessions yet (spec 2026-10-19 §2).
+        XCTAssertNil(capture(
+            agent: .opencode,
+            argv: ["opencode", "-c"],
+            snapshot: snapshot(kind: .opencode, sessionId: "ses_0123456789abcdefABCDEFGHIJ")
+        ))
+    }
 }

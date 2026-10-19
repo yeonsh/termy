@@ -2,8 +2,8 @@
 //
 // Per-pane poller that watches which binary owns the foreground process
 // group of each pane's PTY, and synthesizes SessionStart / SessionEnd
-// events when known agent CLIs (`claude`, `codex`) enter or leave that
-// foreground PG.
+// events when known agent CLIs (`claude`, `codex`, `agy`, `opencode`) enter
+// or leave that foreground PG.
 //
 // Why we need this:
 //   - Codex CLI has no native `SessionEnd` hook event. When the user types
@@ -190,6 +190,9 @@ actor ForegroundProcessWatcher {
             || normalized.hasPrefix("antigravity-cli-") {
             return .antigravity
         }
+        if normalized == "opencode" || normalized.hasPrefix("opencode-") {
+            return .opencode
+        }
         if normalized == "claude" || normalized.hasPrefix("claude-") {
             return .claude
         }
@@ -222,6 +225,9 @@ actor ForegroundProcessWatcher {
                 || basename == "antigravity-cli"
                 || basename.hasPrefix("antigravity-cli-") {
                 return (index, .antigravity)
+            }
+            if basename == "opencode" || basename.hasPrefix("opencode-") {
+                return (index, .opencode)
             }
             if basename == "claude"
                 || basename.hasPrefix("claude-")

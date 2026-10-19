@@ -203,4 +203,25 @@ final class ForegroundProcessWatcherTests: XCTestCase {
         // macOS pids stay below 100_000.
         XCTAssertNil(ForegroundProcessWatcher.processCwd(pid: 999_999))
     }
+
+    // MARK: - OpenCode
+
+    // protects=the opencode binary name and argv entrypoint are recognized;
+    // fails_when=opencode is missed or `opencoder` matches;
+    // no_claim=the real foreground pgrp leader name (E2E M1).
+    func test_classifyAgent_opencode() {
+        XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "opencode"), .opencode)
+        XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "opencode-dev"), .opencode)
+        XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "OpenCode"), .opencode)
+        XCTAssertNil(ForegroundProcessWatcher.classifyAgent(by: "opencoder"))
+    }
+
+    func test_agentEntrypoint_opencodeNativeBinary_isIndexZero() {
+        // Homebrew opencode-v2 is a single Mach-O binary; the Cellar path
+        // contains "opencode-v2" but the basename is "opencode".
+        let argv = ["/opt/homebrew/Cellar/opencode-v2/2.0.32/bin/opencode", "-c"]
+        let entry = ForegroundProcessWatcher.agentEntrypoint(in: argv)
+        XCTAssertEqual(entry?.index, 0)
+        XCTAssertEqual(entry?.kind, .opencode)
+    }
 }
