@@ -285,7 +285,7 @@ enum OpenCodePluginInstaller {
     private static func showError(_ title: String, error: Error) {
         let alert = NSAlert()
         alert.messageText = title
-        alert.informativeText = "\(error)"
+        alert.informativeText = error.localizedDescription
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.runModal()
