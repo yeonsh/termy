@@ -1,6 +1,6 @@
 # opencode 지원(pane 상태 표시) — 구현 계획
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** termy pane에서 실행한 opencode v2 TUI의 상태(THINK · WAIT · IDLE · ERR)와 알림을 Claude Code · Codex · agy처럼 보여 준다.
 
@@ -91,7 +91,7 @@ git add docs/superpowers/specs/2026-10-19-opencode-support-design.md docs/superp
 git commit -m "docs(opencode): opencode 지원 설계 문서와 구현 계획을 추가"
 ```
 
-- [ ] **Step 2: harness 준비**
+- [x] **Step 2: harness 준비**
 
 ```bash
 SPIKE=/tmp/termy-oc-spike
@@ -104,7 +104,7 @@ opencode --version
 
 Expected: `opencode v2.0.32`. `auth list --standalone`에 평소 쓰는 provider(DeepSeek `stored`)가 보인다. 사용자 DB를 그대로 쓰기 때문이다(`--standalone` 없이 실행하면 공유 서비스의 결과가 나오므로 반드시 붙인다). 보이지 않으면 멈추고 보고한다.
 
-- [ ] **Step 3: logging plugin 작성**
+- [x] **Step 3: logging plugin 작성**
 
 `termy-spike/tui.js`는 `export default { id: "termy-spike", setup(ctx) { … } }` 형식이고, 모든 기록을 `/tmp/termy-oc-spike/log.jsonl`에 JSON 한 줄씩 덧붙인다(`node:fs`의 `appendFileSync`). 기록할 것:
 
@@ -114,7 +114,7 @@ Expected: `opencode v2.0.32`. `auth list --standalone`에 평소 쓰는 provider
 4. `ctx.data.listen` 핸들러에서 `setTimeout(…, 0)`으로 미룬 뒤: `{"t":"view","seq":n,"event":event.details.type,"route":ctx.ui.router.current(),"status":…,"permissions":…,"forms":…}`. route가 session이면 그 root와 family의 `status`, `permission.list(id)?.length`, `form.list(id)?.length`를 담는다.
 5. cleanup: `{"t":"cleanup"}`
 
-- [ ] **Step 4: S1 · S2 · S3 확인**
+- [x] **Step 4: S1 · S2 · S3 확인**
 
 먼저 TUI 없이 탐색 경로를 확인한다. TUI와 같은 탐색 함수(`localPluginDirectories(process.cwd(), global.config)`)를 쓰는 명령이다.
 
@@ -132,7 +132,7 @@ cat /tmp/termy-oc-spike/spawn.log /tmp/termy-oc-spike/order.log
 
 Expected: `log.jsonl`에 setup 줄이 있고 `"pane":"spike-pane"`이다(S1, S2). `spawn.log`는 `{"hello":1}`, `order.log`는 `1`, `2`, `3` 순서다(S3). TUI 화면에 plugin 오류나 신뢰 확인 창이 떠 있으면 그 내용을 결과에 적는다.
 
-- [ ] **Step 5: S4 확인(turn 하나)**
+- [x] **Step 5: S4 확인(turn 하나)**
 
 ```bash
 tmux send-keys -t oc-spike 'Reply with the single word ok.' Enter
@@ -141,7 +141,7 @@ sleep 20
 
 Expected(`log.jsonl`): `exec started` → `view`(status running) → `exec succeeded` → 그 뒤의 `view`(status idle). 같은 이벤트에서 `exec` 줄의 seq가 `view` 줄보다 작아야 한다(핸들러가 미룬 계산보다 먼저 돎). route는 `{"type":"session","sessionID":"ses_…"}`다.
 
-- [ ] **Step 6: S5 확인(권한, question, Esc)**
+- [x] **Step 6: S5 확인(권한, question, Esc)**
 
 ```bash
 tmux send-keys -t oc-spike 'Read the file .env and tell me its first line.' Enter
@@ -156,13 +156,13 @@ tmux send-keys -t oc-spike 'Use the question tool to ask me to choose between A 
 
 question 화면이 떠 있는 동안 `forms`가 1 이상이어야 한다. 답한 뒤에는 0이어야 한다. 마지막으로 오래 걸리는 prompt(`Count from 1 to 300, one number per line.`)를 보내고 2초 뒤 `tmux send-keys -t oc-spike Escape`를 보내, `exec interrupted`와 `reason`(예: `user`)을 확인한다. 권한 창이 뜨지 않으면 opencode v2 permission 문서(https://opencode.ai/v2/docs/config/)를 보고 `work/opencode.json`에서 read를 `ask`로 설정해 다시 해 본다.
 
-- [ ] **Step 7: S6 확인(파일 갱신 시 다시 로드)**
+- [x] **Step 7: S6 확인(파일 갱신 시 다시 로드)**
 
 TUI가 떠 있는 상태에서 `/tmp/termy-oc-spike/config/opencode/plugins/termy-spike/tui.js` 끝에 공백 줄을 하나 덧붙이고 5초 기다린다.
 
 Expected: `log.jsonl`에 `cleanup` 다음 `setup`이 새로 찍힌다.
 
-- [ ] **Step 8: 정리와 기록**
+- [x] **Step 8: 정리와 기록**
 
 ```bash
 tmux kill-session -t oc-spike
@@ -173,7 +173,7 @@ cd /tmp/termy-oc-spike/work && opencode session list
 
 spec §6 표 아래에 `### 결과(2026-MM-DD, opencode vX)` 절을 추가하고 S1~S6마다 통과 여부와 근거(로그 줄 요약)를 적는다. S4에서 종료 이벤트가 미룬 계산보다 늦게 왔다면 spec §6 판정 규칙대로 "종료 이벤트 핸들러에서도 `schedule()`을 부른다"를 §4.2 glue에 반영하고 그 사실을 적는다. S5 · S6이 실패했다면 해당 기능을 spec §2로 옮기고 §7의 관련 수용 기준을 고친다. `/tmp/termy-oc-spike`는 Task 4 Step 7을 위해 남겨 둔다(logging plugin 폴더만 지운다: `rm -rf /tmp/termy-oc-spike/config/opencode/plugins/termy-spike`).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-10-19-opencode-support-design.md
@@ -197,7 +197,7 @@ git commit -m "docs(spec): opencode TUI plugin spike 결과를 설계 문서에 
 **Interfaces:**
 - Produces: `AgentKind.opencode`(`wireName == "opencode"`, `displayName == "OpenCode"`), `AgentKind.from(rawAgent: "opencode") == .opencode`. Task 3이 쓴다.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 각 파일 끝에 `// MARK: - OpenCode` 구역을 만들고 그 아래에 둔다(card 주석은 Global Constraints). `AgentKindTests.swift`:
 
@@ -274,12 +274,12 @@ git commit -m "docs(spec): opencode TUI plugin spike 결과를 설계 문서에 
     }
 ```
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: 테스트 명령, `-only-testing:termy-tests/AgentKindTests -only-testing:termy-tests/ForegroundProcessWatcherTests -only-testing:termy-tests/AgentResumeCaptureTests -only-testing:termy-tests/AgentResumeCommandTests -only-testing:termy-tests/PaneShellEnvironmentTests`
 Expected: 컴파일 실패, `type 'AgentKind' has no member 'opencode'`
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 - `AgentKind.swift`: `case opencode` 추가. `wireName` → `"opencode"`, `displayName` → `"OpenCode"`, `from(rawAgent:)`에 `case "opencode": return .opencode`. 머리 주석의 wire 문자열 목록에 `"antigravity"`, `"opencode"`를 넣는다.
 - `ForegroundProcessWatcher.swift`: `classifyAgent(by:)`와 `agentEntrypoint(in:)`에서 agy 검사 바로 뒤, claude 검사 앞에 `name == "opencode" || name.hasPrefix("opencode-")`(소문자화한 값, `agentEntrypoint`에서는 basename)를 `.opencode`로 매칭한다. 머리 주석 4-6행의 agent 목록을 `claude`, `codex`, `agy`, `opencode`로 고친다.
@@ -287,12 +287,12 @@ Expected: 컴파일 실패, `type 'AgentKind' has no member 'opencode'`
 - `AgentResumeFlags.swift`: switch에 `case .opencode: table = [:]`.
 - `Pane.swift`: `agentSessionMarkerEnvKeys` 끝에 `"OPENCODE_TERMINAL", "OPENCODE_SESSION_ID",`를 추가하고, 배열 위 주석에 opencode가 셸 도구 자식에게 넣는 표식이라는 말을 덧붙인다.
 
-- [ ] **Step 4: 통과 확인**
+- [x] **Step 4: 통과 확인**
 
 Run: Step 2와 같은 명령
 Expected: `** TEST SUCCEEDED **`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/termy/Sources/{AgentKind,ForegroundProcessWatcher,AgentResume,AgentResumeFlags,Pane}.swift apps/termy-tests/Sources/{AgentKindTests,ForegroundProcessWatcherTests,AgentResumeCaptureTests,AgentResumeCommandTests,PaneShellEnvironmentTests}.swift
@@ -327,7 +327,7 @@ enum WaitAlertRule {
 }
 ```
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `AgentKindTests.swift` 끝에 `// MARK: - OpenCode AgentStatus`와 helper:
 
@@ -524,12 +524,12 @@ final class NotifierWaitAlertRuleTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: `xcodegen generate` 뒤 테스트 명령, `-only-testing:termy-tests/AgentKindTests -only-testing:termy-tests/HookCLITests -only-testing:termy-tests/NotifierWaitAlertRuleTests`
 Expected: 컴파일 실패, `type 'HookEventKind' has no member 'agentStatus'`와 `cannot find 'WaitAlertRule' in scope`. (HookCLI 두 테스트는 코드 변경 없이 통과하는 것이 정상이다. 지금 동작을 고정하는 테스트다.)
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 - `HookEvent.swift`: `HookEventKind`에 `case agentStatus = "AgentStatus" // opencode TUI plugin: derived pane status in meta.reason`. `Meta.reason` 주석에 `AgentStatus: "idle" | "running" | "permission" | "question" | "succeeded" | "failed"`를 덧붙인다.
 - `PaneState.swift`: `apply`의 switch에 `case .agentStatus: applyAgentStatus(event.meta.reason, to: &next)`를 넣고, `private static func applyAgentStatus(_ reason: String?, to next: inout PaneSnapshot)`를 spec §4.4 표 그대로 구현한다. **비교 기준은 `previous`가 아니라 세션 리셋이 적용된 뒤의 `next`다**(함수 시작 시점의 `next.state` · `next.notificationReason`). 알려진 reason이면 state · needsAttention · notificationReason · waitSource · turnOpen을 항상 표의 값으로 쓰고, enteredStateAt만 표의 조건일 때 `next.updatedAt`으로 바꾼다. 모르는 reason이면 아무것도 바꾸지 않는다. agent 종류로 분기하지 않는다.
@@ -545,12 +545,12 @@ Expected: 컴파일 실패, `type 'HookEventKind' has no member 'agentStatus'`�
 - `HookCLI.swift` `parse` 주석의 지원 형식에 `termy-hook --agent opencode AgentStatus → agent="opencode"`를, `main.swift` 머리 주석 사용 예에 `termy-hook --agent opencode AgentStatus   # opencode TUI plugin`을 추가한다.
 - `Notifier.swift`: Interfaces의 `WaitAlertRule`을 파일 최상위(클래스 밖)에 둔다. `shouldAlert`는 `next.state == .waiting`, `previous?.state != .waiting`, 그리고 "직전 id와 새 id가 둘 다 있고 서로 다름"이 아닐 때 true다. `Notifier`의 `previousStates: [String: PaneState]`(`:34`)를 `[String: WaitAlertRule.Observation]`으로 바꾸고, `handle(_:)`(`:56-72`)에서 `guard isWaiting, prev != .waiting else { return }` 대신 `guard WaitAlertRule.shouldAlert(previous: prev, next: current) else { return }`를 쓴다(`current = Observation(state: snap.state, sessionId: snap.lastSessionId)`). `waitingPaneIds`와 dock badge 갱신은 바꾸지 않는다. `pruneWaitingPanes`(`:97`)의 `removeValue`는 타입만 따라간다. `WaitAlertRule` 위 주석에 spec §4.4 "세션 전환으로 생긴 WAIT"의 이유(세션 전환은 사용자 조작, `ingest`는 최종 snapshot만 냄)를 두세 줄로 적는다.
 
-- [ ] **Step 4: 통과 확인**
+- [x] **Step 4: 통과 확인**
 
 Run: Step 2와 같은 명령, 이어서 `-only-testing:termy-tests/PaneStateMachineTests`도 실행
 Expected: 모두 `** TEST SUCCEEDED **`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/termy/Sources/{HookEvent,PaneState,Notifier}.swift apps/termy-hook/Sources/{HookCLI,main}.swift apps/termy-tests/Sources/{AgentKindTests,HookCLITests,NotifierWaitAlertRuleTests}.swift
@@ -570,7 +570,7 @@ git commit -m "feat(agent): opencode AgentStatus 이벤트로 pane 상태를 바
 - Consumes: wire 이름과 reason 어휘(Task 3, Global Constraints)
 - Produces: 번들 리소스 `Contents/Resources/opencode-plugin/tui.js`. `Bundle.main.url(forResource: "tui", withExtension: "js", subdirectory: "opencode-plugin")`로 찾는다. Task 5가 이 템플릿을 읽어 첫 줄 표식과 placeholder `"__TERMY_HOOK_PATH__"`를 쓴다.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `OpenCodePluginScriptTests.swift` 머리 주석: plugin의 pure 영역만 JavaScriptCore로 평가한다는 설명과 spec §8 "plugin pure 영역" 행의 card. opencode 런타임, spawn, 이벤트 순서는 증명하지 않는다(Task 1 S4, Task 4 Step 7이 담당).
 
@@ -713,16 +713,16 @@ final class OpenCodePluginScriptTests: XCTestCase {
     }
 ```
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: `xcodegen generate` 뒤 테스트 명령, `-only-testing:termy-tests/OpenCodePluginScriptTests`
 Expected: FAIL, `XCTUnwrap failed` (번들에 `opencode-plugin/tui.js`가 없음)
 
-- [ ] **Step 3: plugin 파일 작성**
+- [x] **Step 3: plugin 파일 작성**
 
 `apps/termy/Resources/opencode-plugin/tui.js`를 spec §4.2의 코드로 만든다. 파일 순서: (1) Global Constraints의 첫 줄 표식, (2) `import { spawn } from "node:child_process"`, (3) `const TERMY_HOOK_PATH = "__TERMY_HOOK_PATH__"`, (4) `// #region termy-pure` ~ `// #endregion termy-pure`(`termyPhase`, `termyEmission`, `termyView`, `termyPayload`, `termyUtf8Length`), (5) `export default { id: "termy", setup(ctx) { … } }` glue. ESM `import` · `export`는 pure 영역 밖에만 둔다. Task 1에서 S4 대응을 바꿨다면 바뀐 spec §4.2를 따른다.
 
-- [ ] **Step 4: 리소스 복사 설정**
+- [x] **Step 4: 리소스 복사 설정**
 
 `project.yml`의 `termy` target `sources`, `- path: apps/termy/Resources/Assets.xcassets` 아래에:
 
@@ -734,7 +734,7 @@ Expected: FAIL, `XCTUnwrap failed` (번들에 `opencode-plugin/tui.js`가 없음
 
 Run: `xcodegen generate`
 
-- [ ] **Step 5: 문법 확인과 통과 확인**
+- [x] **Step 5: 문법 확인과 통과 확인**
 
 Run: `node --check apps/termy/Resources/opencode-plugin/tui.js; echo "exit=$?"`
 Expected: `exit=0`
@@ -745,14 +745,14 @@ Expected: `** TEST SUCCEEDED **`, 12 tests
 Run: `ls build/DerivedData-tests/Build/Products/Debug/termy.app/Contents/Resources/opencode-plugin/`
 Expected: `tui.js`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/termy/Resources/opencode-plugin/tui.js project.yml apps/termy-tests/Sources/OpenCodePluginScriptTests.swift
 git commit -m "feat(agent): opencode TUI plugin을 앱 번들에 넣음"
 ```
 
-- [ ] **Step 7: 실제 opencode에서 plugin 통합 확인(fake hook)**
+- [x] **Step 7: 실제 opencode에서 plugin 통합 확인(fake hook)**
 
 termy 없이 진짜 plugin을 Task 1 harness에서 돌린다. 설치기가 쓸 위치와 같은 global plugin 경로(임시 XDG config 아래 `opencode/plugins/termy/tui.js`)에 두고, `termy-hook` 대신 받은 것을 기록하는 스크립트를 쓴다.
 
@@ -845,7 +845,7 @@ enum OpenCodePluginInstallerError: LocalizedError {
 }
 ```
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 ```swift
 import XCTest
@@ -951,12 +951,12 @@ final class OpenCodePluginInstallerTests: XCTestCase {
     }
 ```
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: `xcodegen generate` 뒤 테스트 명령, `-only-testing:termy-tests/OpenCodePluginInstallerTests`
 Expected: 컴파일 실패, `cannot find 'OpenCodePluginInstaller' in scope`
 
-- [ ] **Step 3: 설치기 구현**
+- [x] **Step 3: 설치기 구현**
 
 `AntigravityHookInstaller.swift`의 구조(머리 주석, `// MARK:` 순서, `@MainActor` 알림창, `showError`)를 따른다. 정해진 동작:
 
@@ -981,18 +981,18 @@ Expected: 컴파일 실패, `cannot find 'OpenCodePluginInstaller' in scope`
 
 install · uninstall 실패 알림 제목은 `OpenCode plugin install failed` / `OpenCode plugin uninstall failed`, 본문은 `error.localizedDescription`.
 
-- [ ] **Step 4: AppDelegate 연결**
+- [x] **Step 4: AppDelegate 연결**
 
 - `AppDelegate.swift:97-102` asyncAfter 블록의 `AntigravityHookInstaller.promptIfNeeded()` 다음 줄에 `OpenCodePluginInstaller.refreshIfInstalled()`.
 - `openAntigravityHookInstallerPrompt(_:)` 아래에 `@IBAction func openOpenCodePluginInstallerPrompt(_ sender: Any?) { OpenCodePluginInstaller.showPromptFromMenu() }`.
 - 메뉴: `antigravityInstaller.target = self` 다음에 같은 형식으로 `"OpenCode Plugin…"` 항목(`#selector(AppDelegate.openOpenCodePluginInstallerPrompt(_:))`, `keyEquivalent: ""`, `target = self`).
 
-- [ ] **Step 5: 통과 확인**
+- [x] **Step 5: 통과 확인**
 
 Run: 테스트 명령, `-only-testing:termy-tests/OpenCodePluginInstallerTests -only-testing:termy-tests/OpenCodePluginScriptTests`
 Expected: `** TEST SUCCEEDED **`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/termy/Sources/{OpenCodePluginInstaller,AppDelegate}.swift apps/termy-tests/Sources/OpenCodePluginInstallerTests.swift
@@ -1007,12 +1007,12 @@ git commit -m "feat(agent): termy 메뉴에서 opencode plugin을 설치하고 �
 - Modify: `CHANGELOG.md`(`## Unreleased`)
 - Modify: `docs/superpowers/specs/2026-10-19-opencode-support-design.md`(머리의 상태 줄)
 
-- [ ] **Step 1: 전체 테스트**
+- [x] **Step 1: 전체 테스트**
 
 Run: `xcodebuild test -project termy.xcodeproj -scheme termy -destination 'platform=macOS' -derivedDataPath build/DerivedData-tests -skipPackagePluginValidation 2>&1 | tail -25`
 Expected: `** TEST SUCCEEDED **`. 보고에 실행한 테스트 수와 실패 수를 적는다.
 
-- [ ] **Step 2: CHANGELOG**
+- [x] **Step 2: CHANGELOG**
 
 `## Unreleased` 아래에 그대로 쓴다. Task 1 S6이 실패했다면 마지막 문장("OpenCode sessions that are already open…")을 뺀다.
 
@@ -1027,7 +1027,7 @@ Expected: `** TEST SUCCEEDED **`. 보고에 실행한 테스트 수와 실패 �
   sessions that are already open pick it up right away.
 ```
 
-- [ ] **Step 3: spec 상태 줄 갱신과 commit**
+- [x] **Step 3: spec 상태 줄 갱신과 commit**
 
 spec 머리의 `- 상태:` 줄을 `- 상태: 구현 완료(YYYY-MM-DD), 실제 앱 수동 확인 대기`로 바꾼다.
 
