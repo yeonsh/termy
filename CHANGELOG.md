@@ -6,6 +6,13 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.18 — 2026-10-21
+
+- Cmd+click now opens Markdown and PDF paths whose file name contains
+  parentheses, like `…/Strategy (revised) 2026-10-20.pdf`. Before, the
+  click did nothing. The link underline still stops at the "(", but
+  clicking the underlined part opens the whole file.
+
 ## 0.2.17 — 2026-10-20
 
 - Cmd+click a PDF path in a pane to open it in a termy preview window,
