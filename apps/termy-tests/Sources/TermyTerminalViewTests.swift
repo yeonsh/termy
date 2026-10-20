@@ -387,8 +387,8 @@ final class TermyTerminalViewTests: XCTestCase {
 
         let view = Self.mouseCapturingTerminal(showing: "docs/x.md")
         var opened: [URL] = []
-        view.markdownBaseDirectories = { [dir.path] }
-        view.onOpenMarkdownFile = { opened.append($0) }
+        view.previewBaseDirectories = { [dir.path] }
+        view.onOpenPreviewFile = { opened.append($0) }
 
         view.handleClickInBounds(try XCTUnwrap(Self.leftMouseDown(modifierFlags: .command)))
         XCTAssertFalse(view.allowMouseReporting)
@@ -445,11 +445,11 @@ final class TermyTerminalViewTests: XCTestCase {
     func test_linkClickAction_existingMarkdownOpensPreview() {
         XCTAssertEqual(
             clickAction("docs/a.md", existing: ["/proj/docs/a.md"]),
-            .previewMarkdown(URL(fileURLWithPath: "/proj/docs/a.md").resolvingSymlinksInPath())
+            .preview(URL(fileURLWithPath: "/proj/docs/a.md").resolvingSymlinksInPath())
         )
         XCTAssertEqual(
             clickAction("file:///proj/docs/a.md", existing: ["/proj/docs/a.md"]),
-            .previewMarkdown(URL(fileURLWithPath: "/proj/docs/a.md").resolvingSymlinksInPath())
+            .preview(URL(fileURLWithPath: "/proj/docs/a.md").resolvingSymlinksInPath())
         )
     }
 
@@ -509,7 +509,7 @@ final class TermyTerminalViewTests: XCTestCase {
                 homeDirectory: "/Users/me",
                 isRegularFile: { $0 == expected }
             ),
-            .previewMarkdown(URL(fileURLWithPath: expected).resolvingSymlinksInPath()),
+            .preview(URL(fileURLWithPath: expected).resolvingSymlinksInPath()),
             "link text: \(link)"
         )
     }

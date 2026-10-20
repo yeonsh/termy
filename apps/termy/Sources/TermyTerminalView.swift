@@ -21,7 +21,7 @@ import SwiftTerm
 
 /// What a Cmd+click on a terminal link does.
 enum LinkClickAction: Equatable {
-    case previewMarkdown(URL)
+    case preview(URL)
     case beep
     case openURL(URL)
     case ignore
@@ -160,10 +160,10 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// Directories a relative markdown path is resolved against, most
     /// likely first. Set by Pane; without it only absolute and `~/` paths
     /// resolve.
-    var markdownBaseDirectories: (() -> [String])?
+    var previewBaseDirectories: (() -> [String])?
 
     /// Opens a resolved markdown file in a preview window. Set by Pane.
-    var onOpenMarkdownFile: ((URL) -> Void)?
+    var onOpenPreviewFile: ((URL) -> Void)?
 
     /// Pane writes the focus-state caret color here instead of mutating
     /// `caretColor` directly. We mirror it onto `caretColor` except while
@@ -275,13 +275,13 @@ final class TermyTerminalView: LocalProcessTerminalView {
         }
         let action = Self.linkClickAction(
             for: raw,
-            baseDirectories: markdownBaseDirectories?() ?? [],
+            baseDirectories: previewBaseDirectories?() ?? [],
             homeDirectory: NSHomeDirectory(),
-            isRegularFile: MarkdownLinkResolver.fileExistsAsRegularFile
+            isRegularFile: PreviewLinkResolver.fileExistsAsRegularFile
         )
         switch action {
-        case .previewMarkdown(let url):
-            onOpenMarkdownFile?(url)
+        case .preview(let url):
+            onOpenPreviewFile?(url)
             return true
         case .beep:
             // Consumed so SwiftTerm's own mouseUp doesn't act on it too.
@@ -306,17 +306,17 @@ final class TermyTerminalView: LocalProcessTerminalView {
     ) -> LinkClickAction {
         let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .ignore }
-        switch MarkdownLinkResolver.resolve(
+        switch PreviewLinkResolver.resolve(
             linkText: trimmed,
             baseDirectories: baseDirectories,
             homeDirectory: homeDirectory,
             isRegularFile: isRegularFile
         ) {
         case .file(let url):
-            return .previewMarkdown(url)
+            return .preview(url)
         case .missing:
             return .beep
-        case .notMarkdown:
+        case .notPreviewable:
             return openableURL(from: trimmed).map(LinkClickAction.openURL) ?? .ignore
         }
     }

@@ -117,11 +117,11 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         terminal.onClickInBounds = { [weak self] in
             self?.onPaneClicked?()
         }
-        terminal.markdownBaseDirectories = { [weak self] in
-            self?.markdownBaseDirectories() ?? []
+        terminal.previewBaseDirectories = { [weak self] in
+            self?.previewBaseDirectories() ?? []
         }
-        terminal.onOpenMarkdownFile = { url in
-            _ = MarkdownPreviewManager.shared.open(url)
+        terminal.onOpenPreviewFile = { url in
+            _ = PreviewManager.shared.open(url)
         }
         applyTheme()
         applyActiveAppearance(false)
@@ -424,15 +424,15 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     /// `cd other-project`, `README.md` must not open the old project's file.
     /// Scrollback from that older session still resolves through the agent
     /// cwd.
-    func markdownBaseDirectories() -> [String] {
-        Self.markdownBaseDirectories(
+    func previewBaseDirectories() -> [String] {
+        Self.previewBaseDirectories(
             agentCwd: MissionControlModel.shared.snapshot(paneId: paneId)?.lastCwd,
             shellCwd: currentCwd,
             workTreeRoot: GitBranch.workTreeRoot(for: currentCwd)
         )
     }
 
-    nonisolated static func markdownBaseDirectories(
+    nonisolated static func previewBaseDirectories(
         agentCwd: String?,
         shellCwd: String,
         workTreeRoot: String?

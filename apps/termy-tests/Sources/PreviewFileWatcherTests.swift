@@ -2,27 +2,27 @@ import XCTest
 @testable import termy
 
 @MainActor
-final class MarkdownFileWatcherTests: XCTestCase {
+final class PreviewFileWatcherTests: XCTestCase {
     // MARK: classify
 
     private let a = FileFingerprint(inode: 1, size: 10, mtimeNanoseconds: 100)
 
     func test_classify() {
-        XCTAssertEqual(MarkdownFileWatcher.classify(old: nil, new: nil), .unchanged)
-        XCTAssertEqual(MarkdownFileWatcher.classify(old: a, new: a), .unchanged)
-        XCTAssertEqual(MarkdownFileWatcher.classify(old: nil, new: a), .recreated)
-        XCTAssertEqual(MarkdownFileWatcher.classify(old: a, new: nil), .deleted)
+        XCTAssertEqual(PreviewFileWatcher.classify(old: nil, new: nil), .unchanged)
+        XCTAssertEqual(PreviewFileWatcher.classify(old: a, new: a), .unchanged)
+        XCTAssertEqual(PreviewFileWatcher.classify(old: nil, new: a), .recreated)
+        XCTAssertEqual(PreviewFileWatcher.classify(old: a, new: nil), .deleted)
         XCTAssertEqual(
-            MarkdownFileWatcher.classify(old: a, new: FileFingerprint(inode: 1, size: 11, mtimeNanoseconds: 100)),
+            PreviewFileWatcher.classify(old: a, new: FileFingerprint(inode: 1, size: 11, mtimeNanoseconds: 100)),
             .modified
         )
         XCTAssertEqual(
-            MarkdownFileWatcher.classify(old: a, new: FileFingerprint(inode: 1, size: 10, mtimeNanoseconds: 101)),
+            PreviewFileWatcher.classify(old: a, new: FileFingerprint(inode: 1, size: 10, mtimeNanoseconds: 101)),
             .modified
         )
         // Atomic save: same size and mtime granularity, new inode.
         XCTAssertEqual(
-            MarkdownFileWatcher.classify(old: a, new: FileFingerprint(inode: 2, size: 10, mtimeNanoseconds: 100)),
+            PreviewFileWatcher.classify(old: a, new: FileFingerprint(inode: 2, size: 10, mtimeNanoseconds: 100)),
             .modified
         )
     }
@@ -58,7 +58,7 @@ final class MarkdownFileWatcherTests: XCTestCase {
     func test_inPlaceWriteIsReported() async throws {
         let url = try makeTempFile("one")
         var changes: [FileChange] = []
-        let watcher = MarkdownFileWatcher(fileURL: url) { changes.append($0) }
+        let watcher = PreviewFileWatcher(fileURL: url) { changes.append($0) }
         defer { watcher.stop() }
 
         try "one two".write(to: url, atomically: false, encoding: .utf8)
@@ -69,7 +69,7 @@ final class MarkdownFileWatcherTests: XCTestCase {
     func test_atomicReplaceThenInPlaceWriteBothReported() async throws {
         let url = try makeTempFile("one")
         var changes: [FileChange] = []
-        let watcher = MarkdownFileWatcher(fileURL: url) { changes.append($0) }
+        let watcher = PreviewFileWatcher(fileURL: url) { changes.append($0) }
         defer { watcher.stop() }
 
         try "two two".write(to: url, atomically: true, encoding: .utf8)
@@ -83,7 +83,7 @@ final class MarkdownFileWatcherTests: XCTestCase {
     func test_deleteThenRecreateIsReported() async throws {
         let url = try makeTempFile("one")
         var changes: [FileChange] = []
-        let watcher = MarkdownFileWatcher(fileURL: url) { changes.append($0) }
+        let watcher = PreviewFileWatcher(fileURL: url) { changes.append($0) }
         defer { watcher.stop() }
 
         try FileManager.default.removeItem(at: url)
@@ -96,7 +96,7 @@ final class MarkdownFileWatcherTests: XCTestCase {
     func test_stopSilencesWatcher() async throws {
         let url = try makeTempFile("one")
         var changes: [FileChange] = []
-        let watcher = MarkdownFileWatcher(fileURL: url) { changes.append($0) }
+        let watcher = PreviewFileWatcher(fileURL: url) { changes.append($0) }
         watcher.stop()
 
         try "one two".write(to: url, atomically: false, encoding: .utf8)

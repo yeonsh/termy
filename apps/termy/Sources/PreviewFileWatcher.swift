@@ -1,4 +1,4 @@
-// MarkdownFileWatcher.swift
+// PreviewFileWatcher.swift
 //
 // Tells a preview window when its markdown file changes on disk. Agents
 // write files both in place and by atomic save (write a temp file, rename
@@ -36,7 +36,7 @@ enum FileChange: Equatable {
 }
 
 @MainActor
-final class MarkdownFileWatcher {
+final class PreviewFileWatcher {
     static let debounceInterval: TimeInterval = 0.15
 
     private let path: String

@@ -144,7 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var activeController: MainWindowController? {
         // A focused markdown preview has no panes; without this, pane
         // commands would fall through to the first main window's panes.
-        if MarkdownPreviewManager.isPreviewWindow(NSApp.keyWindow) {
+        if PreviewManager.isPreviewWindow(NSApp.keyWindow) {
             return nil
         }
         if let winCtrl = NSApp.keyWindow?.windowController as? MainWindowController {
@@ -171,7 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @IBAction func closePane(_ sender: Any?) {
         // ⌘W on a focused preview closes the preview, never a pane.
-        if let keyWindow = NSApp.keyWindow, MarkdownPreviewManager.isPreviewWindow(keyWindow) {
+        if let keyWindow = NSApp.keyWindow, PreviewManager.isPreviewWindow(keyWindow) {
             keyWindow.performClose(sender)
             return
         }
@@ -329,7 +329,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         let previewState = Self.previewMenuState(
             for: menuItem.action,
-            previewIsKey: MarkdownPreviewManager.isPreviewWindow(NSApp.keyWindow)
+            previewIsKey: PreviewManager.isPreviewWindow(NSApp.keyWindow)
         )
         if let title = previewState.title {
             menuItem.title = title

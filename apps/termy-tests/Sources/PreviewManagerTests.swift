@@ -2,8 +2,8 @@ import XCTest
 @testable import termy
 
 @MainActor
-final class MarkdownPreviewManagerTests: XCTestCase {
-    private var manager: MarkdownPreviewManager!
+final class PreviewManagerTests: XCTestCase {
+    private var manager: PreviewManager!
     private var dir: URL!
     /// The app delegate quits when the last visible window closes, which
     /// would end the test host mid-run; this keeps one window up for the
@@ -19,7 +19,7 @@ final class MarkdownPreviewManagerTests: XCTestCase {
 
     override func setUp() async throws {
         // In memory, so runs don't leave plists in ~/Library/Preferences.
-        manager = MarkdownPreviewManager(defaults: InMemoryUserDefaults())
+        manager = PreviewManager(defaults: InMemoryUserDefaults())
         Self.sentinel.orderFront(nil)
         dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -75,7 +75,7 @@ final class MarkdownPreviewManagerTests: XCTestCase {
 
     func test_centeredFrame_centersInVisibleFrame() {
         XCTAssertEqual(
-            MarkdownPreviewManager.centeredFrame(
+            PreviewManager.centeredFrame(
                 size: NSSize(width: 800, height: 600),
                 in: NSRect(x: 3840, y: 100, width: 1600, height: 1000)
             ),
@@ -86,7 +86,7 @@ final class MarkdownPreviewManagerTests: XCTestCase {
     /// A window taller or wider than the screen keeps its title bar reachable.
     func test_centeredFrame_keepsTopLeftOnScreenWhenTooBig() {
         XCTAssertEqual(
-            MarkdownPreviewManager.centeredFrame(
+            PreviewManager.centeredFrame(
                 size: NSSize(width: 1600, height: 932),
                 in: NSRect(x: 0, y: 0, width: 1440, height: 875)
             ),
@@ -99,7 +99,7 @@ final class MarkdownPreviewManagerTests: XCTestCase {
         let window = try XCTUnwrap(manager.open(try makeFile("a.md")).window)
         XCTAssertEqual(
             window.frame,
-            MarkdownPreviewManager.centeredFrame(size: window.frame.size, in: screen.visibleFrame)
+            PreviewManager.centeredFrame(size: window.frame.size, in: screen.visibleFrame)
         )
     }
 
@@ -120,8 +120,8 @@ final class MarkdownPreviewManagerTests: XCTestCase {
 
     func test_isPreviewWindow() throws {
         let controller = manager.open(try makeFile("a.md"))
-        XCTAssertTrue(MarkdownPreviewManager.isPreviewWindow(controller.window))
-        XCTAssertFalse(MarkdownPreviewManager.isPreviewWindow(NSWindow()))
-        XCTAssertFalse(MarkdownPreviewManager.isPreviewWindow(nil))
+        XCTAssertTrue(PreviewManager.isPreviewWindow(controller.window))
+        XCTAssertFalse(PreviewManager.isPreviewWindow(NSWindow()))
+        XCTAssertFalse(PreviewManager.isPreviewWindow(nil))
     }
 }

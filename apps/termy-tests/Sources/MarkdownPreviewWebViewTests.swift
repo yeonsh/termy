@@ -67,11 +67,11 @@ final class MarkdownPreviewWebViewTests: XCTestCase {
         MarkdownPreviewWebView(frame: NSRect(x: 0, y: 0, width: 200, height: 200), configuration: WKWebViewConfiguration())
     }
 
-    // MARK: markdownFiles(in:isRegularFile:)
+    // MARK: previewFiles(in:isRegularFile:)
 
     func test_markdownFiles_keepsExistingMarkdownFilesOnly() {
         let existing: Set<String> = ["/proj/a.md", "/proj/b.txt", "/proj/c d.markdown"]
-        let result = MarkdownPreviewWebView.markdownFiles(
+        let result = MarkdownPreviewWebView.previewFiles(
             in: [
                 URL(fileURLWithPath: "/proj/a.md"),
                 URL(fileURLWithPath: "/proj/b.txt"),
@@ -93,7 +93,7 @@ final class MarkdownPreviewWebViewTests: XCTestCase {
         let file = try makeFile("spec.md")
         let webView = makeWebView()
         var opened: [URL] = []
-        webView.onDropMarkdownFiles = { opened += $0 }
+        webView.onDropPreviewFiles = { opened += $0 }
 
         let info = drag([file])
         XCTAssertEqual(webView.draggingEntered(info), .copy)
@@ -106,7 +106,7 @@ final class MarkdownPreviewWebViewTests: XCTestCase {
         let file = try makeFile("notes.txt")
         let webView = makeWebView()
         var opened: [URL] = []
-        webView.onDropMarkdownFiles = { opened += $0 }
+        webView.onDropPreviewFiles = { opened += $0 }
 
         let info = drag([file])
         XCTAssertEqual(webView.draggingEntered(info), [])
@@ -119,7 +119,7 @@ final class MarkdownPreviewWebViewTests: XCTestCase {
         let text = try makeFile("log.txt")
         let webView = makeWebView()
         var opened: [URL] = []
-        webView.onDropMarkdownFiles = { opened += $0 }
+        webView.onDropPreviewFiles = { opened += $0 }
 
         XCTAssertTrue(webView.performDragOperation(drag([text, markdown])))
         XCTAssertEqual(opened, [markdown.resolvingSymlinksInPath()])
@@ -131,6 +131,6 @@ final class MarkdownPreviewWebViewTests: XCTestCase {
         let file = try makeFile("spec.md")
         let controller = MarkdownPreviewWindowController(fileURL: file, defaults: InMemoryUserDefaults())
         defer { controller.close() }
-        XCTAssertNotNil(controller.webView.onDropMarkdownFiles)
+        XCTAssertNotNil(controller.webView.onDropPreviewFiles)
     }
 }

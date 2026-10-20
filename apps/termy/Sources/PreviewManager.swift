@@ -1,4 +1,4 @@
-// MarkdownPreviewManager.swift
+// PreviewManager.swift
 //
 // One preview window per markdown file. Cmd+clicking a file that's already
 // open brings its window forward instead of stacking another; files are
@@ -8,8 +8,8 @@
 import AppKit
 
 @MainActor
-final class MarkdownPreviewManager {
-    static let shared = MarkdownPreviewManager()
+final class PreviewManager {
+    static let shared = PreviewManager()
 
     private(set) var controllers: [String: MarkdownPreviewWindowController] = [:]
     private let defaults: UserDefaults

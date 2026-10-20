@@ -1,6 +1,6 @@
 // MarkdownPreviewWindowController.swift
 //
-// One window per previewed markdown file (MarkdownPreviewManager keeps the
+// One window per previewed markdown file (PreviewManager keeps the
 // one-per-file rule). The file is agent-written, so the WKWebView runs with
 // page JavaScript off and every navigation is decided here: our own loads
 // go through, links leave for the browser or open another preview, nothing
@@ -38,7 +38,7 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
 
     let webView: MarkdownPreviewWebView
     private let defaults: UserDefaults
-    private var watcher: MarkdownFileWatcher?
+    private var watcher: PreviewFileWatcher?
     private var lastMarkdown = ""
     private var hasLoaded = false
     private var pendingScrollY: Double?
@@ -60,9 +60,9 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
         // Force Touch previews load link targets without asking
         // `decidePolicyFor`.
         webView.allowsLinkPreview = false
-        webView.onDropMarkdownFiles = { urls in
+        webView.onDropPreviewFiles = { urls in
             for url in urls {
-                MarkdownPreviewManager.shared.open(url)
+                PreviewManager.shared.open(url)
             }
         }
         self.webView = webView
@@ -87,7 +87,7 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
             self?.addShowInFinder(to: menu)
         }
         reload(after: nil)
-        watcher = MarkdownFileWatcher(fileURL: fileURL) { [weak self] change in
+        watcher = PreviewFileWatcher(fileURL: fileURL) { [weak self] change in
             self?.reload(after: change)
         }
     }
@@ -205,7 +205,7 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
             navigationType: navigationAction.navigationType,
             url: navigationAction.request.url,
             documentURL: fileURL,
-            isRegularFile: MarkdownLinkResolver.fileExistsAsRegularFile
+            isRegularFile: PreviewLinkResolver.fileExistsAsRegularFile
         )
         switch route {
         case .allow:
@@ -216,7 +216,7 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
             NSWorkspace.shared.open(url)
             return .cancel
         case .preview(let url):
-            MarkdownPreviewManager.shared.open(url)
+            PreviewManager.shared.open(url)
             return .cancel
         }
     }
@@ -260,7 +260,7 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
             if url.fragment != nil, url.path == documentURL.path {
                 return .allow   // in-page anchor; WebKit scrolls to it
             }
-            let resolution = MarkdownLinkResolver.resolve(
+            let resolution = PreviewLinkResolver.resolve(
                 linkText: url.absoluteString,
                 baseDirectories: [],
                 homeDirectory: NSHomeDirectory(),

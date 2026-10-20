@@ -109,7 +109,7 @@ final class WindowManager {
         // Previews belong to the main windows. With none left, close them
         // too so "closing the last window quits termy" still holds.
         if controllers.isEmpty {
-            MarkdownPreviewManager.shared.closeAll()
+            PreviewManager.shared.closeAll()
         }
     }
 

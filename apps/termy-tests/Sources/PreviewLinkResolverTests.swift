@@ -1,15 +1,15 @@
 import XCTest
 @testable import termy
 
-final class MarkdownLinkResolverTests: XCTestCase {
+final class PreviewLinkResolverTests: XCTestCase {
     private let home = "/Users/me"
 
     private func resolve(
         _ text: String,
         bases: [String] = ["/proj"],
         existing: Set<String>
-    ) -> MarkdownLinkResolution {
-        MarkdownLinkResolver.resolve(
+    ) -> PreviewLinkResolution {
+        PreviewLinkResolver.resolve(
             linkText: text,
             baseDirectories: bases,
             homeDirectory: home,
@@ -17,7 +17,7 @@ final class MarkdownLinkResolverTests: XCTestCase {
         )
     }
 
-    private func file(_ path: String) -> MarkdownLinkResolution {
+    private func file(_ path: String) -> PreviewLinkResolution {
         .file(URL(fileURLWithPath: path).resolvingSymlinksInPath())
     }
 
@@ -87,15 +87,15 @@ final class MarkdownLinkResolverTests: XCTestCase {
     }
 
     func test_nonMarkdownPathIsNotMarkdown() {
-        XCTAssertEqual(resolve("src/main.swift", existing: ["/proj/src/main.swift"]), .notMarkdown)
-        XCTAssertEqual(resolve("docs/a.md.bak", existing: []), .notMarkdown)
-        XCTAssertEqual(resolve("README.md.bak", existing: []), .notMarkdown)
-        XCTAssertEqual(resolve("docs/a.mdx", existing: ["/proj/docs/a.mdx"]), .notMarkdown)
-        XCTAssertEqual(resolve("docs/a.md-old/b.txt", existing: []), .notMarkdown)
+        XCTAssertEqual(resolve("src/main.swift", existing: ["/proj/src/main.swift"]), .notPreviewable)
+        XCTAssertEqual(resolve("docs/a.md.bak", existing: []), .notPreviewable)
+        XCTAssertEqual(resolve("README.md.bak", existing: []), .notPreviewable)
+        XCTAssertEqual(resolve("docs/a.mdx", existing: ["/proj/docs/a.mdx"]), .notPreviewable)
+        XCTAssertEqual(resolve("docs/a.md-old/b.txt", existing: []), .notPreviewable)
     }
 
     func test_webURLEndingInMdIsNotMarkdown() {
-        XCTAssertEqual(resolve("https://github.com/o/r/blob/main/README.md", existing: []), .notMarkdown)
+        XCTAssertEqual(resolve("https://github.com/o/r/blob/main/README.md", existing: []), .notPreviewable)
     }
 
     func test_missingFileIsMissing() {
@@ -105,7 +105,7 @@ final class MarkdownLinkResolverTests: XCTestCase {
 
     func test_emptyAndDuplicateBasesAreSkipped() {
         var checked: [String] = []
-        _ = MarkdownLinkResolver.resolve(
+        _ = PreviewLinkResolver.resolve(
             linkText: "docs/a.md",
             baseDirectories: ["", "/proj", "/proj"],
             homeDirectory: home,
@@ -125,11 +125,11 @@ final class MarkdownLinkResolverTests: XCTestCase {
             withDestinationURL: real
         )
 
-        let result = MarkdownLinkResolver.resolve(
+        let result = PreviewLinkResolver.resolve(
             linkText: "link.md",
             baseDirectories: [dir.path],
             homeDirectory: home,
-            isRegularFile: MarkdownLinkResolver.fileExistsAsRegularFile
+            isRegularFile: PreviewLinkResolver.fileExistsAsRegularFile
         )
         XCTAssertEqual(result, .file(real.resolvingSymlinksInPath()))
     }
@@ -139,7 +139,7 @@ final class MarkdownLinkResolverTests: XCTestCase {
         let fake = dir.appendingPathComponent("folder.md")
         try FileManager.default.createDirectory(at: fake, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        XCTAssertFalse(MarkdownLinkResolver.fileExistsAsRegularFile(fake.path))
+        XCTAssertFalse(PreviewLinkResolver.fileExistsAsRegularFile(fake.path))
     }
 
     /// Reading a FIFO blocks until a writer shows up — on the main thread.
@@ -149,7 +149,7 @@ final class MarkdownLinkResolverTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         let fifo = dir.appendingPathComponent("pipe.md")
         XCTAssertEqual(Darwin.mkfifo(fifo.path, 0o644), 0)
-        XCTAssertFalse(MarkdownLinkResolver.fileExistsAsRegularFile(fifo.path))
+        XCTAssertFalse(PreviewLinkResolver.fileExistsAsRegularFile(fifo.path))
     }
 
     func test_regularFileAndSymlinkToOneAreRegularFiles() throws {
@@ -160,8 +160,8 @@ final class MarkdownLinkResolverTests: XCTestCase {
         try "# x\n".write(to: real, atomically: true, encoding: .utf8)
         let link = dir.appendingPathComponent("link.md")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
-        XCTAssertTrue(MarkdownLinkResolver.fileExistsAsRegularFile(real.path))
-        XCTAssertTrue(MarkdownLinkResolver.fileExistsAsRegularFile(link.path))
-        XCTAssertFalse(MarkdownLinkResolver.fileExistsAsRegularFile(dir.appendingPathComponent("none.md").path))
+        XCTAssertTrue(PreviewLinkResolver.fileExistsAsRegularFile(real.path))
+        XCTAssertTrue(PreviewLinkResolver.fileExistsAsRegularFile(link.path))
+        XCTAssertFalse(PreviewLinkResolver.fileExistsAsRegularFile(dir.appendingPathComponent("none.md").path))
     }
 }

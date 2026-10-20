@@ -13,7 +13,7 @@ import WebKit
 
 final class MarkdownPreviewWebView: WKWebView {
     /// Opens dropped markdown files. Set by the preview controller.
-    var onDropMarkdownFiles: (([URL]) -> Void)?
+    var onDropPreviewFiles: (([URL]) -> Void)?
     /// Adds items to WebKit's context menu. Set by the preview controller.
     var onWillOpenMenu: ((NSMenu) -> Void)?
 
@@ -26,23 +26,23 @@ final class MarkdownPreviewWebView: WKWebView {
         guard let files = Self.fileURLs(on: sender.draggingPasteboard) else {
             return super.draggingEntered(sender)
         }
-        return markdownFiles(in: files).isEmpty ? [] : .copy
+        return previewFiles(in: files).isEmpty ? [] : .copy
     }
 
     override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
         guard let files = Self.fileURLs(on: sender.draggingPasteboard) else {
             return super.draggingUpdated(sender)
         }
-        return markdownFiles(in: files).isEmpty ? [] : .copy
+        return previewFiles(in: files).isEmpty ? [] : .copy
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         guard let files = Self.fileURLs(on: sender.draggingPasteboard) else {
             return super.performDragOperation(sender)
         }
-        let markdown = markdownFiles(in: files)
+        let markdown = previewFiles(in: files)
         guard !markdown.isEmpty else { return false }
-        onDropMarkdownFiles?(markdown)
+        onDropPreviewFiles?(markdown)
         return true
     }
 
@@ -57,10 +57,10 @@ final class MarkdownPreviewWebView: WKWebView {
     }
 
     /// The dropped files that are markdown files on disk, symlinks resolved.
-    nonisolated static func markdownFiles(in urls: [URL], isRegularFile: (String) -> Bool) -> [URL] {
+    nonisolated static func previewFiles(in urls: [URL], isRegularFile: (String) -> Bool) -> [URL] {
         urls.compactMap { url in
             guard url.isFileURL else { return nil }
-            let resolution = MarkdownLinkResolver.resolve(
+            let resolution = PreviewLinkResolver.resolve(
                 linkText: url.absoluteString,
                 baseDirectories: [],
                 homeDirectory: NSHomeDirectory(),
@@ -73,7 +73,7 @@ final class MarkdownPreviewWebView: WKWebView {
         }
     }
 
-    private func markdownFiles(in urls: [URL]) -> [URL] {
-        Self.markdownFiles(in: urls, isRegularFile: MarkdownLinkResolver.fileExistsAsRegularFile)
+    private func previewFiles(in urls: [URL]) -> [URL] {
+        Self.previewFiles(in: urls, isRegularFile: PreviewLinkResolver.fileExistsAsRegularFile)
     }
 }

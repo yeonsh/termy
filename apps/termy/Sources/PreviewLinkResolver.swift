@@ -1,4 +1,4 @@
-// MarkdownLinkResolver.swift
+// PreviewLinkResolver.swift
 //
 // Decides whether a Cmd+clicked terminal link names a markdown file termy
 // should preview, and which file on disk that is. SwiftTerm hands over the
@@ -10,16 +10,16 @@
 
 import Foundation
 
-enum MarkdownLinkResolution: Equatable {
+enum PreviewLinkResolution: Equatable {
     /// Not a markdown link; the caller falls back to its URL handling.
-    case notMarkdown
+    case notPreviewable
     /// Shaped like a markdown path, but no such file exists.
     case missing
     /// The markdown file to open, symlinks resolved.
     case file(URL)
 }
 
-enum MarkdownLinkResolver {
+enum PreviewLinkResolver {
     static let extensions: Set<String> = ["md", "markdown"]
 
     private static let leadingPunctuation: Set<Character> = ["(", "[", "`", "'", "\""]
@@ -33,8 +33,8 @@ enum MarkdownLinkResolver {
         baseDirectories: [String],
         homeDirectory: String,
         isRegularFile: (String) -> Bool
-    ) -> MarkdownLinkResolution {
-        guard let path = markdownPath(from: linkText) else { return .notMarkdown }
+    ) -> PreviewLinkResolution {
+        guard let path = previewPath(from: linkText) else { return .notPreviewable }
 
         let candidates: [String]
         if path.hasPrefix("~/") {
@@ -61,7 +61,7 @@ enum MarkdownLinkResolver {
     /// punctuation, `file://`, `#fragment`, `:line[:col]` and text glued
     /// after the extension removed. nil for any other extension and for
     /// web URLs.
-    static func markdownPath(from linkText: String) -> String? {
+    static func previewPath(from linkText: String) -> String? {
         var text = Substring(linkText.trimmingCharacters(in: .whitespacesAndNewlines))
         while let first = text.first, leadingPunctuation.contains(first) {
             text = text.dropFirst()
