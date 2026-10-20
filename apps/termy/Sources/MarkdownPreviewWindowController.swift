@@ -15,7 +15,7 @@ import WebKit
 
 @MainActor
 final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, NSMenuItemValidation {
-    static let defaultContentSize = NSSize(width: 820, height: 900)
+    static let defaultContentSize = PreviewWindowSupport.defaultContentSize
     static let contentSizeDefaultsKey = "MarkdownPreview.contentSize"
     static let deletedBanner = "This file was deleted. The preview will reload if it comes back."
 
@@ -100,11 +100,7 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
     /// Content size for a new preview window: the last one closed, or the
     /// default when nothing usable is stored.
     static func savedContentSize(defaults: UserDefaults) -> NSSize {
-        guard let stored = defaults.string(forKey: contentSizeDefaultsKey) else {
-            return defaultContentSize
-        }
-        let size = NSSizeFromString(stored)
-        return size.width >= 320 && size.height >= 240 ? size : defaultContentSize
+        PreviewWindowSupport.savedContentSize(defaults: defaults, key: contentSizeDefaultsKey)
     }
 
     /// UTF-8 with invalid bytes replaced — one stray byte shouldn't hide
