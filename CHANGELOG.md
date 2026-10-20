@@ -9,7 +9,9 @@ extracts the matching section into the Sparkle appcast `<description>`.
 - Cmd+click a PDF path in a pane to open it in a termy preview window,
   just like Markdown files. When an agent regenerates the PDF, the preview
   updates and stays on the page and zoom you were reading; while the file
-  is still being written, the previous version stays on screen.
+  is still being written, the previous version stays on screen. `file://`
+  links to PDFs, and PDF links or drops inside a Markdown preview, open in
+  a termy PDF preview too.
 
 ## 0.2.16 — 2026-10-19
 

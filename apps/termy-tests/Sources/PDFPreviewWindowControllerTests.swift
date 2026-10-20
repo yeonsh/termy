@@ -5,14 +5,33 @@ import PDFKit
 @MainActor
 final class PDFPreviewWindowControllerTests: XCTestCase {
     /// A `pages`-page US Letter PDF. CoreGraphics ends it with `%%EOF`.
-    private func makePDFData(pages: Int) -> Data {
+    /// `pageHeight` overrides the media box height per page index.
+    private func makePDFData(pages: Int, pageHeight: (Int) -> CGFloat = { _ in 792 }) -> Data {
         let data = NSMutableData()
         var box = CGRect(x: 0, y: 0, width: 612, height: 792)
         let context = CGContext(consumer: CGDataConsumer(data: data as CFMutableData)!, mediaBox: &box, nil)!
-        for _ in 0..<pages {
-            context.beginPDFPage(nil)
+        for index in 0..<pages {
+            var pageBox = CGRect(x: 0, y: 0, width: 612, height: pageHeight(index))
+            let info = [kCGPDFContextMediaBox as String: Data(bytes: &pageBox, count: MemoryLayout<CGRect>.size)] as CFDictionary
+            context.beginPDFPage(info)
             context.endPDFPage()
         }
+        context.closePDF()
+        return data as Data
+    }
+
+    /// A one-page PDF that asks for a password (user and owner), so PDFKit
+    /// reports `isLocked`.
+    private func makeLockedPDFData() -> Data {
+        let data = NSMutableData()
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let info = [
+            kCGPDFContextUserPassword as String: "secret",
+            kCGPDFContextOwnerPassword as String: "secret",
+        ] as CFDictionary
+        let context = CGContext(consumer: CGDataConsumer(data: data as CFMutableData)!, mediaBox: &box, info)!
+        context.beginPDFPage(nil)
+        context.endPDFPage()
         context.closePDF()
         return data as Data
     }
@@ -151,6 +170,28 @@ final class PDFPreviewWindowControllerTests: XCTestCase {
         XCTAssertTrue(shown, "unreadable banner, got \(controller.bannerText ?? "nil")")
     }
 
+    func test_documentFromData_lockedPDFIsUnreadable() {
+        let locked = makeLockedPDFData()
+        XCTAssertTrue(PDFPreviewWindowController.hasEndMarker(locked))
+        XCTAssertNil(PDFPreviewWindowController.document(from: locked, requireEndMarker: true))
+        XCTAssertNil(PDFPreviewWindowController.document(from: locked, requireEndMarker: false))
+    }
+
+    func test_firstLoad_lockedPDFShowsUnreadableBanner() async throws {
+        let url = try makeReport(makeLockedPDFData())
+        let controller = openPreview(url, settleInterval: 0.3)
+        defer { controller.close() }
+        let shown = await waitUntil { controller.bannerText == "Couldn't read this PDF." }
+        XCTAssertTrue(shown, "unreadable banner, got \(controller.bannerText ?? "nil")")
+        XCTAssertNil(controller.pdfView.document)
+    }
+
+    func test_firstResponderIsPDFView() throws {
+        let controller = openPreview(try makeReport(makePDFData(pages: 1)))
+        defer { controller.close() }
+        XCTAssertTrue(controller.window?.initialFirstResponder === controller.pdfView)
+    }
+
     func test_firstLoad_readErrorShowsReadBanner() throws {
         let url = try makeReport(makePDFData(pages: 6))
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
@@ -180,6 +221,29 @@ final class PDFPreviewWindowControllerTests: XCTestCase {
         XCTAssertTrue(swapped, "7-page version")
         XCTAssertEqual(controller.currentPageIndex, 3)
         XCTAssertNil(controller.bannerText)
+    }
+
+    /// Without the restore, PDFView keeps reporting the old `currentPage`
+    /// while the view itself sits at the top; so also check what is on screen.
+    func test_reload_keepsPageWhenEarlierPageChangesHeight() async throws {
+        let url = try makeReport(makePDFData(pages: 6))
+        let controller = openPreview(url)
+        defer { controller.close() }
+        try await showPage3(of: controller)
+        try makePDFData(pages: 6, pageHeight: { $0 == 0 ? 1584 : 792 }).write(to: url, options: .atomic)
+        let swapped = await waitUntil {
+            controller.pdfView.document?.page(at: 0)?.bounds(for: .mediaBox).height == 1584
+        }
+        XCTAssertTrue(swapped, "taller first page")
+        XCTAssertEqual(controller.currentPageIndex, 3)
+        let pdfView = controller.pdfView
+        let visibleIndexes = { pdfView.visiblePages.compactMap { pdfView.document?.index(for: $0) } }
+        let onScreen = await waitUntil {
+            pdfView.layoutSubtreeIfNeeded()
+            pdfView.displayIfNeeded()
+            return visibleIndexes().contains(3)
+        }
+        XCTAssertTrue(onScreen, "page 3 on screen, got \(visibleIndexes())")
     }
 
     func test_reload_clampsToLastPageWhenShorter() async throws {
@@ -258,8 +322,8 @@ final class PDFPreviewWindowControllerTests: XCTestCase {
         try Data("broken-1".utf8).write(to: url, options: .atomic)
         try await Task.sleep(nanoseconds: 600_000_000)
         try Data("broken-two".utf8).write(to: url, options: .atomic)
-        try await Task.sleep(nanoseconds: 600_000_000)
-        XCTAssertNil(controller.bannerText, "1.2 s after the first write, 0.6 s after the second")
+        try await Task.sleep(nanoseconds: 900_000_000)
+        XCTAssertNil(controller.bannerText, "1.5 s after the first write, 0.9 s after the second")
 
         let stale = await waitUntil { controller.bannerText == PDFPreviewWindowController.staleBanner }
         XCTAssertTrue(stale, "stale banner, got \(controller.bannerText ?? "nil")")

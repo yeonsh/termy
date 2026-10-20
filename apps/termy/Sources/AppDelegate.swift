@@ -142,7 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: - Menu action forwarding
 
     private var activeController: MainWindowController? {
-        // A focused markdown preview has no panes; without this, pane
+        // A focused preview has no panes; without this, pane
         // commands would fall through to the first main window's panes.
         if PreviewManager.isPreviewWindow(NSApp.keyWindow) {
             return nil
@@ -337,7 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return previewState.isEnabled
     }
 
-    /// Enablement, and the ⌘W title, when a markdown preview may be the
+    /// Enablement, and the ⌘W title, when a preview window may be the
     /// key window. Pure so the pane-action list is testable.
     static func previewMenuState(for action: Selector?, previewIsKey: Bool) -> (isEnabled: Bool, title: String?) {
         if action == #selector(AppDelegate.closePane(_:)) {

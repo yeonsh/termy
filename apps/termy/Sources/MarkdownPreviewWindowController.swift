@@ -116,7 +116,7 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
             lastMarkdown = Self.decodeMarkdown(try Data(contentsOf: fileURL))
             render(markdown: lastMarkdown, banner: nil)
         } catch {
-            render(markdown: "", banner: "Couldn't read this file: \(error.localizedDescription)")
+            render(markdown: "", banner: PreviewWindowSupport.readErrorBanner(error))
         }
     }
 

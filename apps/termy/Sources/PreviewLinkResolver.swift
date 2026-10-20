@@ -1,12 +1,12 @@
 // PreviewLinkResolver.swift
 //
-// Decides whether a Cmd+clicked terminal link names a markdown or PDF file termy
-// should preview, and which file on disk that is. SwiftTerm hands over the
-// raw matched text — `docs/x.md`, `./x.pdf:12`, `file:///…/x.md`, often with
-// prose punctuation or the rest of a Korean sentence (`x.md에 저장했습니다.`)
-// stuck to it — and a relative path is relative to
-// whatever cwd the agent printed it from, so callers pass candidate base
-// directories in priority order and the first one holding the file wins.
+// Decides whether a Cmd+clicked terminal link names a markdown or PDF file
+// termy should preview, and which file on disk that is. SwiftTerm hands over
+// the raw matched text — `docs/x.md`, `./x.pdf:12`, `file:///…/x.md`, often
+// with prose punctuation or the rest of a Korean sentence (`x.md에 저장했습니다.`)
+// stuck to it — and a relative path is relative to whatever cwd the agent
+// printed it from, so callers pass candidate base directories in priority
+// order and the first one holding the file wins.
 
 import Foundation
 
@@ -82,7 +82,7 @@ enum PreviewLinkResolver {
         }
         path = stripLineSuffix(path)
 
-        if !hasMarkdownExtension(path) {
+        if !hasPreviewExtension(path) {
             // SwiftTerm's path regex keeps matching into Hangul particles
             // (`\w`), `**`, and trailing words ending in `.`; cut at the
             // first .md/.markdown/.pdf that isn't followed by another file-name
@@ -93,7 +93,7 @@ enum PreviewLinkResolver {
             ) else { return nil }
             path = String(path[range])
         }
-        guard hasMarkdownExtension(path) else { return nil }
+        guard hasPreviewExtension(path) else { return nil }
         return path
     }
 
@@ -106,7 +106,7 @@ enum PreviewLinkResolver {
         return (info.st_mode & S_IFMT) == S_IFREG
     }
 
-    private static func hasMarkdownExtension(_ path: String) -> Bool {
+    private static func hasPreviewExtension(_ path: String) -> Bool {
         extensions.contains((path as NSString).pathExtension.lowercased())
     }
 

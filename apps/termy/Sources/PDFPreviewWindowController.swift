@@ -97,6 +97,8 @@ final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate, @p
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
         window.contentView = contentStack
+        // Space, arrows and Page Down scroll the PDF without a click first.
+        window.initialFirstResponder = pdfView
         super.init(window: window)
 
         window.delegate = self
@@ -129,11 +131,13 @@ final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate, @p
         data.suffix(1024).range(of: Data("%%EOF".utf8)) != nil
     }
 
-    /// The document in `data` when PDFKit finds at least one page in it.
+    /// The document in `data` when PDFKit finds at least one page in it
+    /// and it isn't locked.
     /// `requireEndMarker` also demands a finished file (see the header).
     nonisolated static func document(from data: Data, requireEndMarker: Bool) -> PDFDocument? {
         if requireEndMarker, !hasEndMarker(data) { return nil }
-        guard let document = PDFDocument(data: data), document.pageCount > 0 else { return nil }
+        // A password-protected PDF opens with blank pages; we can't read it.
+        guard let document = PDFDocument(data: data), !document.isLocked, document.pageCount > 0 else { return nil }
         return document
     }
 
@@ -176,7 +180,7 @@ final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate, @p
         do {
             return try Data(contentsOf: fileURL)
         } catch {
-            bannerText = "Couldn't read this file: \(error.localizedDescription)"
+            bannerText = PreviewWindowSupport.readErrorBanner(error)
             return nil
         }
     }
@@ -201,18 +205,18 @@ final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate, @p
         // Page and point come from one destination so they always belong
         // together; `currentPage` is only the fallback.
         let destination = pdfView.currentDestination
-        guard let oldDocument = pdfView.document,
-              let oldPage = destination?.page ?? pdfView.currentPage else {
-            pdfView.document = newDocument
-            return
-        }
-        let pageIndex = oldDocument.index(for: oldPage)
+        let oldDocument = pdfView.document
         let autoScales = pdfView.autoScales
         let scaleFactor = pdfView.scaleFactor
+        let oldPage = destination?.page ?? pdfView.currentPage
         pdfView.document = newDocument
+        guard oldDocument != nil else { return }
+        // Zoom is restored whether or not a page position is known.
         if !autoScales {
             pdfView.scaleFactor = scaleFactor
         }
+        guard let oldDocument, let oldPage else { return }
+        let pageIndex = oldDocument.index(for: oldPage)
         guard let page = newDocument.page(at: min(pageIndex, newDocument.pageCount - 1)) else { return }
         if let point = destination?.point {
             pdfView.go(to: PDFDestination(page: page, at: point))

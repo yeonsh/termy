@@ -1,8 +1,8 @@
 // PreviewFileWatcher.swift
 //
-// Tells a preview window when its markdown file changes on disk. Agents
-// write files both in place and by atomic save (write a temp file, rename
-// it over the original), so we watch the file itself for content changes
+// Tells a preview window when its file changes on disk. Agents write files
+// both in place and by atomic save (write a temp file, rename it over the
+// original), so we watch the file itself for content changes
 // and its parent directory for the file being replaced, removed or
 // re-created. Bursts of events — an agent writing in chunks — collapse
 // into one check after a short debounce, and the check compares a stat

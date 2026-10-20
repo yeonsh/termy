@@ -1,8 +1,8 @@
 // PreviewManager.swift
 //
-// One preview window per markdown or PDF file. Cmd+clicking a file that's already
-// open brings its window forward instead of stacking another; files are
-// keyed by their symlink-resolved standard path, so `./docs/x.md` and an
+// One preview window per markdown or PDF file. Cmd+clicking a file that's
+// already open brings its window forward instead of stacking another; files
+// are keyed by their symlink-resolved standard path, so `./docs/x.md` and an
 // absolute path to the same file share a window.
 
 import AppKit

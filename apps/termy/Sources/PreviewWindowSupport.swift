@@ -20,6 +20,11 @@ enum PreviewWindowSupport {
         return size.width >= 320 && size.height >= 240 ? size : defaultContentSize
     }
 
+    /// The banner both preview kinds show when the file can't be read at all.
+    static func readErrorBanner(_ error: Error) -> String {
+        "Couldn't read this file: \(error.localizedDescription)"
+    }
+
     enum FinderReveal: Equatable {
         case selectFile(URL)
         case openFolder(URL)
