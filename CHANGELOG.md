@@ -6,6 +6,8 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.17 — 2026-10-20
+
 - Cmd+click a PDF path in a pane to open it in a termy preview window,
   just like Markdown files. When an agent regenerates the PDF, the preview
   updates and stays on the page and zoom you were reading; while the file
