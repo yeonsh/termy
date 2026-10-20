@@ -17,17 +17,24 @@ import AppKit
 import PDFKit
 
 @MainActor
-final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate {
+final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate, @preconcurrency PDFViewDelegate, NSMenuItemValidation {
     static let defaultSettleInterval: TimeInterval = 1.0
     static let contentSizeDefaultsKey = "PDFPreview.contentSize"
     static let unreadableBanner = "Couldn't read this PDF."
     static let staleBanner = "Couldn't read the new version. Showing the previous one."
 
+    /// Where a clicked link goes. Pure for testing.
+    enum LinkRoute: Equatable {
+        case openExternally(URL)
+        case preview(URL)
+        case ignore
+    }
+
     let fileURL: URL
     /// Called from `windowWillClose`; the manager forgets the window here.
     var onClose: ((PDFPreviewWindowController) -> Void)?
 
-    let pdfView: PDFView
+    let pdfView: PDFPreviewView
     /// The one line above the document; nil hides it.
     private(set) var bannerText: String? {
         didSet { updateBanner() }
@@ -49,7 +56,7 @@ final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate {
         self.fileURL = fileURL
         self.defaults = defaults
         self.settleInterval = settleInterval
-        let pdfView = PDFView(frame: .zero)
+        let pdfView = PDFPreviewView(frame: .zero)
         pdfView.displayMode = .singlePageContinuous
         pdfView.displaysPageBreaks = true
         pdfView.autoScales = true
@@ -93,6 +100,10 @@ final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
 
         window.delegate = self
+        pdfView.delegate = self
+        pdfView.onWillOpenMenu = { [weak self] menu in
+            self?.addShowInFinder(to: menu)
+        }
         reload(after: nil)
         watcher = PreviewFileWatcher(fileURL: fileURL) { [weak self] change in
             self?.reload(after: change)
@@ -214,6 +225,72 @@ final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate {
         bannerLabel.stringValue = bannerText ?? ""
         bannerLabel.isHidden = bannerText == nil
         contentStack.edgeInsets.top = bannerText == nil ? 0 : 8
+    }
+
+    // MARK: - Links
+
+    /// Web links go to the browser, markdown and PDF files to a preview
+    /// window; anything else (apps, scripts, missing files) does nothing.
+    nonisolated static func linkRoute(for url: URL, isRegularFile: (String) -> Bool) -> LinkRoute {
+        switch url.scheme?.lowercased() {
+        case "http", "https", "mailto":
+            return .openExternally(url)
+        case "file":
+            let resolution = PreviewLinkResolver.resolve(
+                linkText: url.absoluteString,
+                baseDirectories: [],
+                homeDirectory: NSHomeDirectory(),
+                isRegularFile: isRegularFile
+            )
+            if case .file(let target) = resolution {
+                return .preview(target)
+            }
+            return .ignore
+        default:
+            return .ignore
+        }
+    }
+
+    /// Not calling super: its default opens the URL as-is.
+    func pdfViewWillClick(onLink sender: PDFView, with url: URL) {
+        switch Self.linkRoute(for: url, isRegularFile: PreviewLinkResolver.fileExistsAsRegularFile) {
+        case .openExternally(let url):
+            NSWorkspace.shared.open(url)
+        case .preview(let url):
+            PreviewManager.shared.open(url)
+        case .ignore:
+            break
+        }
+    }
+
+    // MARK: - Show in Finder
+
+    /// File ▸ Show in Finder reaches this through the responder chain while
+    /// the preview is key; the context-menu item targets it directly.
+    @objc func showInFinder(_ sender: Any?) {
+        switch finderReveal {
+        case .selectFile(let url)?:
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        case .openFolder(let url)?:
+            NSWorkspace.shared.open(url)
+        case nil:
+            break
+        }
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard menuItem.action == #selector(showInFinder(_:)) else { return true }
+        return finderReveal != nil
+    }
+
+    private var finderReveal: PreviewWindowSupport.FinderReveal? {
+        PreviewWindowSupport.finderReveal(for: fileURL, exists: FileManager.default.fileExists(atPath:))
+    }
+
+    private func addShowInFinder(to menu: NSMenu) {
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        let item = menu.addItem(withTitle: "Show in Finder", action: #selector(showInFinder(_:)), keyEquivalent: "")
+        item.target = self
     }
 
     // MARK: - NSWindowDelegate

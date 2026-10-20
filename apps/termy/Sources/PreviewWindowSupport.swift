@@ -19,4 +19,17 @@ enum PreviewWindowSupport {
         let size = NSSizeFromString(stored)
         return size.width >= 320 && size.height >= 240 ? size : defaultContentSize
     }
+
+    enum FinderReveal: Equatable {
+        case selectFile(URL)
+        case openFolder(URL)
+    }
+
+    /// The file itself, or the folder it lived in once it's deleted (the
+    /// preview stays open for a file that may come back). Pure for testing.
+    nonisolated static func finderReveal(for fileURL: URL, exists: (String) -> Bool) -> FinderReveal? {
+        if exists(fileURL.path) { return .selectFile(fileURL) }
+        let folder = fileURL.deletingLastPathComponent()
+        return exists(folder.path) ? .openFolder(folder) : nil
+    }
 }

@@ -27,11 +27,6 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
         case preview(URL)
     }
 
-    enum FinderReveal: Equatable {
-        case selectFile(URL)
-        case openFolder(URL)
-    }
-
     let fileURL: URL
     /// Called from `windowWillClose`; the manager forgets the window here.
     var onClose: ((MarkdownPreviewWindowController) -> Void)?
@@ -291,16 +286,8 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
         return finderReveal != nil
     }
 
-    private var finderReveal: FinderReveal? {
-        Self.finderReveal(for: fileURL, exists: FileManager.default.fileExists(atPath:))
-    }
-
-    /// The file itself, or the folder it lived in once it's deleted (the
-    /// preview stays open for a file that may come back). Pure for testing.
-    nonisolated static func finderReveal(for fileURL: URL, exists: (String) -> Bool) -> FinderReveal? {
-        if exists(fileURL.path) { return .selectFile(fileURL) }
-        let folder = fileURL.deletingLastPathComponent()
-        return exists(folder.path) ? .openFolder(folder) : nil
+    private var finderReveal: PreviewWindowSupport.FinderReveal? {
+        PreviewWindowSupport.finderReveal(for: fileURL, exists: FileManager.default.fileExists(atPath:))
     }
 
     private func addShowInFinder(to menu: NSMenu) {

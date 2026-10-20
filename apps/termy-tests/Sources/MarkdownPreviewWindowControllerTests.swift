@@ -130,8 +130,8 @@ final class MarkdownPreviewWindowControllerTests: XCTestCase {
     }
 
     func test_finderReveal_selectsFileAndFallsBackToItsFolder() {
-        func reveal(existing: Set<String>) -> MarkdownPreviewWindowController.FinderReveal? {
-            MarkdownPreviewWindowController.finderReveal(for: document, exists: { existing.contains($0) })
+        func reveal(existing: Set<String>) -> PreviewWindowSupport.FinderReveal? {
+            PreviewWindowSupport.finderReveal(for: document, exists: { existing.contains($0) })
         }
         XCTAssertEqual(reveal(existing: ["/proj/docs/spec.md", "/proj/docs"]), .selectFile(document))
         // Deleted while previewed: the folder it lived in.

@@ -279,4 +279,68 @@ final class PDFPreviewWindowControllerTests: XCTestCase {
         XCTAssertTrue(swapped, "7-page version")
         XCTAssertNil(controller.bannerText)
     }
+
+    // MARK: - Links and Finder
+
+    func test_linkRoute_sendsWebLinksToBrowser() {
+        for text in ["https://example.com/a", "http://x.org", "mailto:a@b.c"] {
+            let url = URL(string: text)!
+            XCTAssertEqual(PDFPreviewWindowController.linkRoute(for: url, isRegularFile: { _ in false }), .openExternally(url), text)
+        }
+    }
+
+    func test_linkRoute_opensMarkdownFileInPreview() {
+        XCTAssertEqual(
+            PDFPreviewWindowController.linkRoute(for: URL(string: "file:///proj/docs/a.md")!, isRegularFile: { $0 == "/proj/docs/a.md" }),
+            .preview(URL(fileURLWithPath: "/proj/docs/a.md").resolvingSymlinksInPath())
+        )
+    }
+
+    func test_linkRoute_ignoresAppsScriptsAndMissingFiles() {
+        let existing: Set<String> = ["/Applications/Calculator.app", "/proj/run.command"]
+        for text in [
+            "file:///Applications/Calculator.app", "file:///proj/run.command", "file:///proj/none.pdf",
+            "other.pdf", "ftp://x/y", "javascript:alert(1)",
+        ] {
+            let url = URL(string: text)!
+            XCTAssertEqual(PDFPreviewWindowController.linkRoute(for: url, isRegularFile: { existing.contains($0) }), .ignore, text)
+        }
+    }
+
+    func test_pdfViewDelegateIsController() throws {
+        let controller = openPreview(try makeReport(makePDFData(pages: 1)))
+        defer { controller.close() }
+        XCTAssertTrue(controller.pdfView.delegate === controller)
+    }
+
+    func test_contextMenuEndsWithShowInFinder() throws {
+        let controller = openPreview(try makeReport(makePDFData(pages: 1)))
+        defer { controller.close() }
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: controller.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ))
+        let menu = try XCTUnwrap(controller.pdfView.menu(for: event))
+        let item = try XCTUnwrap(menu.items.last)
+        XCTAssertEqual(item.title, "Show in Finder")
+        XCTAssertEqual(item.action, #selector(PDFPreviewWindowController.showInFinder(_:)))
+        XCTAssertTrue(item.target === controller)
+        if menu.items.count > 1 {
+            XCTAssertTrue(menu.items[menu.items.count - 2].isSeparatorItem)
+        }
+    }
+
+    func test_showInFinderDisabledOnceFolderIsGone() throws {
+        let url = try makeReport(makePDFData(pages: 1))
+        let controller = openPreview(url)
+        defer { controller.close() }
+        let item = NSMenuItem(
+            title: "Show in Finder",
+            action: #selector(PDFPreviewWindowController.showInFinder(_:)),
+            keyEquivalent: ""
+        )
+        XCTAssertTrue(controller.validateMenuItem(item))
+        try FileManager.default.removeItem(at: url.deletingLastPathComponent())
+        XCTAssertFalse(controller.validateMenuItem(item))
+    }
 }

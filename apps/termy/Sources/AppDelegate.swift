@@ -575,7 +575,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         menu.addItem(.separator())
 
-        // No target: the key markdown preview answers it, so the item is
+        // No target: the key preview (markdown or PDF) answers it, so the item is
         // disabled while a terminal window is key.
         let showInFinder = menu.addItem(
             withTitle: "Show in Finder",
