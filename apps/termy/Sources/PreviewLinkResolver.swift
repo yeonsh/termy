@@ -97,6 +97,100 @@ enum PreviewLinkResolver {
         return path
     }
 
+    /// SwiftTerm's path regex never takes `(` or `)` into a path, so
+    /// `…/전략 (보강판) 2026-10-20.pdf` arrives cut off at `…/전략`. Finds the
+    /// file the screen actually names: an entry next to the cut-off path
+    /// whose name starts with its last component and whose rest
+    /// `followingText` (the screen text after the link) spells out,
+    /// whitespace ignored because a wrap adds indentation or drops the space
+    /// it broke at. A relative path tries `baseDirectories` in order; within
+    /// one folder the longest matching name wins.
+    // gstack-shortcut(dec-81b5e233): click-only fix, SwiftTerm's hover underline still stops at "(", upgrade when SwiftTerm's path regex is patched or bumped
+    static func resolveCutOff(
+        linkText: String,
+        followingText: String,
+        baseDirectories: [String],
+        homeDirectory: String,
+        listDirectory: (String) -> [String],
+        isRegularFile: (String) -> Bool
+    ) -> URL? {
+        var text = Substring(linkText.trimmingCharacters(in: .whitespacesAndNewlines))
+        while let first = text.first, leadingPunctuation.contains(first) {
+            text = text.dropFirst()
+        }
+        // Schemed links arrive whole (OSC 8 or SwiftTerm's URL branch).
+        guard !text.contains("://"), !text.lowercased().hasPrefix("file:"),
+              let slash = text.lastIndex(of: "/")
+        else { return nil }
+        let folder = String(text[...slash])
+        let namePrefix = String(text[text.index(after: slash)...])
+
+        let folders: [String]
+        if folder.hasPrefix("~/") {
+            folders = [(homeDirectory as NSString).appendingPathComponent(String(folder.dropFirst(2)))]
+        } else if folder.hasPrefix("/") {
+            folders = [folder]
+        } else {
+            var seen = Set<String>()
+            folders = baseDirectories
+                .filter { !$0.isEmpty && seen.insert($0).inserted }
+                .map { ($0 as NSString).appendingPathComponent(folder) }
+        }
+
+        let following = Substring(followingText)
+        for folder in folders {
+            let directory = (folder as NSString).standardizingPath
+            var best: String?
+            for name in listDirectory(directory) where name.hasPrefix(namePrefix) {
+                let rest = name.dropFirst(namePrefix.count)
+                guard !rest.isEmpty,
+                      name.count > (best?.count ?? 0),
+                      PreviewKind(fileURL: URL(fileURLWithPath: name)) != nil,
+                      let end = endOfMatchIgnoringWhitespace(rest, in: following),
+                      nameEnds(in: following, at: end),
+                      isRegularFile((directory as NSString).appendingPathComponent(name))
+                else { continue }
+                best = name
+            }
+            if let best {
+                return URL(fileURLWithPath: (directory as NSString).appendingPathComponent(best))
+                    .resolvingSymlinksInPath()
+            }
+        }
+        return nil
+    }
+
+    /// Where `needle` ends in `text` when `text` starts with it once
+    /// whitespace is dropped from both; nil when it doesn't.
+    static func endOfMatchIgnoringWhitespace<S: StringProtocol>(_ needle: S, in text: Substring) -> String.Index? {
+        var n = needle.startIndex
+        var t = text.startIndex
+        while true {
+            while n < needle.endIndex, needle[n].isWhitespace { n = needle.index(after: n) }
+            guard n < needle.endIndex else { return t }
+            while t < text.endIndex, text[t].isWhitespace { t = text.index(after: t) }
+            guard t < text.endIndex, text[t] == needle[n] else { return nil }
+            n = needle.index(after: n)
+            t = text.index(after: t)
+        }
+    }
+
+    /// True when a file name can end at `index`: the end of the text or
+    /// anything but an ASCII file-name character. A `.` counts as an end
+    /// only when no letter or digit follows (a full stop, not `.bak`).
+    private static func nameEnds(in text: Substring, at index: String.Index) -> Bool {
+        guard index < text.endIndex else { return true }
+        func isNameCharacter(_ c: Character) -> Bool {
+            c.isASCII && (c.isLetter || c.isNumber || "_-/".contains(c))
+        }
+        let next = text[index]
+        if next == "." {
+            let after = text.index(after: index)
+            return after == text.endIndex || !isNameCharacter(text[after])
+        }
+        return !isNameCharacter(next)
+    }
+
     /// `isRegularFile` for real use: `path`, symlinks followed, is a
     /// regular file. A FIFO or device named `x.md` would block the
     /// synchronous read on the main thread.

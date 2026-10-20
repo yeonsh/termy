@@ -553,6 +553,60 @@ final class TermyTerminalViewTests: XCTestCase {
         )
     }
 
+    // MARK: - Paths SwiftTerm cuts at "("
+
+    private let parenReport = "/r/NetDrive 시장 탈환 전략 (보강판) 2026-10-20.pdf"
+    private let notesReport = "/r/NetDrive 시장 탈환 전략 보강판 개정 노트 2026-10-20.pdf"
+
+    @MainActor
+    private func screenClickAction(_ view: TermyTerminalView, row: Int, col: Int) -> LinkClickAction? {
+        let files: Set<String> = [parenReport, notesReport]
+        return view.linkClickAction(
+            atScreen: Position(col: col, row: row),
+            baseDirectories: ["/proj"],
+            homeDirectory: "/Users/me",
+            isRegularFile: { files.contains($0) },
+            listDirectory: { $0 == "/r" ? files.map { ($0 as NSString).lastPathComponent } : [] }
+        )
+    }
+
+    private func preview(_ path: String) -> LinkClickAction {
+        .preview(URL(fileURLWithPath: path).resolvingSymlinksInPath())
+    }
+
+    /// SwiftTerm's link ends at "전략"; the click still opens the file the
+    /// line names, not the sibling that shares the cut-off prefix.
+    @MainActor
+    func test_cmdClickOnPathWithParentheses_opensTheFileTheLineNames() {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 1600, height: 200))
+        view.getTerminal().resize(cols: 200, rows: 10)
+        view.feed(text: "\(parenReport)\r\n\(notesReport)")
+
+        XCTAssertEqual(screenClickAction(view, row: 0, col: 10), preview(parenReport))
+        XCTAssertEqual(screenClickAction(view, row: 1, col: 10), preview(notesReport))
+        XCTAssertNil(screenClickAction(view, row: 5, col: 10), "no link there")
+    }
+
+    @MainActor
+    func test_cmdClickOnSoftWrappedPathWithParentheses_opensTheFile() {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 200))
+        view.getTerminal().resize(cols: 30, rows: 10)
+        view.feed(text: parenReport)
+
+        XCTAssertEqual(screenClickAction(view, row: 0, col: 5), preview(parenReport))
+    }
+
+    /// Ink breaks the line at the space before "2026", drops that space, and
+    /// indents the continuation.
+    @MainActor
+    func test_cmdClickOnInkWrappedPathWithParentheses_opensTheFile() {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 200))
+        view.getTerminal().resize(cols: 40, rows: 10)
+        view.feed(text: "  /r/NetDrive 시장 탈환 전략 (보강판)\r\u{1b}[1B\u{1b}[2C2026-10-20.pdf")
+
+        XCTAssertEqual(screenClickAction(view, row: 0, col: 5), preview(parenReport))
+    }
+
     // MARK: - IME marked-text overlay
 
     /// Claude Code prompt `> 하하 호호` with the cursor moved back to the

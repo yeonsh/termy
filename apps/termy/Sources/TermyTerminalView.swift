@@ -269,16 +269,15 @@ final class TermyTerminalView: LocalProcessTerminalView {
     }
 
     private func openLinkUnderMouse(windowLocation: NSPoint) -> Bool {
-        guard let pos = cellPosition(at: windowLocation) else { return false }
-        guard let raw = terminal.link(at: .screen(pos), mode: .explicitAndImplicit) else {
-            return false
-        }
-        let action = Self.linkClickAction(
-            for: raw,
-            baseDirectories: previewBaseDirectories?() ?? [],
-            homeDirectory: NSHomeDirectory(),
-            isRegularFile: PreviewLinkResolver.fileExistsAsRegularFile
-        )
+        guard let pos = cellPosition(at: windowLocation),
+              let action = linkClickAction(
+                atScreen: pos,
+                baseDirectories: previewBaseDirectories?() ?? [],
+                homeDirectory: NSHomeDirectory(),
+                isRegularFile: PreviewLinkResolver.fileExistsAsRegularFile,
+                listDirectory: { (try? FileManager.default.contentsOfDirectory(atPath: $0)) ?? [] }
+              )
+        else { return false }
         switch action {
         case .preview(let url):
             onOpenPreviewFile?(url)
@@ -293,6 +292,97 @@ final class TermyTerminalView: LocalProcessTerminalView {
         case .ignore:
             return false
         }
+    }
+
+    /// What a Cmd+click on screen cell `pos` does; nil when there's no link
+    /// there. A link that names no file may be a path SwiftTerm cut short
+    /// at a "(" — the screen text after it gets a second look.
+    func linkClickAction(
+        atScreen pos: Position,
+        baseDirectories: [String],
+        homeDirectory: String,
+        isRegularFile: (String) -> Bool,
+        listDirectory: (String) -> [String]
+    ) -> LinkClickAction? {
+        guard let raw = terminal.link(at: .screen(pos), mode: .explicitAndImplicit) else {
+            return nil
+        }
+        let action = Self.linkClickAction(
+            for: raw,
+            baseDirectories: baseDirectories,
+            homeDirectory: homeDirectory,
+            isRegularFile: isRegularFile
+        )
+        switch action {
+        case .preview, .openURL:
+            return action
+        case .beep, .ignore:
+            guard let following = screenText(after: raw, at: pos),
+                  let url = PreviewLinkResolver.resolveCutOff(
+                    linkText: raw,
+                    followingText: following,
+                    baseDirectories: baseDirectories,
+                    homeDirectory: homeDirectory,
+                    listDirectory: listDirectory,
+                    isRegularFile: isRegularFile
+                  )
+            else { return action }
+            return .preview(url)
+        }
+    }
+
+    /// The screen text after `linkText`, the link SwiftTerm found at `pos`,
+    /// to the end of the rows a wrap joined to that row: soft-wrapped rows
+    /// as they are, and after a line break a row continuing one that
+    /// reaches the right edge (Ink's hard wrap). nil when the link text
+    /// isn't there around the click.
+    private func screenText(after linkText: String, at pos: Position) -> String? {
+        let reach = 4
+        func continues(below upper: Int) -> Bool {
+            guard let upperLine = terminal.getLine(row: upper),
+                  let lowerLine = terminal.getLine(row: upper + 1)
+            else { return false }
+            if lowerLine.isWrapped { return true }
+            let cols = terminal.cols
+            return lowerLine.getTrimmedLength() > 0
+                && upperLine.getTrimmedLength() >= cols - max(2, cols / 5)
+        }
+        var firstRow = pos.row
+        while firstRow > max(0, pos.row - reach), continues(below: firstRow - 1) { firstRow -= 1 }
+        var lastRow = pos.row
+        while lastRow < pos.row + reach, continues(below: lastRow) { lastRow += 1 }
+
+        var text = ""
+        var clickOffset = 0
+        for row in firstRow...lastRow {
+            guard let line = terminal.getLine(row: row) else { break }
+            if row > firstRow && !line.isWrapped { text += "\n" }
+            if row == pos.row {
+                // The right half of a wide glyph belongs to the glyph.
+                var col = min(pos.col, line.count)
+                if col > 0, col < line.count, line[col - 1].width == 2 { col -= 1 }
+                clickOffset = text.count
+                    + line.translateToString(endCol: col, skipNullCellsFollowingWide: true).count
+            }
+            text += line.translateToString(trimRight: true, skipNullCellsFollowingWide: true)
+                .replacingOccurrences(of: "\u{0}", with: " ")
+        }
+
+        let chars = Substring(text)
+        guard let first = linkText.first(where: { !$0.isWhitespace }) else { return nil }
+        var start = chars.startIndex
+        var offset = 0
+        while start < chars.endIndex {
+            if chars[start] == first,
+               let end = PreviewLinkResolver.endOfMatchIgnoringWhitespace(linkText, in: chars[start...]),
+               offset <= clickOffset,
+               clickOffset < offset + chars.distance(from: start, to: end) {
+                return String(chars[end...])
+            }
+            start = chars.index(after: start)
+            offset += 1
+        }
+        return nil
     }
 
     /// Markdown and PDF files first (`file://` ones included, so they preview

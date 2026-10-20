@@ -200,4 +200,102 @@ final class PreviewLinkResolverTests: XCTestCase {
         XCTAssertNil(PreviewKind(fileURL: URL(fileURLWithPath: "/x/d.txt")))
         XCTAssertNil(PreviewKind(fileURL: URL(fileURLWithPath: "/x/Makefile")))
     }
+
+    // MARK: - Links SwiftTerm cut short
+
+    private let reportDir = "/r/2026-10-20-netdrive"
+    private let parenReport = "NetDrive 시장 탈환 전략 (보강판) 2026-10-20.pdf"
+    private let notesReport = "NetDrive 시장 탈환 전략 보강판 개정 노트 2026-10-20.pdf"
+
+    private func resolveCutOff(
+        _ link: String,
+        following: String,
+        bases: [String] = ["/proj"],
+        listing: [String: [String]],
+        existing: Set<String>? = nil
+    ) -> URL? {
+        let files = existing ?? Set(listing.flatMap { dir, names in names.map { "\(dir)/\($0)" } })
+        return PreviewLinkResolver.resolveCutOff(
+            linkText: link,
+            followingText: following,
+            baseDirectories: bases,
+            homeDirectory: home,
+            listDirectory: { listing[$0] ?? [] },
+            isRegularFile: { files.contains($0) }
+        )
+    }
+
+    /// SwiftTerm stops a path at `(`; the rest of the name is on screen.
+    func test_resolveCutOff_findsTheParenthesizedName() {
+        XCTAssertEqual(
+            resolveCutOff(
+                "\(reportDir)/NetDrive 시장 탈환 전략",
+                following: " (보강판) 2026-10-20.pdf",
+                listing: [reportDir: [parenReport, notesReport, "other.pdf"]]
+            ),
+            URL(fileURLWithPath: "\(reportDir)/\(parenReport)").resolvingSymlinksInPath()
+        )
+    }
+
+    /// A sibling sharing the cut-off prefix must not win just because it exists.
+    func test_resolveCutOff_picksTheNameTheTextSpellsOut() {
+        XCTAssertNil(resolveCutOff(
+            "\(reportDir)/NetDrive 시장 탈환 전략",
+            following: " (초안) 2026-10-20.pdf",
+            listing: [reportDir: [parenReport, notesReport]]
+        ))
+    }
+
+    /// Wraps add indentation or drop the space they broke at.
+    func test_resolveCutOff_ignoresWhitespaceFromWraps() {
+        let expected = URL(fileURLWithPath: "\(reportDir)/\(parenReport)").resolvingSymlinksInPath()
+        for following in [" (보강판)\n  2026-10-20.pdf", "(보강판)2026-10-\n  20.pdf"] {
+            XCTAssertEqual(
+                resolveCutOff("\(reportDir)/NetDrive 시장 탈환 전략", following: following, listing: [reportDir: [parenReport]]),
+                expected,
+                following
+            )
+        }
+    }
+
+    func test_resolveCutOff_needsTheNameToEndThere() {
+        let listing = ["/proj/docs": ["a (1).pdf"]]
+        let expected = URL(fileURLWithPath: "/proj/docs/a (1).pdf").resolvingSymlinksInPath()
+        XCTAssertEqual(resolveCutOff("docs/a", following: " (1).pdf에 저장했습니다.", listing: listing), expected)
+        XCTAssertEqual(resolveCutOff("docs/a", following: " (1).pdf.", listing: listing), expected)
+        XCTAssertEqual(resolveCutOff("docs/a", following: " (1).pdf", listing: listing), expected)
+        XCTAssertNil(resolveCutOff("docs/a", following: " (1).pdfx", listing: listing))
+        XCTAssertNil(resolveCutOff("docs/a", following: " (1).pdf.bak", listing: listing))
+    }
+
+    func test_resolveCutOff_triesBaseDirectoriesInOrder() {
+        XCTAssertEqual(
+            resolveCutOff(
+                "docs/a",
+                following: " (draft).md",
+                bases: ["/one", "/two"],
+                listing: ["/two/docs": ["a (draft).md"]]
+            ),
+            URL(fileURLWithPath: "/two/docs/a (draft).md").resolvingSymlinksInPath()
+        )
+    }
+
+    func test_resolveCutOff_linkEndingAtAFolder() {
+        XCTAssertEqual(
+            resolveCutOff("~/notes/", following: "(draft) plan.md", listing: ["/Users/me/notes": ["(draft) plan.md"]]),
+            URL(fileURLWithPath: "/Users/me/notes/(draft) plan.md").resolvingSymlinksInPath()
+        )
+    }
+
+    func test_resolveCutOff_onlyPreviewableRegularFiles() {
+        XCTAssertNil(resolveCutOff("docs/a", following: " (1).txt", listing: ["/proj/docs": ["a (1).txt"]]))
+        // Listed but not a regular file (a folder named like one).
+        XCTAssertNil(resolveCutOff("docs/a", following: " (1).pdf", listing: ["/proj/docs": ["a (1).pdf"]], existing: []))
+    }
+
+    func test_resolveCutOff_leavesURLsAlone() {
+        let listing = ["/proj/docs": ["a (1).pdf"]]
+        XCTAssertNil(resolveCutOff("https://example.com/docs/a", following: " (1).pdf", listing: listing))
+        XCTAssertNil(resolveCutOff("file:///proj/docs/a", following: " (1).pdf", listing: listing))
+    }
 }
