@@ -296,6 +296,13 @@ final class PDFPreviewWindowControllerTests: XCTestCase {
         )
     }
 
+    func test_linkRoute_opensPdfFileInPreview() {
+        XCTAssertEqual(
+            PDFPreviewWindowController.linkRoute(for: URL(string: "file:///proj/out/other.pdf")!, isRegularFile: { $0 == "/proj/out/other.pdf" }),
+            .preview(URL(fileURLWithPath: "/proj/out/other.pdf").resolvingSymlinksInPath())
+        )
+    }
+
     func test_linkRoute_ignoresAppsScriptsAndMissingFiles() {
         let existing: Set<String> = ["/Applications/Calculator.app", "/proj/run.command"]
         for text in [

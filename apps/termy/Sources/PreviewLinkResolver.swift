@@ -1,8 +1,8 @@
 // PreviewLinkResolver.swift
 //
-// Decides whether a Cmd+clicked terminal link names a markdown file termy
+// Decides whether a Cmd+clicked terminal link names a markdown or PDF file termy
 // should preview, and which file on disk that is. SwiftTerm hands over the
-// raw matched text — `docs/x.md`, `./x.md:12`, `file:///…/x.md`, often with
+// raw matched text — `docs/x.md`, `./x.pdf:12`, `file:///…/x.md`, often with
 // prose punctuation or the rest of a Korean sentence (`x.md에 저장했습니다.`)
 // stuck to it — and a relative path is relative to
 // whatever cwd the agent printed it from, so callers pass candidate base
@@ -11,21 +11,21 @@
 import Foundation
 
 enum PreviewLinkResolution: Equatable {
-    /// Not a markdown link; the caller falls back to its URL handling.
+    /// Not a markdown or PDF link; the caller falls back to its URL handling.
     case notPreviewable
-    /// Shaped like a markdown path, but no such file exists.
+    /// Shaped like a markdown or PDF path, but no such file exists.
     case missing
-    /// The markdown file to open, symlinks resolved.
+    /// The markdown or PDF file to open, symlinks resolved.
     case file(URL)
 }
 
 enum PreviewLinkResolver {
-    static let extensions: Set<String> = ["md", "markdown"]
+    static let extensions: Set<String> = ["md", "markdown", "pdf"]
 
     private static let leadingPunctuation: Set<Character> = ["(", "[", "`", "'", "\""]
     private static let trailingPunctuation: Set<Character> = [".", ",", ";", ":", "!", "?", ")", "]", "`", "'", "\""]
 
-    /// Resolves `linkText` to a markdown file. A relative path is tried
+    /// Resolves `linkText` to a markdown or PDF file. A relative path is tried
     /// against `baseDirectories` in order and the first base holding the
     /// file wins, so callers list the most likely base first.
     static func resolve(
@@ -57,7 +57,7 @@ enum PreviewLinkResolver {
         return .missing
     }
 
-    /// The path in `linkText` when it names a markdown file: surrounding
+    /// The path in `linkText` when it names a markdown or PDF file: surrounding
     /// punctuation, `file://`, `#fragment`, `:line[:col]` and text glued
     /// after the extension removed. nil for any other extension and for
     /// web URLs.
@@ -85,10 +85,10 @@ enum PreviewLinkResolver {
         if !hasMarkdownExtension(path) {
             // SwiftTerm's path regex keeps matching into Hangul particles
             // (`\w`), `**`, and trailing words ending in `.`; cut at the
-            // first .md/.markdown that isn't followed by another file-name
+            // first .md/.markdown/.pdf that isn't followed by another file-name
             // character. A glued `:12에서` goes with the rest.
             guard let range = path.range(
-                of: #"^.*?\.(md|markdown)(?![A-Za-z0-9._/-])"#,
+                of: #"^.*?\.(md|markdown|pdf)(?![A-Za-z0-9._/-])"#,
                 options: [.regularExpression, .caseInsensitive]
             ) else { return nil }
             path = String(path[range])

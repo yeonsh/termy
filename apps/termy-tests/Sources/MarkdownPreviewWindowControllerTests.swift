@@ -59,6 +59,13 @@ final class MarkdownPreviewWindowControllerTests: XCTestCase {
         )
     }
 
+    func test_route_opensPdfFileInPreview() {
+        XCTAssertEqual(
+            route(.linkActivated, "file:///proj/out/report.pdf", existing: ["/proj/out/report.pdf"]),
+            .preview(URL(fileURLWithPath: "/proj/out/report.pdf").resolvingSymlinksInPath())
+        )
+    }
+
     func test_route_cancelsEverythingElse() {
         XCTAssertEqual(route(.linkActivated, "file:///proj/docs/missing.md"), .cancel)
         XCTAssertEqual(route(.linkActivated, "file:///proj/src/main.swift", existing: ["/proj/src/main.swift"]), .cancel)

@@ -10,7 +10,7 @@
 // consumed only when we actually open a URL; otherwise it propagates
 // normally so selection, mouse-reporting, etc. keep working.
 //
-// Cmd+click on a markdown file path (`docs/spec.md`, `./x.md:12`, …) opens
+// Cmd+click on a markdown or PDF file path (`docs/spec.md`, `./x.pdf:12`, …) opens
 // it in a preview window instead: `linkClickAction` resolves the path
 // against the pane's cwd candidates and the Pane opens the preview.
 
@@ -157,12 +157,12 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// could run its multi-click selection code.
     var onClickInBounds: (() -> Void)?
 
-    /// Directories a relative markdown path is resolved against, most
+    /// Directories a relative markdown or PDF path is resolved against, most
     /// likely first. Set by Pane; without it only absolute and `~/` paths
     /// resolve.
     var previewBaseDirectories: (() -> [String])?
 
-    /// Opens a resolved markdown file in a preview window. Set by Pane.
+    /// Opens a resolved markdown or PDF file in a preview window. Set by Pane.
     var onOpenPreviewFile: ((URL) -> Void)?
 
     /// Pane writes the focus-state caret color here instead of mutating
@@ -295,7 +295,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
         }
     }
 
-    /// Markdown files first (`file://` ones included, so they preview
+    /// Markdown and PDF files first (`file://` ones included, so they preview
     /// instead of launching the default app), then schemed URLs; any
     /// other path stays a no-op.
     nonisolated static func linkClickAction(
@@ -326,7 +326,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// (1483b09) that default opener also opens any existing file path —
     /// launching it outright if it's an app or script. Hold SwiftTerm's path
     /// to the same scheme allowlist so a path-shaped click stays a no-op;
-    /// markdown paths never get here because the monitor consumes them.
+    /// markdown and PDF paths never get here because the monitor consumes them.
     override func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
         let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = Self.openableURL(from: trimmed) else { return }

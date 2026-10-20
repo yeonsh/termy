@@ -457,6 +457,22 @@ final class TermyTerminalViewTests: XCTestCase {
         XCTAssertEqual(clickAction("docs/none.md"), .beep)
     }
 
+    func test_linkClickAction_existingPdfOpensPreview() {
+        XCTAssertEqual(
+            clickAction("out/r.pdf", existing: ["/proj/out/r.pdf"]),
+            .preview(URL(fileURLWithPath: "/proj/out/r.pdf").resolvingSymlinksInPath())
+        )
+    }
+
+    func test_linkClickAction_missingPdfBeeps() {
+        XCTAssertEqual(clickAction("out/none.pdf"), .beep)
+    }
+
+    func test_linkClickAction_webURLEndingInPdfOpensBrowser() {
+        let link = "https://arxiv.org/pdf/2401.00001.pdf"
+        XCTAssertEqual(clickAction(link), .openURL(URL(string: link)!))
+    }
+
     func test_linkClickAction_webURLOpensBrowser() {
         XCTAssertEqual(clickAction("https://example.com"), .openURL(URL(string: "https://example.com")!))
     }
@@ -502,6 +518,29 @@ final class TermyTerminalViewTests: XCTestCase {
         let link = try XCTUnwrap(terminal.link(at: .screen(Position(col: 12, row: 0)), mode: .explicitAndImplicit))
         XCTAssertTrue(link.hasPrefix("docs/superpowers/specs/x-design.md"), link)
         let expected = "/proj/docs/superpowers/specs/x-design.md"
+        XCTAssertEqual(
+            TermyTerminalView.linkClickAction(
+                for: link,
+                baseDirectories: ["/proj"],
+                homeDirectory: "/Users/me",
+                isRegularFile: { $0 == expected }
+            ),
+            .preview(URL(fileURLWithPath: expected).resolvingSymlinksInPath()),
+            "link text: \(link)"
+        )
+    }
+
+    @MainActor
+    func test_cmdClickOnPdfPathInKoreanSentence_opensPreview() throws {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 200))
+        let terminal = view.getTerminal()
+        terminal.resize(cols: 100, rows: 10)
+        view.feed(text: "보고서를 out/report.pdf에 저장했습니다.")
+
+        // "보고서를 " takes 9 columns, so column 14 is inside the path.
+        let link = try XCTUnwrap(terminal.link(at: .screen(Position(col: 14, row: 0)), mode: .explicitAndImplicit))
+        XCTAssertTrue(link.hasPrefix("out/report.pdf"), link)
+        let expected = "/proj/out/report.pdf"
         XCTAssertEqual(
             TermyTerminalView.linkClickAction(
                 for: link,

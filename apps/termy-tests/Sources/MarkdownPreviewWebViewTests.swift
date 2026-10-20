@@ -69,7 +69,7 @@ final class MarkdownPreviewWebViewTests: XCTestCase {
 
     // MARK: previewFiles(in:isRegularFile:)
 
-    func test_markdownFiles_keepsExistingMarkdownFilesOnly() {
+    func test_previewFiles_keepsExistingPreviewFilesOnly() {
         let existing: Set<String> = ["/proj/a.md", "/proj/b.txt", "/proj/c d.markdown"]
         let result = MarkdownPreviewWebView.previewFiles(
             in: [
@@ -84,6 +84,21 @@ final class MarkdownPreviewWebViewTests: XCTestCase {
         XCTAssertEqual(result, [
             URL(fileURLWithPath: "/proj/a.md").resolvingSymlinksInPath(),
             URL(fileURLWithPath: "/proj/c d.markdown").resolvingSymlinksInPath(),
+        ])
+    }
+
+    func test_previewFiles_includesPdf() {
+        let result = MarkdownPreviewWebView.previewFiles(
+            in: [
+                URL(fileURLWithPath: "/proj/a.md"),
+                URL(fileURLWithPath: "/proj/b.pdf"),
+                URL(fileURLWithPath: "/proj/c.txt"),
+            ],
+            isRegularFile: { _ in true }
+        )
+        XCTAssertEqual(result, [
+            URL(fileURLWithPath: "/proj/a.md").resolvingSymlinksInPath(),
+            URL(fileURLWithPath: "/proj/b.pdf").resolvingSymlinksInPath(),
         ])
     }
 

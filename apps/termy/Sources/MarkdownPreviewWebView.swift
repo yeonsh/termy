@@ -1,7 +1,7 @@
 // MarkdownPreviewWebView.swift
 //
 // The preview's WKWebView, plus a hook for the controller's context-menu
-// items and one job WebKit won't do: open markdown files dropped onto it.
+// items and one job WebKit won't do: open markdown and PDF files dropped onto it.
 // Apps built against current SDKs get WKWebView's
 // `DropToNavigateDisallowedByDefault` behavior — the "load" drop action is
 // masked off — so a dropped file never becomes a navigation that
@@ -12,7 +12,7 @@ import AppKit
 import WebKit
 
 final class MarkdownPreviewWebView: WKWebView {
-    /// Opens dropped markdown files. Set by the preview controller.
+    /// Opens dropped markdown and PDF files. Set by the preview controller.
     var onDropPreviewFiles: (([URL]) -> Void)?
     /// Adds items to WebKit's context menu. Set by the preview controller.
     var onWillOpenMenu: ((NSMenu) -> Void)?
@@ -40,9 +40,9 @@ final class MarkdownPreviewWebView: WKWebView {
         guard let files = Self.fileURLs(on: sender.draggingPasteboard) else {
             return super.performDragOperation(sender)
         }
-        let markdown = previewFiles(in: files)
-        guard !markdown.isEmpty else { return false }
-        onDropPreviewFiles?(markdown)
+        let previewable = previewFiles(in: files)
+        guard !previewable.isEmpty else { return false }
+        onDropPreviewFiles?(previewable)
         return true
     }
 
@@ -56,7 +56,7 @@ final class MarkdownPreviewWebView: WKWebView {
         return urls
     }
 
-    /// The dropped files that are markdown files on disk, symlinks resolved.
+    /// The dropped files that are markdown or PDF files on disk, symlinks resolved.
     nonisolated static func previewFiles(in urls: [URL], isRegularFile: (String) -> Bool) -> [URL] {
         urls.compactMap { url in
             guard url.isFileURL else { return nil }

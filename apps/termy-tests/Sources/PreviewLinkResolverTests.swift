@@ -86,7 +86,7 @@ final class PreviewLinkResolverTests: XCTestCase {
         XCTAssertEqual(resolve("notes.MARKDOWN을", existing: ["/proj/notes.MARKDOWN"]), file("/proj/notes.MARKDOWN"))
     }
 
-    func test_nonMarkdownPathIsNotMarkdown() {
+    func test_otherPathIsNotPreviewable() {
         XCTAssertEqual(resolve("src/main.swift", existing: ["/proj/src/main.swift"]), .notPreviewable)
         XCTAssertEqual(resolve("docs/a.md.bak", existing: []), .notPreviewable)
         XCTAssertEqual(resolve("README.md.bak", existing: []), .notPreviewable)
@@ -94,7 +94,35 @@ final class PreviewLinkResolverTests: XCTestCase {
         XCTAssertEqual(resolve("docs/a.md-old/b.txt", existing: []), .notPreviewable)
     }
 
-    func test_webURLEndingInMdIsNotMarkdown() {
+    func test_pdfPaths() {
+        let expected = file("/proj/out/report.pdf")
+        let existing: Set<String> = ["/proj/out/report.pdf"]
+        for text in [
+            "out/report.pdf", "./out/report.pdf:3", "file:///proj/out/report.pdf", "`out/report.pdf`",
+            "(out/report.pdf).", "out/report.pdf에 저장했습니다.", "out/report.pdf를",
+        ] {
+            XCTAssertEqual(resolve(text, existing: existing), expected, text)
+        }
+    }
+
+    func test_uppercasePdfExtension() {
+        XCTAssertEqual(resolve("out/REPORT.PDF", existing: ["/proj/out/REPORT.PDF"]), file("/proj/out/REPORT.PDF"))
+    }
+
+    func test_webURLEndingInPdfIsNotPreviewable() {
+        XCTAssertEqual(resolve("https://arxiv.org/pdf/2401.00001.pdf", existing: []), .notPreviewable)
+    }
+
+    func test_pdfLookalikesAreNotPreviewable() {
+        XCTAssertEqual(resolve("out/report.pdfx", existing: ["/proj/out/report.pdfx"]), .notPreviewable)
+        XCTAssertEqual(resolve("out/report.pdf.bak", existing: ["/proj/out/report.pdf.bak"]), .notPreviewable)
+    }
+
+    func test_missingPdf() {
+        XCTAssertEqual(resolve("out/none.pdf", existing: []), .missing)
+    }
+
+    func test_webURLEndingInMdIsNotPreviewable() {
         XCTAssertEqual(resolve("https://github.com/o/r/blob/main/README.md", existing: []), .notPreviewable)
     }
 
