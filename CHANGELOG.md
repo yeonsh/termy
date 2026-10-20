@@ -6,6 +6,11 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+- Cmd+click a PDF path in a pane to open it in a termy preview window,
+  just like Markdown files. When an agent regenerates the PDF, the preview
+  updates and stays on the page and zoom you were reading; while the file
+  is still being written, the previous version stays on screen.
+
 ## 0.2.16 — 2026-10-19
 
 - OpenCode now works with termy alongside Claude Code, Codex and
