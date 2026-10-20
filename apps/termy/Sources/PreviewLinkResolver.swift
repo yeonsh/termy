@@ -122,3 +122,17 @@ enum PreviewLinkResolver {
         return String(result)
     }
 }
+
+/// Which preview window a file opens in, by extension.
+enum PreviewKind: Equatable {
+    case markdown
+    case pdf
+
+    init?(fileURL: URL) {
+        switch fileURL.pathExtension.lowercased() {
+        case "md", "markdown": self = .markdown
+        case "pdf": self = .pdf
+        default: return nil
+        }
+    }
+}

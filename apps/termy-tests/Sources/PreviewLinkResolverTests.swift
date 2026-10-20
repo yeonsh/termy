@@ -164,4 +164,12 @@ final class PreviewLinkResolverTests: XCTestCase {
         XCTAssertTrue(PreviewLinkResolver.fileExistsAsRegularFile(link.path))
         XCTAssertFalse(PreviewLinkResolver.fileExistsAsRegularFile(dir.appendingPathComponent("none.md").path))
     }
+
+    func test_previewKind() {
+        XCTAssertEqual(PreviewKind(fileURL: URL(fileURLWithPath: "/x/a.md")), .markdown)
+        XCTAssertEqual(PreviewKind(fileURL: URL(fileURLWithPath: "/x/b.MARKDOWN")), .markdown)
+        XCTAssertEqual(PreviewKind(fileURL: URL(fileURLWithPath: "/x/c.Pdf")), .pdf)
+        XCTAssertNil(PreviewKind(fileURL: URL(fileURLWithPath: "/x/d.txt")))
+        XCTAssertNil(PreviewKind(fileURL: URL(fileURLWithPath: "/x/Makefile")))
+    }
 }

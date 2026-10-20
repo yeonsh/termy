@@ -36,10 +36,22 @@ final class PreviewManagerTests: XCTestCase {
         return url
     }
 
+    private func makePDF(_ name: String) throws -> URL {
+        let data = NSMutableData()
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let context = try XCTUnwrap(CGContext(consumer: try XCTUnwrap(CGDataConsumer(data: data as CFMutableData)), mediaBox: &box, nil))
+        context.beginPDFPage(nil)
+        context.endPDFPage()
+        context.closePDF()
+        let url = dir.appendingPathComponent(name)
+        try (data as Data).write(to: url)
+        return url
+    }
+
     func test_openingSameFileTwiceReusesWindow() throws {
         let url = try makeFile("a.md")
-        let first = manager.open(url)
-        let second = manager.open(url)
+        let first = try XCTUnwrap(manager.open(url))
+        let second = try XCTUnwrap(manager.open(url))
         XCTAssertTrue(first === second)
         XCTAssertEqual(manager.controllers.count, 1)
     }
@@ -61,7 +73,7 @@ final class PreviewManagerTests: XCTestCase {
     }
 
     func test_closingWindowForgetsIt() throws {
-        let controller = manager.open(try makeFile("a.md"))
+        let controller = try XCTUnwrap(manager.open(try makeFile("a.md")))
         controller.close()
         XCTAssertTrue(manager.controllers.isEmpty)
     }
@@ -96,7 +108,7 @@ final class PreviewManagerTests: XCTestCase {
 
     func test_firstPreviewIsCenteredOnTheClickedWindowsScreen() throws {
         let screen = try XCTUnwrap(NSApp.keyWindow?.screen ?? NSScreen.main)
-        let window = try XCTUnwrap(manager.open(try makeFile("a.md")).window)
+        let window = try XCTUnwrap(manager.open(try makeFile("a.md"))?.window)
         XCTAssertEqual(
             window.frame,
             PreviewManager.centeredFrame(size: window.frame.size, in: screen.visibleFrame)
@@ -106,22 +118,54 @@ final class PreviewManagerTests: XCTestCase {
     /// The cascade follows the newest preview that is still open, not a
     /// point left over from one already closed.
     func test_newPreviewCascadesFromNewestOpenPreview() throws {
-        let a = try XCTUnwrap(manager.open(try makeFile("a.md")).window)
-        let bController = manager.open(try makeFile("b.md"))
+        let a = try XCTUnwrap(manager.open(try makeFile("a.md"))?.window)
+        let bController = try XCTUnwrap(manager.open(try makeFile("b.md")))
         let b = try XCTUnwrap(bController.window)
         XCTAssertGreaterThan(b.frame.minX, a.frame.minX)
         XCTAssertLessThan(b.frame.maxY, a.frame.maxY)
 
         let bFrame = b.frame
         bController.close()
-        let c = try XCTUnwrap(manager.open(try makeFile("c.md")).window)
+        let c = try XCTUnwrap(manager.open(try makeFile("c.md"))?.window)
         XCTAssertEqual(c.frame, bFrame)
     }
 
     func test_isPreviewWindow() throws {
-        let controller = manager.open(try makeFile("a.md"))
+        let controller = try XCTUnwrap(manager.open(try makeFile("a.md")))
         XCTAssertTrue(PreviewManager.isPreviewWindow(controller.window))
         XCTAssertFalse(PreviewManager.isPreviewWindow(NSWindow()))
         XCTAssertFalse(PreviewManager.isPreviewWindow(nil))
+    }
+
+    func test_openingPdfShowsPdfPreview() throws {
+        let controller = try XCTUnwrap(manager.open(try makePDF("report.pdf")))
+        XCTAssertTrue(controller is PDFPreviewWindowController)
+    }
+
+    func test_openingSamePdfTwiceReusesWindow() throws {
+        let url = try makePDF("report.pdf")
+        let first = try XCTUnwrap(manager.open(url))
+        let second = try XCTUnwrap(manager.open(url))
+        XCTAssertTrue(first === second)
+        XCTAssertEqual(manager.controllers.count, 1)
+    }
+
+    func test_markdownAndPdfShareCascadeAndCloseAll() throws {
+        let a = try XCTUnwrap(manager.open(try makeFile("a.md"))?.window)
+        let b = try XCTUnwrap(manager.open(try makePDF("b.pdf"))?.window)
+        XCTAssertGreaterThan(b.frame.minX, a.frame.minX)
+        XCTAssertLessThan(b.frame.maxY, a.frame.maxY)
+        manager.closeAll()
+        XCTAssertTrue(manager.controllers.isEmpty)
+    }
+
+    func test_isPreviewWindow_pdf() throws {
+        let controller = try XCTUnwrap(manager.open(try makePDF("report.pdf")))
+        XCTAssertTrue(PreviewManager.isPreviewWindow(controller.window))
+    }
+
+    func test_unknownKindOpensNothing() throws {
+        XCTAssertNil(manager.open(try makeFile("notes.txt")))
+        XCTAssertTrue(manager.controllers.isEmpty)
     }
 }

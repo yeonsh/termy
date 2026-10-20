@@ -14,7 +14,7 @@ import AppKit
 import WebKit
 
 @MainActor
-final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, NSMenuItemValidation {
+final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, NSMenuItemValidation, PreviewWindowController {
     static let defaultContentSize = PreviewWindowSupport.defaultContentSize
     static let contentSizeDefaultsKey = "MarkdownPreview.contentSize"
     static let deletedBanner = "This file was deleted. The preview will reload if it comes back."
@@ -29,7 +29,7 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
 
     let fileURL: URL
     /// Called from `windowWillClose`; the manager forgets the window here.
-    var onClose: ((MarkdownPreviewWindowController) -> Void)?
+    var onClose: (() -> Void)?
 
     let webView: MarkdownPreviewWebView
     private let defaults: UserDefaults
@@ -304,6 +304,6 @@ final class MarkdownPreviewWindowController: NSWindowController, NSWindowDelegat
         if let contentSize = window?.contentLayoutRect.size {
             defaults.set(NSStringFromSize(contentSize), forKey: Self.contentSizeDefaultsKey)
         }
-        onClose?(self)
+        onClose?()
     }
 }

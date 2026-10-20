@@ -33,3 +33,11 @@ enum PreviewWindowSupport {
         return exists(folder.path) ? .openFolder(folder) : nil
     }
 }
+
+/// What `PreviewManager` needs from a preview window, whatever it shows.
+@MainActor
+protocol PreviewWindowController: NSWindowController {
+    var fileURL: URL { get }
+    /// Called from `windowWillClose`; the manager forgets the window here.
+    var onClose: (() -> Void)? { get set }
+}

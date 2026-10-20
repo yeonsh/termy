@@ -17,7 +17,7 @@ import AppKit
 import PDFKit
 
 @MainActor
-final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate, @preconcurrency PDFViewDelegate, NSMenuItemValidation {
+final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate, @preconcurrency PDFViewDelegate, NSMenuItemValidation, PreviewWindowController {
     static let defaultSettleInterval: TimeInterval = 1.0
     static let contentSizeDefaultsKey = "PDFPreview.contentSize"
     static let unreadableBanner = "Couldn't read this PDF."
@@ -32,7 +32,7 @@ final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate, @p
 
     let fileURL: URL
     /// Called from `windowWillClose`; the manager forgets the window here.
-    var onClose: ((PDFPreviewWindowController) -> Void)?
+    var onClose: (() -> Void)?
 
     let pdfView: PDFPreviewView
     /// The one line above the document; nil hides it.
@@ -302,6 +302,6 @@ final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate, @p
         if let contentSize = window?.contentLayoutRect.size {
             defaults.set(NSStringFromSize(contentSize), forKey: Self.contentSizeDefaultsKey)
         }
-        onClose?(self)
+        onClose?()
     }
 }

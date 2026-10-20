@@ -1,6 +1,6 @@
 // PreviewManager.swift
 //
-// One preview window per markdown file. Cmd+clicking a file that's already
+// One preview window per markdown or PDF file. Cmd+clicking a file that's already
 // open brings its window forward instead of stacking another; files are
 // keyed by their symlink-resolved standard path, so `./docs/x.md` and an
 // absolute path to the same file share a window.
@@ -11,7 +11,7 @@ import AppKit
 final class PreviewManager {
     static let shared = PreviewManager()
 
-    private(set) var controllers: [String: MarkdownPreviewWindowController] = [:]
+    private(set) var controllers: [String: any PreviewWindowController] = [:]
     private let defaults: UserDefaults
     /// Keys of the open previews, oldest first; a new window cascades from
     /// the last one.
@@ -33,21 +33,28 @@ final class PreviewManager {
         return NSRect(origin: NSPoint(x: x.rounded(), y: y.rounded()), size: size)
     }
 
-    /// True when `window` belongs to a markdown preview.
+    /// True when `window` belongs to a markdown or PDF preview.
     static func isPreviewWindow(_ window: NSWindow?) -> Bool {
-        window?.windowController is MarkdownPreviewWindowController
+        window?.windowController is any PreviewWindowController
     }
 
     /// Shows the preview for `url`, reusing its window when already open.
+    /// nil, with no window made, for a file that has no preview kind.
     @discardableResult
-    func open(_ url: URL) -> MarkdownPreviewWindowController {
+    func open(_ url: URL) -> (any PreviewWindowController)? {
         let key = Self.key(for: url)
         if let existing = controllers[key] {
             existing.window?.makeKeyAndOrderFront(nil)
             return existing
         }
-        let controller = MarkdownPreviewWindowController(fileURL: URL(fileURLWithPath: key), defaults: defaults)
-        controller.onClose = { [weak self] _ in
+        let fileURL = URL(fileURLWithPath: key)
+        let controller: any PreviewWindowController
+        switch PreviewKind(fileURL: fileURL) {
+        case .markdown: controller = MarkdownPreviewWindowController(fileURL: fileURL, defaults: defaults)
+        case .pdf: controller = PDFPreviewWindowController(fileURL: fileURL, defaults: defaults)
+        case nil: return nil
+        }
+        controller.onClose = { [weak self] in
             guard let self else { return }
             controllers.removeValue(forKey: key)
             openOrder.removeAll { $0 == key }
