@@ -18,15 +18,17 @@ settings:
 
 packages:
   SwiftTerm:
-    url: https://github.com/migueldeicaza/SwiftTerm
+    # termy's fork: v1.20.0 plus termy patches on branch `termy/1.20`
+    # (fit single-width glyphs wider than their cell, e.g. D2Coding's ①…⑳).
+    # Add patches there and pin the new commit here.
+    url: https://github.com/yeonsh/SwiftTerm
     # Stay on the 1.x line. main is SwiftTerm 2.0: it parses PTY output on
     # an IO thread and never calls `LocalProcessTerminalView.dataReceived`,
     # which TermyTerminalView overrides for the Codex PTY-activity ping and
-    # the IME overlay re-anchor. `branch: main` would pull that in on the
-    # next fresh package resolve. Bump deliberately and re-verify
-    # TermyTerminalView's SwiftTerm workarounds live (IME, selection, mouse
-    # reporting, caret overlay).
-    exactVersion: "1.20.0"
+    # the IME overlay re-anchor. Bump deliberately, re-apply the termy
+    # patches, and re-verify TermyTerminalView's SwiftTerm workarounds live
+    # (IME, selection, mouse reporting, caret overlay).
+    revision: 480724ec7eac049330d643200fed52fab203c4ed
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     exactVersion: "2.6.4"

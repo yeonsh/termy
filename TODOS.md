@@ -30,10 +30,11 @@ Squash-merged to main as `690a193` on 2026-04-26.
   bespoke heuristics (e.g., output cadence, prompt regex).
 
 ### Migrate to SwiftTerm 2.0
-- **What:** Move from `exactVersion: "1.20.0"` to SwiftTerm 2.0 once it is tagged. Upstream `main` (`15fed4f`, 2026-10-05) is already 2.0 but untagged; 2026-10-07 bumped f37922e → 1.20.0 instead.
+- **What:** Move from the 1.20.0-based fork (`yeonsh/SwiftTerm`, branch `termy/1.20`) to SwiftTerm 2.0 once it is tagged. Upstream `main` (`15fed4f`, 2026-10-05) is already 2.0 but untagged; 2026-10-07 bumped f37922e → 1.20.0 instead.
 - **Why:** 2.0 is where upstream development continues (strict concurrency, parse thread, renderer work). Staying on 1.x means no new fixes.
 - **Cons:** 2.0 parses PTY output on the IO thread and never calls `LocalProcessTerminalView.dataReceived`. termy overrides it for the Codex PTY-activity ping (POSSIBLY_WAITING → THINKING) and the IME overlay re-anchor; both would go silent with no compile error. Move them to `setProcessOutputHandler` (runs on the parse thread, `@Sendable`, must return fast) and hop to main. `Terminal` is no longer reachable from the view, so `Workspace.flushPendingTerminalThaws` (`pane.terminal.terminal.updateFullScreen()`) needs another way to force a full redraw. See `MigratingFrom1To2.md` in the SwiftTerm docs.
 - **Scroll:** Keep `TerminalScrollWheel.swift`. 2.0 adds a wheel-report budget (5d3026a / #657, 100 reports/s, burst 6, one report per wheel notch) that felt too slow in Claude Code side by side, and has no gesture latch.
+- **Fork patches:** Re-apply or drop the commits on `termy/1.20`. Single-width glyphs wider than their cell (D2Coding's ①…⑳, fallback glyphs under Menlo) are fitted in `glyphSlotFit`; upstream 2.0 fits only fallback-font glyphs, so a primary font such as D2Coding still needs the patch.
 - **Context:** Re-verify every SwiftTerm workaround in TermyTerminalView live after the move (IME `kittyIsComposing`, caret overlay timing, `feedPrepare` selection clearing, the mouse-reporting bypass, Option+Left/Right, `requestOpenLink` allowlist, selected-text color).
 
 ### SwiftTerm 1.20 audit leftovers

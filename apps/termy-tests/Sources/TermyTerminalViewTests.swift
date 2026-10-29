@@ -664,4 +664,61 @@ final class TermyTerminalViewTests: XCTestCase {
         let y = overlay.isFlipped ? local.y : overlay.bounds.height - local.y
         return rep.colorAt(x: Int(local.x * scale), y: Int(y * scale))?.alphaComponent ?? 0
     }
+
+    /// A one-column character with a two-cell glyph painted over the next
+    /// cell (2026-10-29: `②를`, `③을` in Claude Code output). ①…⑳ are East
+    /// Asian Ambiguous, so the terminal and Claude Code both give them one
+    /// column, but Menlo falls back to Apple SD Gothic Neo's full-width glyph
+    /// and D2Coding ships them at a two-cell advance. termy's SwiftTerm fork
+    /// (yeonsh/SwiftTerm, termy/1.20) shrinks such glyphs into their cell.
+    @MainActor
+    func test_circledDigit_staysInItsCell_withFallbackGlyph() throws {
+        let font = try XCTUnwrap(NSFont(name: "Menlo-Regular", size: 16))
+        Self.assertGlyphStaysInItsCell("②", font: font)
+    }
+
+    @MainActor
+    func test_circledDigit_staysInItsCell_withD2Coding() throws {
+        guard let font = NSFont(name: "D2Codingligature", size: 16) else {
+            throw XCTSkip("D2Coding is not installed")
+        }
+        Self.assertGlyphStaysInItsCell("②", font: font)
+    }
+
+    @MainActor
+    private static func assertGlyphStaysInItsCell(_ text: String, font: NSFont,
+                                                  file: StaticString = #filePath, line: UInt = #line) {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 100))
+        view.font = font
+        // Hidden cursor, so the caret does not paint the next cell.
+        view.feed(text: "\u{1b}[?25l" + text)
+        XCTAssertEqual(view.terminal.getLine(row: 0)?.getWidth(index: 0), 1, file: file, line: line)
+
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            return XCTFail("no bitmap", file: file, line: line)
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        guard let background = rep.colorAt(x: rep.pixelsWide - 1, y: rep.pixelsHigh - 1) else {
+            return XCTFail("no background pixel", file: file, line: line)
+        }
+        var inkColumns: [Int] = []
+        for x in 0..<Int(60 * scale) {
+            let inked = (0..<Int(30 * scale)).contains { y in
+                guard let c = rep.colorAt(x: x, y: y) else { return false }
+                return abs(c.redComponent - background.redComponent)
+                    + abs(c.greenComponent - background.greenComponent)
+                    + abs(c.blueComponent - background.blueComponent) > 0.3
+            }
+            if inked { inkColumns.append(x) }
+        }
+        guard let first = inkColumns.first, let last = inkColumns.last else {
+            return XCTFail("\(text) is not drawn", file: file, line: line)
+        }
+
+        let cellWidth = ("W" as NSString).size(withAttributes: [.font: font]).width
+        let inkMaxX = CGFloat(last + 1) / scale
+        XCTAssertLessThanOrEqual(inkMaxX, cellWidth + 1, "ink spills into the next cell", file: file, line: line)
+        XCTAssertGreaterThan(inkMaxX - CGFloat(first) / scale, cellWidth * 0.6, "glyph shrinks into the cell, not away", file: file, line: line)
+    }
 }

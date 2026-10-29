@@ -21,7 +21,7 @@ beyond that stage. In practice, the repo contains:
 - UI: AppKit + SwiftUI
 - Terminal renderer / PTY host: `SwiftTerm`
 - Project format: Xcode project (`termy.xcodeproj`)
-- Package dependency: `SwiftTerm` from `https://github.com/migueldeicaza/SwiftTerm`
+- Package dependency: `SwiftTerm` from termy's fork `https://github.com/yeonsh/SwiftTerm` (branch `termy/1.20`: v1.20.0 plus termy patches, pinned by revision in `project.yml`)
 
 ## Repository Layout
 
