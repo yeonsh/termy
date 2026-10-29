@@ -6,6 +6,14 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.19 — 2026-10-29
+
+- Circled numbers like ①②③ no longer cover the character after them.
+  They take one column, but D2Coding draws them two columns wide (and
+  Menlo borrows a two-column ② from another font), so in Claude Code
+  output such as `②를` the right half of ② hid the next character. They
+  are now drawn slightly smaller so they fit their own column.
+
 ## 0.2.18 — 2026-10-21
 
 - Cmd+click now opens Markdown and PDF paths whose file name contains
