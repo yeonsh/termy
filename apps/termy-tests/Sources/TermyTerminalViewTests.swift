@@ -665,60 +665,94 @@ final class TermyTerminalViewTests: XCTestCase {
         return rep.colorAt(x: Int(local.x * scale), y: Int(y * scale))?.alphaComponent ?? 0
     }
 
-    /// A one-column character with a two-cell glyph painted over the next
-    /// cell (2026-10-29: `②를`, `③을` in Claude Code output). ①…⑳ are East
-    /// Asian Ambiguous, so the terminal and Claude Code both give them one
-    /// column, but Menlo falls back to Apple SD Gothic Neo's full-width glyph
-    /// and D2Coding ships them at a two-cell advance. termy's SwiftTerm fork
-    /// (yeonsh/SwiftTerm, termy/1.20) shrinks such glyphs into their cell.
+    /// A one-column character with a two-cell glyph (2026-10-29: `②를`, `③을`
+    /// in Claude Code output). ①…⑳ are East Asian Ambiguous, so the terminal
+    /// and Claude Code both give them one column, but Menlo falls back to Apple
+    /// SD Gothic Neo's full-width glyph and D2Coding ships them at a two-cell
+    /// advance. termy's SwiftTerm fork (yeonsh/SwiftTerm, termy/1.20) shrinks
+    /// such glyphs to fit: an eighth of a cell past each side (the neighbors'
+    /// side bearings), or 3/8 of a blank neighbor cell (2026-10-30: shrunk to
+    /// one cell, `②` was too small to read).
     @MainActor
-    func test_circledDigit_staysInItsCell_withFallbackGlyph() throws {
-        let font = try XCTUnwrap(NSFont(name: "Menlo-Regular", size: 16))
-        Self.assertGlyphStaysInItsCell("②", font: font)
-    }
-
-    @MainActor
-    func test_circledDigit_staysInItsCell_withD2Coding() throws {
-        guard let font = NSFont(name: "D2Codingligature", size: 16) else {
-            throw XCTSkip("D2Coding is not installed")
+    func test_circledDigit_betweenLetters_overflowsOnlyIntoSideBearings() throws {
+        for font in try Self.circledDigitFonts() {
+            let view = Self.renderedView("가\u{1b}[31m②\u{1b}[0m가", font: font)
+            let cell = Self.cellWidth(of: view)
+            let ink = try XCTUnwrap(Self.inkSpan(in: view, where: Self.isRed), font.fontName)
+            XCTAssertGreaterThanOrEqual(ink.minX, 2 * cell - cell / 8 - Self.antialiasSlack, font.fontName)
+            XCTAssertLessThanOrEqual(ink.maxX, 3 * cell + cell / 8 + Self.antialiasSlack, font.fontName)
+            XCTAssertGreaterThan(ink.width, cell * 1.1, "\(font.fontName): grows past its own cell")
         }
-        Self.assertGlyphStaysInItsCell("②", font: font)
     }
 
     @MainActor
-    private static func assertGlyphStaysInItsCell(_ text: String, font: NSFont,
-                                                  file: StaticString = #filePath, line: UInt = #line) {
+    func test_circledDigit_afterBlank_borrowsPartOfIt() throws {
+        for font in try Self.circledDigitFonts() {
+            let view = Self.renderedView("가 \u{1b}[31m②\u{1b}[0m가", font: font)
+            let cell = Self.cellWidth(of: view)
+            let ink = try XCTUnwrap(Self.inkSpan(in: view, where: Self.isRed), font.fontName)
+            XCTAssertGreaterThanOrEqual(ink.minX, 3 * cell - cell * 3 / 8 - Self.antialiasSlack, font.fontName)
+            XCTAssertLessThanOrEqual(ink.maxX, 4 * cell + cell / 8 + Self.antialiasSlack, font.fontName)
+            XCTAssertGreaterThan(ink.width, cell * 1.3, "\(font.fontName): grows into the blank")
+        }
+    }
+
+    /// Two circled digits around one blank each borrow part of it, never all
+    /// of it, so they stay apart.
+    @MainActor
+    func test_circledDigits_sharingABlank_keepAGap() throws {
+        for font in try Self.circledDigitFonts() {
+            let view = Self.renderedView("가\u{1b}[31m②\u{1b}[0m \u{1b}[34m⑳\u{1b}[0m가", font: font)
+            let cell = Self.cellWidth(of: view)
+            let left = try XCTUnwrap(Self.inkSpan(in: view, where: Self.isRed), font.fontName)
+            let right = try XCTUnwrap(Self.inkSpan(in: view, where: Self.isBlue), font.fontName)
+            XCTAssertGreaterThanOrEqual(right.minX - left.maxX, cell / 8, font.fontName)
+        }
+    }
+
+    /// Menlo (fallback glyph) always; D2Coding (the user's font, which ships
+    /// its own two-cell glyphs) when installed.
+    private static func circledDigitFonts() throws -> [NSFont] {
+        let menlo = try XCTUnwrap(NSFont(name: "Menlo-Regular", size: 16))
+        return [menlo] + [NSFont(name: "D2Codingligature", size: 16)].compactMap { $0 }
+    }
+
+    @MainActor
+    private static func renderedView(_ text: String, font: NSFont) -> TermyTerminalView {
         let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 100))
         view.font = font
-        // Hidden cursor, so the caret does not paint the next cell.
+        // Hidden cursor, so the caret does not paint over the text.
         view.feed(text: "\u{1b}[?25l" + text)
-        XCTAssertEqual(view.terminal.getLine(row: 0)?.getWidth(index: 0), 1, file: file, line: line)
+        return view
+    }
 
-        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
-            return XCTFail("no bitmap", file: file, line: line)
-        }
+    /// SwiftTerm's cell width: the advance of `W`, snapped to device pixels.
+    @MainActor
+    private static func cellWidth(of view: TermyTerminalView) -> CGFloat {
+        let scale = NSScreen.main?.backingScaleFactor ?? 1
+        let width = ("W" as NSString).size(withAttributes: [.font: view.font]).width
+        return (width * scale).rounded() / scale
+    }
+
+    /// One pixel of antialiased edge at 1x.
+    private static let antialiasSlack: CGFloat = 1
+
+    private static func isRed(_ c: NSColor) -> Bool { c.redComponent - max(c.greenComponent, c.blueComponent) > 0.25 }
+    private static func isBlue(_ c: NSColor) -> Bool { c.blueComponent - max(c.redComponent, c.greenComponent) > 0.25 }
+
+    /// Horizontal extent, in points, of the first row's pixels matching `ink`.
+    @MainActor
+    private static func inkSpan(in view: NSView, where ink: (NSColor) -> Bool) -> (minX: CGFloat, maxX: CGFloat, width: CGFloat)? {
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: rep)
         let scale = CGFloat(rep.pixelsWide) / view.bounds.width
-        guard let background = rep.colorAt(x: rep.pixelsWide - 1, y: rep.pixelsHigh - 1) else {
-            return XCTFail("no background pixel", file: file, line: line)
-        }
-        var inkColumns: [Int] = []
-        for x in 0..<Int(60 * scale) {
-            let inked = (0..<Int(30 * scale)).contains { y in
-                guard let c = rep.colorAt(x: x, y: y) else { return false }
-                return abs(c.redComponent - background.redComponent)
-                    + abs(c.greenComponent - background.greenComponent)
-                    + abs(c.blueComponent - background.blueComponent) > 0.3
+        let columns = (0..<Int(120 * scale)).filter { x in
+            (0..<Int(30 * scale)).contains { y in
+                rep.colorAt(x: x, y: y).flatMap { $0.usingColorSpace(.deviceRGB) }.map(ink) ?? false
             }
-            if inked { inkColumns.append(x) }
         }
-        guard let first = inkColumns.first, let last = inkColumns.last else {
-            return XCTFail("\(text) is not drawn", file: file, line: line)
-        }
-
-        let cellWidth = ("W" as NSString).size(withAttributes: [.font: font]).width
-        let inkMaxX = CGFloat(last + 1) / scale
-        XCTAssertLessThanOrEqual(inkMaxX, cellWidth + 1, "ink spills into the next cell", file: file, line: line)
-        XCTAssertGreaterThan(inkMaxX - CGFloat(first) / scale, cellWidth * 0.6, "glyph shrinks into the cell, not away", file: file, line: line)
+        guard let first = columns.first, let last = columns.last else { return nil }
+        let minX = CGFloat(first) / scale, maxX = CGFloat(last + 1) / scale
+        return (minX, maxX, maxX - minX)
     }
 }

@@ -19,7 +19,8 @@ settings:
 packages:
   SwiftTerm:
     # termy's fork: v1.20.0 plus termy patches on branch `termy/1.20`
-    # (fit single-width glyphs wider than their cell, e.g. D2Coding's ①…⑳).
+    # (fit single-width glyphs wider than their cell, e.g. D2Coding's ①…⑳,
+    # borrowing room from blank neighbors).
     # Add patches there and pin the new commit here.
     url: https://github.com/yeonsh/SwiftTerm
     # Stay on the 1.x line. main is SwiftTerm 2.0: it parses PTY output on
@@ -28,7 +29,7 @@ packages:
     # the IME overlay re-anchor. Bump deliberately, re-apply the termy
     # patches, and re-verify TermyTerminalView's SwiftTerm workarounds live
     # (IME, selection, mouse reporting, caret overlay).
-    revision: 480724ec7eac049330d643200fed52fab203c4ed
+    revision: 2843661de29dcbe232689d7aeeb16823e2319a9f
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     exactVersion: "2.6.4"
