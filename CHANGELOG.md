@@ -6,6 +6,16 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.21 — 2026-10-31
+
+- You can now remove a project from the ⌘K list. Each row has a trash
+  button at its right end, and ⌘⌫ removes the selected row while the
+  search field is empty. This is for projects whose folder you renamed or
+  deleted, which used to stay in the list for good. Only termy's saved
+  pane layout is forgotten; the folder itself is never touched. Projects
+  with open panes have no trash button, since termy saves them again
+  right away.
+
 ## 0.2.20 — 2026-10-31
 
 - Circled numbers like ①②③ are big enough to read again. 0.2.19 shrank
