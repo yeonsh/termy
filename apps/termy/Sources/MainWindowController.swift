@@ -410,15 +410,24 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
             p.onPick = { [weak self] record in
                 self?.restore(workspace: record)
             }
+            p.onDelete = { record in
+                Task { await persistence.delete(canonicalPath: record.canonicalPath) }
+            }
             self.projectSwitcher = p
             return p
         }()
+
+        // Projects with live panes in any window. The autosaver writes their
+        // records back on its next save, so the panel offers no remove for them.
+        let openPaths = Set((windowManager?.controllers ?? [self])
+            .flatMap { $0.workspace.panes }
+            .map { ProjectIdentity.canonicalPath(for: $0.currentCwd) })
 
         // persistence.all() is async — hop off MainActor, grab the list,
         // then toggle the panel from the main actor with the result.
         Task { @MainActor in
             let records = await persistence.all()
-            panel.toggle(records: records, over: self.window)
+            panel.toggle(records: records, openPaths: openPaths, over: self.window)
         }
     }
 

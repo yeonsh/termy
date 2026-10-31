@@ -13,10 +13,17 @@
 //   ⎋            close without picking
 //   ⌘K again      close (if open with empty query — keeps user muscle
 //                 memory from "⌘K is my return-to-work reflex")
+//   ⌘⌫           remove the selected project (empty query only; with a
+//                 query typed it still deletes to the start of the line)
 //
 // Row spec (D2): project label (primary, bold) + path tail (secondary,
-// dim) + pane count + last-used (right-aligned, tabular). `⌘K` panel is
-// scoped to SAVED workspaces only; the filter bar handles alive projects.
+// dim) + pane count + last-used (right-aligned, tabular) + trash button.
+// `⌘K` panel is scoped to SAVED workspaces only; the filter bar handles
+// alive projects.
+//
+// Removing (trash or ⌘⌫) forgets the saved layout, never the folder. It
+// is for projects whose folder was renamed or deleted. Projects with open
+// panes get no trash: the autosaver would write them back on its next save.
 //
 // Accessibility: each row gets a single-line VoiceOver label that
 // concatenates every visible cell; the empty state has its own role.
@@ -31,6 +38,10 @@ final class ProjectSwitcherPanel: NSPanel {
     /// Fired when the user picks a row. Panel hides itself before invoking.
     var onPick: ((WorkspaceRecord) -> Void)?
 
+    /// Fired when the user removes a row. The row is already gone from the
+    /// list; the callback forgets the saved record.
+    var onDelete: ((WorkspaceRecord) -> Void)?
+
     // Plain NSTextField instead of NSSearchField: the bezel-less NSSearchField
     // draws a magnifier glyph inside the cell's text rect, which overlaps the
     // placeholder. We re-add the magnifier manually (below) as a separate
@@ -43,6 +54,7 @@ final class ProjectSwitcherPanel: NSPanel {
     private let searchDelegate = SearchDelegate()
 
     private var records: [WorkspaceRecord] = []
+    private var openPaths: Set<String> = []   // canonical paths with live panes
     private var filteredIndices: [Int] = []   // index into `records`
     private let nowForDisplay = Date()
 
@@ -86,8 +98,11 @@ final class ProjectSwitcherPanel: NSPanel {
 
     /// Present over the given window with a freshly-loaded set of records.
     /// Clears the search field so every use starts from "show everything."
-    func present(records: [WorkspaceRecord], over host: NSWindow?) {
+    /// `openPaths` are the canonical paths of projects with live panes; their
+    /// rows cannot be removed.
+    func present(records: [WorkspaceRecord], openPaths: Set<String>, over host: NSWindow?) {
         self.records = records
+        self.openPaths = openPaths
         searchField.stringValue = ""
         refilter()
         if filteredIndices.isEmpty == false {
@@ -110,11 +125,11 @@ final class ProjectSwitcherPanel: NSPanel {
 
     /// Toggle behavior for the ⌘K reflex: if already visible with no query,
     /// close; otherwise (re)present.
-    func toggle(records: [WorkspaceRecord], over host: NSWindow?) {
+    func toggle(records: [WorkspaceRecord], openPaths: Set<String>, over host: NSWindow?) {
         if isVisible && searchField.stringValue.isEmpty {
             close()
         } else {
-            present(records: records, over: host)
+            present(records: records, openPaths: openPaths, over: host)
         }
     }
 
@@ -313,6 +328,40 @@ final class ProjectSwitcherPanel: NSPanel {
         close()
     }
 
+    // MARK: - Removing
+
+    /// Drops `record` from the list and hands it to `onDelete`. The selection
+    /// stays on the selected project, or moves to the row that takes the
+    /// removed row's place.
+    fileprivate func remove(_ record: WorkspaceRecord) {
+        guard !openPaths.contains(record.canonicalPath),
+              let index = records.firstIndex(where: { $0.canonicalPath == record.canonicalPath }) else { return }
+        let selectedRow = tableView.selectedRow
+        let selectedPath = selectedRow >= 0 && selectedRow < filteredIndices.count
+            ? records[filteredIndices[selectedRow]].canonicalPath : nil
+
+        records.remove(at: index)
+        refilter()
+        let rowPaths = filteredIndices.map { records[$0].canonicalPath }
+        if !rowPaths.isEmpty {
+            let row = rowPaths.firstIndex { $0 == selectedPath } ?? min(max(selectedRow, 0), rowPaths.count - 1)
+            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            tableView.scrollRowToVisible(row)
+        }
+        onDelete?(record)
+    }
+
+    /// ⌘⌫. Only with an empty query: with text typed, the key keeps its
+    /// text-field meaning. Returns whether a project was removed.
+    fileprivate func removeSelection() -> Bool {
+        let row = tableView.selectedRow
+        guard searchField.stringValue.isEmpty, row >= 0, row < filteredIndices.count else { return false }
+        let record = records[filteredIndices[row]]
+        guard !openPaths.contains(record.canonicalPath) else { return false }
+        remove(record)
+        return true
+    }
+
     // MARK: - Search field delegate (shuttle class)
 
     private final class SearchDelegate: NSObject, NSSearchFieldDelegate {
@@ -338,6 +387,8 @@ final class ProjectSwitcherPanel: NSPanel {
             case #selector(NSResponder.cancelOperation(_:)):
                 owner.cancelAndClose()
                 return true
+            case #selector(NSResponder.deleteToBeginningOfLine(_:)):
+                return owner.removeSelection()
             default:
                 return false
             }
@@ -355,7 +406,8 @@ extension ProjectSwitcherPanel: NSTableViewDataSource, NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let record = records[filteredIndices[row]]
         let cell = ProjectSwitcherRowView()
-        cell.configure(record: record, now: nowForDisplay)
+        cell.configure(record: record, now: nowForDisplay, removable: !openPaths.contains(record.canonicalPath))
+        cell.onRemove = { [weak self] in self?.remove(record) }
         return cell
     }
 
@@ -371,6 +423,8 @@ private final class ProjectSwitcherRowView: NSTableCellView {
     private let pathField = NSTextField(labelWithString: "")
     private let paneCountField = NSTextField(labelWithString: "")
     private let lastUsedField = NSTextField(labelWithString: "")
+    private let removeButton = RemoveButton()
+    var onRemove: (() -> Void)?
     private static let dateFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .abbreviated
@@ -397,8 +451,10 @@ private final class ProjectSwitcherRowView: NSTableCellView {
         lastUsedField.alignment = .right
         lastUsedField.setContentCompressionResistancePriority(.required, for: .horizontal)
         lastUsedField.setContentHuggingPriority(.required, for: .horizontal)
+        removeButton.target = self
+        removeButton.action = #selector(removeClicked)
 
-        for v in [labelField, pathField, paneCountField, lastUsedField] {
+        for v in [labelField, pathField, paneCountField, lastUsedField, removeButton] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
@@ -416,19 +472,27 @@ private final class ProjectSwitcherRowView: NSTableCellView {
             paneCountField.trailingAnchor.constraint(equalTo: lastUsedField.leadingAnchor, constant: -12),
 
             lastUsedField.centerYAnchor.constraint(equalTo: centerYAnchor),
-            // -24 leaves a comfortable gap for the overlay scroller thumb
-            // when it appears during active scrolling without nudging the
-            // timestamp in the idle state.
-            lastUsedField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
+            lastUsedField.trailingAnchor.constraint(equalTo: removeButton.leadingAnchor, constant: -8),
             // 84pt fits "12 mins ago" comfortably (with the abbreviated style
             // that's actually "12m ago"). Was 56, which clipped "7m ago".
-            lastUsedField.widthAnchor.constraint(greaterThanOrEqualToConstant: 84)
+            lastUsedField.widthAnchor.constraint(greaterThanOrEqualToConstant: 84),
+
+            // A hidden button (open project) keeps its slot, so the
+            // timestamps stay aligned down the list. -16 leaves room for the
+            // overlay scroller thumb, which only shows while scrolling.
+            removeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            removeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            removeButton.widthAnchor.constraint(equalToConstant: 22),
+            removeButton.heightAnchor.constraint(equalToConstant: 22)
         ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
-    func configure(record: WorkspaceRecord, now: Date) {
+    func configure(record: WorkspaceRecord, now: Date, removable: Bool) {
+        removeButton.isHidden = !removable
+        removeButton.setAccessibilityLabel("Remove \(record.displayLabel) from the list")
+
         labelField.stringValue = record.displayLabel
         // Path tail — show the parent dir + basename for disambiguation
         // between same-named repos in different parents.
@@ -448,12 +512,44 @@ private final class ProjectSwitcherRowView: NSTableCellView {
         )
     }
 
+    @objc private func removeClicked() {
+        onRemove?()
+    }
+
     /// Replace `$HOME` with `~` for a more recognizable row.
     private func shorten(path: String) -> String {
         let home = NSHomeDirectory()
         guard path.hasPrefix(home) else { return path }
         return "~" + path.dropFirst(home.count)
     }
+}
+
+// Trash button at a row's right edge: dim at rest, red under the pointer.
+private final class RemoveButton: NSButton {
+    private var hoverArea: NSTrackingArea?
+
+    init() {
+        super.init(frame: .zero)
+        image = NSImage(systemSymbolName: "trash", accessibilityDescription: "Remove")?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
+        imagePosition = .imageOnly
+        isBordered = false
+        contentTintColor = .tertiaryLabelColor
+        toolTip = "Remove from this list. The folder is not touched."
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { contentTintColor = .systemRed }
+    override func mouseExited(with event: NSEvent) { contentTintColor = .tertiaryLabelColor }
 }
 
 // Custom selection rendering — the default NSTableView selection draws a

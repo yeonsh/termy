@@ -56,7 +56,9 @@ cycling through things you don't care about.
 
 Prefer names? <kbd>⌘</kbd><kbd>K</kbd> opens a fuzzy project switcher over
 every project termy has seen, with pane counts and "last used" timestamps.
-Picking one restores that project's saved pane grid.
+Picking one restores that project's saved pane grid. Renamed or deleted a
+project folder? The trash button at the end of its row (or <kbd>⌘</kbd><kbd>⌫</kbd>)
+removes it from the list; the folder itself is never touched.
 
 <p align="center">
   <img src="docs/screenshots/switch-project-0.png" width="620" alt="⌘K fuzzy project switcher" />

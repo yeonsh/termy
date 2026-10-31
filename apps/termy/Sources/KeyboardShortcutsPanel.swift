@@ -51,6 +51,7 @@ final class KeyboardShortcutsPanel: NSPanel {
         ]),
         Section(title: "Projects", entries: [
             Shortcut(combos: [["⌘", "K"]], description: "Switch project (fuzzy search)"),
+            Shortcut(combos: [["⌘", "⌫"]], description: "In ⌘K, remove the selected project from the list"),
             Shortcut(combos: [["⌘", "⇧", "["], ["⌘", "⇧", "]"]], description: "Previous / next project filter"),
             Shortcut(combos: [["⌘", "0"]], description: "Show all panes"),
             Shortcut(combos: [["⌘", "1–9"]], description: "Jump to project filter N")
