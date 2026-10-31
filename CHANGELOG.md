@@ -6,6 +6,15 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.20 — 2026-10-31
+
+- Circled numbers like ①②③ are big enough to read again. 0.2.19 shrank
+  them into their one column, which left the number inside too small to
+  make out. They now reach into part of an empty column next to them, and
+  just into the side margin of a neighboring character, so after a space
+  (`줄 ②가`) they are drawn close to full size. They still don't cover
+  the character next to them.
+
 ## 0.2.19 — 2026-10-29
 
 - Circled numbers like ①②③ no longer cover the character after them.
