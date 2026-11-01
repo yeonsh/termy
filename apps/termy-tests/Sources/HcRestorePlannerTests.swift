@@ -87,6 +87,64 @@ final class HcRestorePlannerTests: XCTestCase {
         XCTAssertEqual(plan(machine: nil, seen: false, terminals: [other]), .run)
     }
 
+    // MARK: - 띄우기 직전의 확인(R13b)
+
+    private func machine(_ name: String, _ state: String) -> HcMachine {
+        HcMachine(name: name, host: name, state: state, why: nil)
+    }
+
+    private func check(_ terminals: [HcTerminal], _ machines: [HcMachine]) -> HcPaneBackend.RemoteRunCheck {
+        HcPaneBackend.remoteRunCheck(paneId: "P", instance: "release", machine: "bdpc01", terminals: terminals, machines: machines)
+    }
+
+    func testRemoteRunCheckAttachesToThePanesLiveTerminal() {
+        XCTAssertEqual(check([terminal("bdpc01/t7", pane: "P")], [machine("bdpc01", "connected")]), .attach("bdpc01/t7"),
+                       "seen was only a wake-up: the terminal was there all along")
+    }
+
+    func testRemoteRunCheckWaitsWhileItsMachineIsNotConnected() {
+        XCTAssertEqual(check([], [machine("bdpc01", "connecting")]), .wait(.connecting))
+        XCTAssertEqual(check([], [machine("bdpc01", "needs_login")]), .wait(.unavailable("bdpc01 needs login")))
+        XCTAssertEqual(check([], [machine("bdpc01", "unreachable")]), .wait(.unavailable("bdpc01 unreachable")))
+    }
+
+    func testRemoteRunCheckRunsOnlyWhenNothingOfOursIsAlive() {
+        XCTAssertEqual(check([], [machine("bdpc01", "connected"), machine("other", "unreachable")]), .run)
+        XCTAssertEqual(check([], []), .run, "an unknown machine: terminal.run reports why")
+        let finished = terminal("bdpc01/t7", pane: "P", state: "finished")
+        XCTAssertEqual(check([finished], [machine("bdpc01", "connected")]), .run)
+    }
+
+    /// labels 필터를 모르는 core가 모든 terminal을 돌려줘도 다른 pane이나 instance의 terminal에 붙지 않는다.
+    func testRemoteRunCheckIgnoresOtherPanesAndInstances() {
+        var otherInstance = terminal("bdpc01/t8", pane: "P")
+        otherInstance.labels["termy.instance"] = "debug"
+        XCTAssertEqual(check([terminal("bdpc01/t7", pane: "Q"), otherInstance], [machine("bdpc01", "connected")]), .run)
+    }
+
+    // MARK: - 기다리는 원격 pane의 상태 줄
+
+    func testWaitingStateNamesTheMachineAndWhy() {
+        XCTAssertEqual(HcPaneBackend.waitingState(machine: "bdpc01", lineState: "needs_login"), .unavailable("bdpc01 needs login"))
+        XCTAssertEqual(HcPaneBackend.waitingState(machine: "bdpc01", lineState: "unreachable"), .unavailable("bdpc01 unreachable"))
+        XCTAssertEqual(HcPaneBackend.waitingState(machine: "bdpc01", lineState: "connecting"), .connecting)
+        XCTAssertEqual(HcPaneBackend.waitingState(machine: "bdpc01", lineState: nil), .connecting, "line state not known yet")
+        XCTAssertEqual(Pane.hcStatusText(HcPaneBackend.waitingState(machine: "bdpc01", lineState: "needs_login")),
+                       "herdr-core unavailable: bdpc01 needs login")
+    }
+
+    // MARK: - 닫은 pane의 terminal
+
+    /// address를 모른 채 닫힌 pane(머신이 끊겨 있던 원격 pane 등)의 terminal이 나중에 오면 kill한다.
+    func testTerminalsOfClosedPanesAreKilledWhenTheyArrive() {
+        var otherInstance = terminal("bdpc01/t4", pane: "B")
+        otherInstance.labels["termy.instance"] = "debug"
+        let arrived = [terminal("t1", pane: "A"), terminal("bdpc01/t2", pane: "B"),
+                       terminal("bdpc01/t3", pane: "B", state: "finished"), otherInstance, terminal("t5", pane: nil)]
+        XCTAssertEqual(HcSessionManager.terminalsOfClosedPanes(["B"], in: arrived, instance: "release"), ["bdpc01/t2"])
+        XCTAssertEqual(HcSessionManager.terminalsOfClosedPanes([], in: arrived, instance: "release"), [])
+    }
+
     func testCachedAddressKeepsExistingRules() {
         let record = terminal("t3", pane: "P")
         XCTAssertEqual(plan(address: "t3", machine: nil, seen: false, terminals: [record]), .attach("t3"))

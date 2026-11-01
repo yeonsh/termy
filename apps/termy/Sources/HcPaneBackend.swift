@@ -22,6 +22,17 @@ enum HcCloseOutcome: Equatable {
     case exited(Int32), unavailable(String)
 }
 
+/// 원격 pane이 띄우기 전에 묻는 `terminal.list`의 labels 필터.
+struct HcPaneLookupParams: Encodable, Sendable {
+    let labels: [String: String]
+}
+
+/// `terminal.list` 결과. machines에는 연결되지 않은 머신도 기다리지 않고 그 줄 상태와 함께 나온다.
+struct HcPaneLookup: Decodable, Sendable {
+    let terminals: [HcTerminal]
+    let machines: [HcMachine]?
+}
+
 /// `terminal.run` 인자. labels는 termy 쪽에서 `"k=v"`로 다루고, wire에서는 hc가 받는 `{k: v}` 객체로 쓴다.
 struct HcRunParams: Encodable, Equatable, Sendable {
     var argv: [String]?
@@ -235,6 +246,13 @@ final class HcPaneBackend {
         reattach()
     }
 
+    /// machine.list로 기다리는 머신의 줄 상태를 새로 알았다. 머신을 보기 전(address 없음, 붙는 중 아님)에만 보여 준다.
+    func machineLineChanged() {
+        guard lifecycle == .running, session == nil, attachTask == nil, address == nil,
+              let machine = launch.machine, !manager.hasSeenMachine(machine) else { return }
+        setState(Self.waitingState(machine: machine, lineState: manager.machineLineState(machine)))
+    }
+
     func statusChanged(_ status: HcStatus?) {
         guard lifecycle == .running else { return }
         onStatus?(status)
@@ -317,6 +335,7 @@ final class HcPaneBackend {
     /// 아는 address가 있으면 그 레코드, 없으면 같은 pane label의 살아 있는 terminal, 그것도 없으면 새로 띄운다.
     /// 원격 pane(machine 있음)은 지금 구독에서 그 머신이 연결된 것을 본 뒤에만 새로 띄운다(machineSeen). 그 전에는
     /// 머신 줄이 아직 이어지지 않아 살아 있는 자기 terminal이 snapshot에 없을 수 있고, 띄우면 셸이 둘이 된다.
+    /// `.run`이어도 원격 pane은 띄우기 직전에 `remoteRunCheck`로 hc에 다시 묻는다.
     nonisolated static func plan(paneId: String, address: String?, machine: String?, machineSeen: Bool,
                                  store: HcEventStore, instance: String) -> AttachPlan {
         if let address {
@@ -331,6 +350,65 @@ final class HcPaneBackend {
         if let mine { return .attach(mine.address) }
         if let machine, !machineSeen { return .awaitMachine(machine) }
         return .run
+    }
+
+    enum RemoteRunCheck: Equatable {
+        case attach(String), wait(HcPaneConnectionState), run
+    }
+
+    /// address를 모르는 원격 pane이 terminal.run 직전에 하는 확인(`terminal.list {labels}`의 결과로 정한다).
+    /// 머신을 "봤다"는 신호는 그 머신의 terminal이 store에 오기 전에도 올 수 있다(줄이 이어진 것과 그 머신의 구독이
+    /// 이어진 것은 따로 온다). 그래서 hc에 직접 묻는다: 이 pane의 살아 있는 terminal이 있으면 붙고, 그 머신이
+    /// connected가 아니면 기다리고, 둘 다 아니면 띄운다. 필터를 모르는 core가 다 돌려줘도 label을 다시 본다.
+    nonisolated static func remoteRunCheck(paneId: String, instance: String, machine: String,
+                                           terminals: [HcTerminal], machines: [HcMachine]) -> RemoteRunCheck {
+        let mine = terminals.first {
+            $0.state == "live" && $0.labels["termy.pane"] == paneId && $0.labels["termy.instance"] == instance
+        }
+        if let mine { return .attach(mine.address) }
+        if let line = machines.first(where: { $0.name == machine }), line.state != "connected" {
+            return .wait(waitingState(machine: machine, lineState: line.state))
+        }
+        return .run
+    }
+
+    /// 머신을 기다리는 원격 pane의 상태. 로그인이 필요하거나 닿지 않으면 머신 이름과 이유를 보여 주고, 연결 중이거나
+    /// 아직 모르면 연결 중으로 둔다.
+    nonisolated static func waitingState(machine: String, lineState: String?) -> HcPaneConnectionState {
+        switch lineState {
+        case "needs_login": return .unavailable("\(machine) needs login")
+        case "unreachable": return .unavailable("\(machine) unreachable")
+        default: return .connecting
+        }
+    }
+
+    static func paneLookupParams(paneId: String, instance: String) -> HcPaneLookupParams {
+        HcPaneLookupParams(labels: ["termy.pane": paneId, "termy.instance": instance])
+    }
+
+    /// 원격 pane의 terminal.run 직전 확인. nil이면 이번 attach를 그만둔다(호출 실패·머신 대기·pane이 닫힘;
+    /// 상태는 여기서 정했다).
+    private func checkBeforeRemoteRun(machine: String, on conn: HcConnection) async -> RemoteRunCheck? {
+        setState(.connecting)
+        let instance = HcSessionManager.instanceLabel
+        let lookup: HcPaneLookup
+        do {
+            lookup = try await conn.call("terminal.list", Self.paneLookupParams(paneId: paneId, instance: instance))
+        } catch {
+            attachFailed(error, address: nil)
+            return nil
+        }
+        let check = Self.remoteRunCheck(paneId: paneId, instance: instance, machine: machine,
+                                        terminals: lookup.terminals, machines: lookup.machines ?? [])
+        if lifecycle == .killed, case .attach(let found) = check {
+            manager.kill(address: found)   // 묻는 사이에 pane이 닫혔다
+        }
+        guard lifecycle == .running else { return nil }
+        if case .wait(let state) = check {
+            setState(state)
+            return nil
+        }
+        return check
     }
 
     private func plan() -> AttachPlan {
@@ -369,14 +447,21 @@ final class HcPaneBackend {
         case .waitForMachine(let machine):
             setState(.unavailable("\(machine) is not connected"))
             return
-        case .awaitMachine:
+        case .awaitMachine(let machine):
             // manager가 그 머신을 보면(machine.list, 그 머신의 terminal이나 `missed`) 다시 부른다.
-            setState(.connecting)
+            setState(Self.waitingState(machine: machine, lineState: manager.machineLineState(machine)))
             manager.refreshMachines()
             return
         case .attach(let found):
             target = found
         case .run:
+            if let machine = launch.machine {
+                guard let check = await checkBeforeRemoteRun(machine: machine, on: conn) else { return }
+                if case .attach(let found) = check {
+                    target = found
+                    break
+                }
+            }
             let params = Self.runParams(paneId: paneId, projectKey: projectKey, projectId: projectId, launch: launch,
                                         instance: HcSessionManager.instanceLabel,
                                         baseEnvironment: ProcessInfo.processInfo.environment)

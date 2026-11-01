@@ -241,6 +241,53 @@ final class HcRestoreIntegrationTests: XCTestCase {
         XCTAssertEqual(controller.panes.count, 2)
     }
 
+    /// address를 모른 채 닫힌 pane(머신이 끊겨 있던 원격 pane)의 terminal이 나중에 오면(`created`) kill한다.
+    /// scratch core에는 머신이 없으므로, 닫은 뒤에 같은 label의 local terminal을 띄워 늦게 오는 terminal을 흉내 낸다.
+    func testClosedPaneTerminalArrivingLaterIsKilled() async throws {
+        let manager = try installScratchManager()
+        try await manager.ensureConnected()
+        let paneId = UUID().uuidString
+        manager.killPane(paneId: paneId)   // 아직 그 pane의 terminal이 없다
+        XCTAssertFalse(manager.hasPendingKills, "quitting does not wait for a terminal that may never come")
+
+        let params = HcPaneBackend.runParams(paneId: paneId, projectKey: "bdpc01:/srv/app", projectId: "app@bdpc01",
+                                             launch: HcLaunch(machine: nil, cwd: "/tmp", shell: "/bin/sh"),
+                                             instance: HcSessionManager.instanceLabel, baseEnvironment: [:])
+        let late: HcTerminal = try await manager.call("terminal.run", params)
+        try await waitUntil(5, "the late terminal is killed") {
+            let live = (try? await self.testTerminals(manager))?.filter { $0.state == "live" }.map(\.address)
+            return live.map { !$0.contains(late.address) } ?? false
+        }
+
+        // 같은 id로 다시 연 pane(⌘K 등)의 terminal은 kill하지 않는다.
+        let reopened = UUID().uuidString
+        manager.killPane(paneId: reopened)
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        let backend = HcPaneBackend(paneId: reopened, projectKey: "/private/tmp", projectId: "tmp",
+                                    launch: HcLaunch(machine: nil, cwd: "/tmp", shell: "/bin/sh"), view: view, manager: manager)
+        addTeardownBlock { @MainActor in backend.detach() }
+        backend.start()
+        try await waitUntil(5, "reopened pane attached") { backend.connectionState == .attached }
+        let address = try XCTUnwrap(backend.address)
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(backend.connectionState, .attached)
+        let live = try await testTerminals(manager).filter { $0.state == "live" }.map(\.address)
+        XCTAssertTrue(live.contains(address), "a pane opened again under that id keeps its terminal")
+    }
+
+    /// R13b의 확인 호출이 실제 core에서 labels로 걸러지고 machines가 함께 오는지(원격 pane이 띄우기 직전에 쓴다).
+    func testPaneLookupFiltersByPaneLabel() async throws {
+        let manager = try installScratchManager()
+        let wanted = UUID().uuidString
+        _ = try await leaveTerminal(manager, paneId: wanted)
+        _ = try await leaveTerminal(manager, paneId: UUID().uuidString)
+        let lookup: HcPaneLookup = try await manager.call(
+            "terminal.list", HcPaneBackend.paneLookupParams(paneId: wanted, instance: HcSessionManager.instanceLabel))
+        XCTAssertEqual(lookup.terminals.map { $0.labels["termy.pane"] }, [wanted])
+        // hc 0.1.16은 머신이 없으면 machines 키를 빼고 보낸다(schema는 required라고 한다). 없어도 풀려야 한다.
+        XCTAssertEqual(lookup.machines ?? [], [], "the scratch core has no machines")
+    }
+
     /// R13. 복원한 원격 pane은 그 머신이 지금 구독에서 연결된 것을 보기 전에는 terminal.run을 부르지 않는다.
     /// scratch core에는 머신이 없으므로 끝까지 기다리는 쪽만 볼 수 있다(머신을 본 뒤 띄우는 쪽은 HcRestorePlannerTests).
     func testRestoredRemotePaneWaitsForItsMachine() async throws {

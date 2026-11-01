@@ -10,7 +10,9 @@ import os
 // 한다. AppDelegate는 종료 직전에 flushPendingKills로 응답을 기다린다.
 // 원격 머신은 연결마다 그 머신이 연결된 것을 봤는지(machine.list의 connected, 그 머신의 terminal이나 `missed`)
 // 기억한다. address를 모르는 원격 pane은 그 전에는 새 셸을 띄우지 않는다: 머신 줄이 다시 이어지기 전에는 살아
-// 있는 그 pane의 terminal이 snapshot에 없어서, 띄우면 셸이 둘이 된다.
+// 있는 그 pane의 terminal이 snapshot에 없어서, 띄우면 셸이 둘이 된다. "봤다"는 깨우는 신호일 뿐이고(줄이
+// 이어진 뒤에도 그 머신의 terminal은 늦게 온다), 띄우기 직전에 backend가 terminal.list로 다시 확인한다.
+// address를 모른 채 닫힌 pane의 terminal은 나중에 오는 대로 kill한다.
 
 enum HcAvailability: Equatable, Sendable {
     case notInstalled, connecting, connected(version: String), unavailable(String)
@@ -67,9 +69,14 @@ final class HcSessionManager {
     private var pendingKills: [String: Bool] = [:]
     /// address를 모르는 채 닫힌 pane(연결 전·unavailable). 연결되면 label로 찾아 kill한다.
     private var pendingPaneKills: Set<String> = []
+    /// address를 모른 채 닫힌 pane들(앱이 도는 동안). 끊겨 있던 머신의 terminal은 줄이 다시 이어진 뒤에야
+    /// (`missed`·`created`) 오므로, 그때 이 label의 terminal을 kill한다. 종료 때 기다리는 kill에는 세지 않는다.
+    private var closedPaneIds: Set<String> = []
     private var flushWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     /// 지금 연결(구독)에서 연결된 것을 본 원격 머신. 연결이 바뀌면 비운다.
     private var seenMachines: Set<String> = []
+    /// 지금 연결에서 machine.list가 마지막으로 알려 준 머신 줄 상태(connecting, connected, needs_login, unreachable).
+    private var machineLines: [String: String] = [:]
     private var machineRefresh: Task<Void, Never>?
     /// machine.list가 도는 사이에 다시 요청이 왔다(그사이 머신이 붙었을 수 있다): 끝나면 한 번 더 부른다.
     private var machineRefreshAgain = false
@@ -138,6 +145,7 @@ final class HcSessionManager {
         reconnectAttempt = 0
         store = HcEventStore(seq: subscription.seq, terminals: subscription.terminals)
         seenMachines = Self.machines(of: subscription.terminals)
+        machineLines = [:]
         readEvents(events, channel: channel, on: conn, epoch: epoch)
         watchDisconnect(conn)
         setAvailability(.connected(version: hello.version))
@@ -166,6 +174,7 @@ final class HcSessionManager {
         guard connection === conn else { return }
         connection = nil
         seenMachines = []
+        machineLines = [:]
         Task { await conn.close() }   // 이미 끊겼어도 닫아 두고 참조를 놓는다(fd는 해제될 때 닫힌다)
         guard !isShutDown else { return }
         setAvailability(.connecting)
@@ -279,6 +288,7 @@ final class HcSessionManager {
                 return
             }
             store.resetFromMissed(seq: missed.seq, terminals: missed.terminals)
+            killTerminalsOfClosedPanes(missed.terminals)
             // 원격 머신의 구독이 (다시) 이어질 때도 `missed`로 온다. 이름이 없으면 waiting pane이 machine.list로 다시 본다.
             markMachinesSeen(Self.machines(of: missed.terminals).union(missed.machine.map { [$0] } ?? []))
             for backend in liveBackends { backend.resync() }
@@ -289,12 +299,16 @@ final class HcSessionManager {
 
     private func route(_ change: HcTerminalChange) {
         switch change {
-        case .upserted(let t): (backend(for: t.address) ?? waitingBackend(for: t))?.terminalUpserted(t)
+        case .upserted(let t):
+            killTerminalsOfClosedPanes([t])
+            (backend(for: t.address) ?? waitingBackend(for: t))?.terminalUpserted(t)
         case .removed: break   // 붙어 있었다면 stream CLOSE가 따로 온다
         case .status(let address, let status): backend(for: address)?.statusChanged(status)
         case .foreground(let address, let fg): backend(for: address)?.foregroundChanged(fg)
         case .lost(let address, _): backend(for: address)?.terminalLost()
-        case .restarted(let t): backend(for: t.address)?.terminalRestarted()
+        case .restarted(let t):
+            killTerminalsOfClosedPanes([t])
+            backend(for: t.address)?.terminalRestarted()
         case .finished(let address, let code, let reason): backend(for: address)?.terminalFinished(exitCode: code, reason: reason)
         }
     }
@@ -304,6 +318,7 @@ final class HcSessionManager {
     func register(_ backend: HcPaneBackend) {
         backends = backends.filter { $0.value.value != nil }
         backends[ObjectIdentifier(backend)] = WeakBackend(value: backend)
+        closedPaneIds.remove(backend.paneId)   // 같은 id로 다시 연 pane의 terminal은 kill하지 않는다
     }
 
     func unregister(_ backend: HcPaneBackend) {
@@ -339,9 +354,15 @@ final class HcSessionManager {
 
     // MARK: - 원격 머신을 봤는지
 
-    /// 지금 연결에서 이 머신이 연결된 것을 봤는지. address를 모르는 원격 pane은 그 전에는 새 셸을 띄우지 않는다.
+    /// 지금 연결에서 이 머신이 연결된 것을 봤는지. address를 모르는 원격 pane을 깨우는 신호일 뿐이고, 띄울지는
+    /// 띄우기 직전에 terminal.list로 다시 확인한다(HcPaneBackend.remoteRunCheck).
     func hasSeenMachine(_ name: String) -> Bool {
         seenMachines.contains(name)
+    }
+
+    /// machine.list가 마지막으로 알려 준 이 머신의 줄 상태. 아직 모르면 nil.
+    func machineLineState(_ name: String) -> String? {
+        machineLines[name]
     }
 
     nonisolated static func machines(of terminals: [HcTerminal]) -> Set<String> {
@@ -365,7 +386,10 @@ final class HcSessionManager {
     private func machinesListed(_ machines: [HcMachine]?, epoch: Int) {
         machineRefresh = nil
         if let machines, epoch == self.epoch, connection != nil {
+            for machine in machines { machineLines[machine.name] = machine.state }
             markMachinesSeen(Set(machines.filter { $0.state == "connected" }.map(\.name)))
+            // 아직 기다리는 pane에는 그 머신의 줄 상태(로그인 필요·닿지 않음)를 보여 준다.
+            for backend in liveBackends where backend.address == nil { backend.machineLineChanged() }
         }
         if machineRefreshAgain {
             machineRefreshAgain = false
@@ -408,7 +432,8 @@ final class HcSessionManager {
         }
     }
 
-    /// address를 모르는 pane을 닫을 때. 연결되면 그 pane label의 살아 있는 terminal을 kill한다.
+    /// address를 모르는 pane을 닫을 때. 연결되면 그 pane label의 살아 있는 terminal을 kill하고, 아직 오지 않은
+    /// terminal(끊겨 있던 원격 머신의 것)은 나중에 오는 대로 kill한다.
     func killPane(paneId: String) {
         pendingPaneKills.insert(paneId)
         if connection != nil {
@@ -419,13 +444,24 @@ final class HcSessionManager {
     }
 
     private func resolvePaneKills() {
-        guard !pendingPaneKills.isEmpty else { return }
-        let paneIds = pendingPaneKills
+        closedPaneIds.formUnion(pendingPaneKills)
         pendingPaneKills = []
-        for t in store.termyTerminals(instance: Self.instanceLabel) where paneIds.contains(t.labels["termy.pane"] ?? "") {
-            kill(address: t.address)
-        }
+        killTerminalsOfClosedPanes(Array(store.terminals.values))
         resumeFlushWaitersIfDone()
+    }
+
+    private func killTerminalsOfClosedPanes(_ terminals: [HcTerminal]) {
+        for address in Self.terminalsOfClosedPanes(closedPaneIds, in: terminals, instance: Self.instanceLabel) {
+            kill(address: address)
+        }
+    }
+
+    /// 닫은 pane(`closed`)의 label이 붙은, 이 instance의 살아 있는 terminal 주소.
+    nonisolated static func terminalsOfClosedPanes(_ closed: Set<String>, in terminals: [HcTerminal], instance: String) -> [String] {
+        guard !closed.isEmpty else { return [] }
+        return terminals.filter {
+            $0.state == "live" && $0.labels["termy.instance"] == instance && closed.contains($0.labels["termy.pane"] ?? "")
+        }.map(\.address)
     }
 
     /// main actor가 막혀 있어도(앱 종료 중) 쓰기가 나가도록 actor 밖의 task에서 보낸다.
