@@ -138,6 +138,8 @@ final class HcSessionManager {
     private var machineRefresh: Task<Void, Never>?
     /// machine.list가 도는 사이에 다시 요청이 왔다(그사이 머신이 붙었을 수 있다): 끝나면 한 번 더 부른다.
     private var machineRefreshAgain = false
+    /// 마지막 hello에서 core가 이 termy와 맞지 않는다고 답했다(`isHelloRejection`). 연결이 되면 풀린다.
+    private var helloRejected = false
 
     private struct WeakBackend { weak var value: HcPaneBackend? }
 
@@ -148,6 +150,36 @@ final class HcSessionManager {
     /// 지금 쓸 수 있는 연결과 그 epoch. backend가 한 attach의 호출을 모두 같은 연결로 보내는 데 쓴다.
     var liveConnection: (connection: HcConnection, epoch: Int)? {
         connection.map { ($0, epoch) }
+    }
+
+    // MARK: - 새 pane
+
+    /// 새 hc pane을 만들어도 되는지(spec §6.10 "어느 경우든 새 hc pane은 만들지 않고"). herdr-core가 없거나 마지막
+    /// hello에서 core가 이 termy와 맞지 않는다고 답했으면 아니다: 만들면 셸이 뜨지 않는 "herdr-core unavailable" pane만
+    /// 생긴다. 아직 연결하지 않았거나 연결 중이거나 일시적으로 실패했으면 된다(평소 길이다).
+    /// 거절된 상태에서 물으면 뒤에서 한 번 다시 연결해 본다. hc pane이 없으면 다시 연결할 일이 없어서, 그러지 않으면
+    /// `hc update`를 한 뒤에도 앱을 다시 켤 때까지 새 pane이 local로 남는다.
+    func allowsNewPanes() -> Bool {
+        guard endpointProvider() != nil else { return false }
+        guard helloRejected else { return true }
+        if connection == nil, connectTask == nil, !isShutDown {
+            Task { try? await self.ensureConnected() }
+        }
+        return false
+    }
+
+    /// 새 로컬 pane에 쓸 `allowsNewPanes`. "Run local panes in herdr-core"가 꺼져 있으면 hc를 찾지도 않는다.
+    static func allowsNewLocalPanes(defaults: UserDefaults) -> Bool {
+        HcFeatureSettings.localPanesEnabled(defaults) && shared.allowsNewPanes()
+    }
+
+    /// hello에서 core가 이 termy와 맞지 않는다고 답한 오류. core가 바뀌기(`hc update`, termy 업데이트) 전에는 다시
+    /// 연결해도 같다.
+    nonisolated static func isHelloRejection(_ error: Error) -> Bool {
+        switch error as? HcError {
+        case .incompatibleGeneration, .missingMethods: return true
+        default: return false
+        }
     }
 
     // MARK: - 연결
@@ -191,6 +223,7 @@ final class HcSessionManager {
         } catch {
             await conn.close()
             if !isShutDown {
+                if Self.isHelloRejection(error) { helloRejected = true }
                 setAvailability(.unavailable(Self.describe(error)))
                 connectFailed(error)
             }
@@ -201,6 +234,7 @@ final class HcSessionManager {
         epoch += 1
         connection = conn
         reconnectAttempt = 0
+        helloRejected = false
         store = HcEventStore(seq: subscription.seq, terminals: subscription.terminals)
         seenMachines = Self.machines(of: subscription.terminals)
         machineLines = [:]

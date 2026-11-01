@@ -138,4 +138,72 @@ final class HcConnectionTests: XCTestCase {
         }
         XCTAssertEqual(reason ?? nil, HcError.disconnected)
     }
+
+    // MARK: - R21: 새 hc pane을 만들어도 되는지(HcSessionManager)
+
+    private func subscribeLine() throws -> Data {
+        let result: [String: Any] = ["channel": 1, "seq": 0, "terminals": [Any]()]
+        let msg: [String: Any] = ["jsonrpc": "2.0", "id": 2, "result": result]   // hello 다음 요청이 id 2다
+        // hello 뒤의 응답은 channel 0의 DATA frame으로 온다.
+        return HcFrame(channel: 0, kind: .data, payload: try JSONSerialization.data(withJSONObject: msg)).encoded()
+    }
+
+    @MainActor
+    private func failToConnect(_ manager: HcSessionManager) async {
+        do {
+            try await manager.ensureConnected()
+            XCTFail("connected")
+        } catch {}
+    }
+
+    @MainActor
+    private final class EndpointBox {
+        var endpoint: HcEndpoint?
+        init(_ endpoint: HcEndpoint?) { self.endpoint = endpoint }
+    }
+
+    /// 아직 연결하지 않았거나 일시적으로 실패했으면 새 pane은 hc다(평소 길). herdr-core가 없거나 core가 hello에서
+    /// 이 termy와 맞지 않는다고 답했으면(generation 불일치, method 부족) 새 hc pane을 만들지 않는다(spec §6.10).
+    @MainActor
+    func testNewPanesAreBlockedOnlyByAKnownHardFailure() async throws {
+        let missing = HcSessionManager(endpointProvider: { nil })
+        addTeardownBlock { await missing.shutdown() }
+        XCTAssertFalse(missing.allowsNewPanes(), "not installed")
+
+        let methods = HcConnection.requiredMethods.filter { $0 != "machine.exec" }
+        for core in [try fakeCore([try helloLine(generation: 2)]), try fakeCore([try helloLine(methods: methods)])] {
+            let manager = HcSessionManager(endpointProvider: { core })
+            addTeardownBlock { await manager.shutdown() }
+            XCTAssertTrue(manager.allowsNewPanes(), "not connected yet: the normal path")
+            await failToConnect(manager)
+            XCTAssertFalse(manager.allowsNewPanes(), "the core rejected this termy in hello")
+        }
+
+        // hello 전에 끝난 connect(일시적인 실패)는 막지 않는다.
+        let flaky = try fakeCore([], exitAfter: true)
+        let manager = HcSessionManager(endpointProvider: { flaky })
+        addTeardownBlock { await manager.shutdown() }
+        await failToConnect(manager)
+        XCTAssertTrue(manager.allowsNewPanes())
+    }
+
+    /// 거절된 뒤 새 pane을 만들려 하면 그 pane은 local로 두고 뒤에서 다시 연결해 본다. 그사이 `hc update`로 맞는 core가
+    /// 됐으면 다음 새 pane부터 hc다(hc pane이 없으면 다시 연결할 일이 없어 거절이 앱을 다시 켤 때까지 남는다).
+    @MainActor
+    func testRejectedHelloIsProbedAgainOnTheNextNewPane() async throws {
+        let box = EndpointBox(try fakeCore([try helloLine(generation: 2)]))
+        let manager = HcSessionManager(endpointProvider: { box.endpoint })
+        addTeardownBlock { await manager.shutdown() }
+        await failToConnect(manager)
+        XCTAssertFalse(manager.allowsNewPanes())
+
+        box.endpoint = try fakeCore([try helloLine(), try subscribeLine()])
+        XCTAssertFalse(manager.allowsNewPanes(), "this pane still goes local")
+        let deadline = Date().addingTimeInterval(5)
+        while manager.availability != .connected(version: "fake") {
+            guard Date() < deadline else { return XCTFail("the probe did not connect: \(manager.availability)") }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(manager.allowsNewPanes())
+    }
 }

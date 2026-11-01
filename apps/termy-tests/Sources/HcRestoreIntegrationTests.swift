@@ -419,4 +419,36 @@ final class HcRestoreIntegrationTests: XCTestCase {
                        PaneHookDetails(lastSessionId: "hc-session", lastPrompt: "ship it", lastAssistantMessage: nil,
                                        lastCwd: nil, agentKind: .codex))
     }
+
+    // MARK: - ⌘K 원격 project 다시 열기(R21)
+
+    /// ⌘K로 원격 project를 다시 열 때 herdr-core가 없으면 먼저 설치를 권하고, 설치하지 않으면 열지 않는다(열면 셸이
+    /// 뜨지 않는 "herdr-core unavailable" pane만 생긴다). 이미 열린 project로 가거나 로컬 project를 열 때는 묻지 않는다.
+    func testReopeningARemoteProjectAsksToInstallFirst() async throws {
+        let manager = HcSessionManager(endpointProvider: { nil })
+        addTeardownBlock { await manager.shutdown() }
+        install(manager)
+        let windowManager = try await restore([window([PaneRecord(cwd: "/tmp", backend: .local, projectId: "tmp")])])
+        let controller = try XCTUnwrap(windowManager.controllers.first)
+        let remote = RemoteProject.record(machine: "hct-box", folder: "/srv/app", now: Date())
+        var asked = 0
+
+        await controller.reopenProject(remote, ensureInstalled: { _ in asked += 1; return false })
+        XCTAssertEqual(asked, 1)
+        XCTAssertEqual(controller.panes.count, 1, "install cancelled: the project does not open")
+
+        await controller.reopenProject(remote, ensureInstalled: { _ in asked += 1; return true })
+        XCTAssertEqual(asked, 2)
+        XCTAssertEqual(controller.panes.map(\.launch), [.local, .hc(machine: "hct-box")])
+
+        await controller.reopenProject(remote, ensureInstalled: { _ in asked += 1; return false })
+        XCTAssertEqual(asked, 2, "an open project just switches the filter")
+        XCTAssertEqual(controller.panes.count, 2)
+
+        let local = WorkspaceRecord(canonicalPath: "/tmp/termy-local-\(UUID().uuidString)", displayLabel: "local",
+                                    panes: [PaneRecord(cwd: "/tmp")])
+        await controller.reopenProject(local, ensureInstalled: { _ in asked += 1; return false })
+        XCTAssertEqual(asked, 2, "a local project never asks")
+        XCTAssertEqual(controller.panes.count, 3)
+    }
 }

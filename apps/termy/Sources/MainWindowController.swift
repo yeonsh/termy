@@ -482,7 +482,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         let panel = projectSwitcher ?? {
             let p = ProjectSwitcherPanel()
             p.onPick = { [weak self] record in
-                self?.restore(workspace: record)
+                Task { @MainActor in await self?.reopenProject(record) }
             }
             p.onDelete = { record in
                 Task { await persistence.delete(canonicalPath: record.canonicalPath) }
@@ -529,6 +529,18 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         restore(workspace: record)
     }
 
+    /// ⌘K에서 고른 project를 연다. 원격 project의 pane은 herdr-core 안에서만 돌므로, 그 project의 pane이 열려 있지
+    /// 않으면 먼저 herdr-core가 있는지 보고(없으면 설치를 권한다) 설치하지 않으면 열지 않는다. 열면 셸이 뜨지 않는
+    /// "herdr-core unavailable" pane만 생긴다. 로컬 project와 이미 열린 project는 묻지 않는다.
+    func reopenProject(_ record: WorkspaceRecord,
+                       ensureInstalled: @MainActor (NSWindow?) async -> Bool = HcInstallSheet.ensureInstalled(over:)) async {
+        let isOpen = workspace.panes.contains { $0.workspaceRecordKey == record.canonicalPath }
+        if record.machine != nil, !isOpen {
+            guard await ensureInstalled(window) else { return }
+        }
+        restore(workspace: record)
+    }
+
     /// Take a saved workspace record and bring it onscreen.
     /// * Alive panes for that canonical project → just switch the filter
     ///   (keeps the live agents untouched).
@@ -549,6 +561,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
             }
             return
         }
+        let hcAllowsNewPanes = HcSessionManager.allowsNewLocalPanes(defaults: .standard)
         // Replay the saved row structure. `addPane` uses the currently-
         // focused pane + axis to decide placement; we drive that by choosing
         // `.row` for the first pane of each saved row and `.column` for
@@ -559,7 +572,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
                 let paneRec = RemoteProject.reopenedPane(saved, in: record)
                 addRestoredPane(
                     paneRec, cwd: paneRec.cwd, splitAxis: axis, startupInput: nil,
-                    launch: PaneLaunch.forReopenedRecord(paneRec, defaults: .standard))
+                    launch: PaneLaunch.forReopenedRecord(paneRec, defaults: .standard, hcAllowsNewPanes: hcAllowsNewPanes))
             }
         }
         // All new panes belong to the restored project — lock the filter to it.

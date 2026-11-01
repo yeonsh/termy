@@ -167,7 +167,7 @@ final class RemoteProjectTests: XCTestCase {
     // MARK: - 새 pane이 원격 pane을 따른다
 
     func testNewPaneFollowsFocusedRemotePane() {
-        let r = Workspace.launchForNewPane(focused: (.hc(machine: "bdpc01"), "/srv/app/sub", "app@bdpc01", "bdpc01:/srv/app"), defaults: InMemoryUserDefaults())
+        let r = Workspace.launchForNewPane(focused: (.hc(machine: "bdpc01"), "/srv/app/sub", "app@bdpc01", "bdpc01:/srv/app"), defaults: InMemoryUserDefaults(), hcAllowsNewPanes: true)
         XCTAssertEqual(r.launch, .hc(machine: "bdpc01")); XCTAssertEqual(r.cwd, "/srv/app/sub"); XCTAssertEqual(r.projectKey, "bdpc01:/srv/app")
         XCTAssertEqual(r.projectId, "app@bdpc01")
     }
@@ -176,19 +176,32 @@ final class RemoteProjectTests: XCTestCase {
     /// addPane이 포커스된 pane과 cwd로 정한다.
     func testNewPaneWithoutRemoteFocusFollowsTheSetting() {
         let off = InMemoryUserDefaults()
-        let local = Workspace.launchForNewPane(focused: (.local, "/p/api", "api", "/p/api"), defaults: off)
+        let local = Workspace.launchForNewPane(focused: (.local, "/p/api", "api", "/p/api"), defaults: off, hcAllowsNewPanes: true)
         XCTAssertEqual(local.launch, .local)
         XCTAssertNil(local.cwd); XCTAssertNil(local.projectId); XCTAssertNil(local.projectKey)
 
         let on = InMemoryUserDefaults()
         HcFeatureSettings.setLocalPanesEnabled(true, on)
-        let localHc = Workspace.launchForNewPane(focused: (.hc(machine: nil), "/p/api", "api", "/p/api"), defaults: on)
+        let localHc = Workspace.launchForNewPane(focused: (.hc(machine: nil), "/p/api", "api", "/p/api"), defaults: on, hcAllowsNewPanes: true)
         XCTAssertEqual(localHc.launch, .hc(machine: nil))
         XCTAssertNil(localHc.cwd); XCTAssertNil(localHc.projectId); XCTAssertNil(localHc.projectKey)
 
-        let none = Workspace.launchForNewPane(focused: nil, defaults: on)
+        let none = Workspace.launchForNewPane(focused: nil, defaults: on, hcAllowsNewPanes: true)
         XCTAssertEqual(none.launch, .hc(machine: nil))
         XCTAssertNil(none.cwd)
+    }
+
+    /// R21. hc를 쓸 수 없는 것이 확실하면 로컬 쪽 새 pane(⌘N·split·새 창의 첫 pane)은 local이다. 원격 pane 옆의
+    /// 새 pane은 그 머신의 pane으로 남는다(local로 바꾸면 원격 project 안에 이 Mac의 셸이 생긴다).
+    func testNewPaneIsLocalWhenHcIsKnownUnusable() {
+        let on = InMemoryUserDefaults()
+        HcFeatureSettings.setLocalPanesEnabled(true, on)
+        XCTAssertEqual(Workspace.launchForNewPane(focused: nil, defaults: on, hcAllowsNewPanes: false).launch, .local)
+        XCTAssertEqual(Workspace.launchForNewPane(focused: (.hc(machine: nil), "/p/api", "api", "/p/api"), defaults: on,
+                                                  hcAllowsNewPanes: false).launch, .local)
+        let remote = Workspace.launchForNewPane(focused: (.hc(machine: "bdpc01"), "/srv/app", "app@bdpc01", "bdpc01:/srv/app"),
+                                                defaults: on, hcAllowsNewPanes: false)
+        XCTAssertEqual(remote.launch, .hc(machine: "bdpc01"))
     }
 
     // MARK: - ⌘K로 다시 열기
@@ -199,7 +212,7 @@ final class RemoteProjectTests: XCTestCase {
         record.panes = [PaneRecord(cwd: "/srv/app/sub")]
         let pane = RemoteProject.reopenedPane(record.panes[0], in: record)
         XCTAssertEqual(pane.launch, .hc(machine: "bdpc01"))
-        XCTAssertEqual(PaneLaunch.forReopenedRecord(pane, defaults: InMemoryUserDefaults()), .hc(machine: "bdpc01"))
+        XCTAssertEqual(PaneLaunch.forReopenedRecord(pane, defaults: InMemoryUserDefaults(), hcAllowsNewPanes: true), .hc(machine: "bdpc01"))
         XCTAssertEqual(pane.cwd, "/srv/app/sub")
         XCTAssertEqual(pane.machine, "bdpc01")
         XCTAssertEqual(pane.projectId, "app@bdpc01")

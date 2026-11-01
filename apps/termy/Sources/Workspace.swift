@@ -456,15 +456,17 @@ final class Workspace: NSView, NSSplitViewDelegate {
 
     /// 사용자가 만드는 새 pane(⌘N·split·새 창의 첫 pane)의 backend와 자리. 포커스된 pane이 원격이면 같은 머신·
     /// cwd·project의 원격 pane이다(원격 project 안에서 만든 pane이 이 Mac의 셸이 되면 안 된다). 아니면 "Run local
-    /// panes in herdr-core" 설정이 backend를 정하고, cwd와 project는 addPane이 지금 규칙(포커스된 pane)으로 정한다.
+    /// panes in herdr-core" 설정과 hc를 쓸 수 있는지(`PaneLaunch.forNewLocalPane`)가 backend를 정하고, cwd와 project는
+    /// addPane이 지금 규칙(포커스된 pane)으로 정한다.
     nonisolated static func launchForNewPane(
         focused: (launch: PaneLaunch, cwd: String, projectId: String, projectKey: String)?,
-        defaults: UserDefaults
+        defaults: UserDefaults,
+        hcAllowsNewPanes: Bool
     ) -> (launch: PaneLaunch, cwd: String?, projectId: String?, projectKey: String?) {
         if let focused, focused.launch.machine != nil {
             return (focused.launch, focused.cwd, focused.projectId, focused.projectKey)
         }
-        return (PaneLaunch.forNewLocalPane(defaults: defaults), nil, nil, nil)
+        return (PaneLaunch.forNewLocalPane(defaults: defaults, hcAllowsNewPanes: hcAllowsNewPanes), nil, nil, nil)
     }
 
     /// 사용자가 만드는 새 pane. `launchForNewPane`의 규칙을 따른다.
@@ -473,7 +475,8 @@ final class Workspace: NSView, NSSplitViewDelegate {
         let focused = focusedPane.map {
             (launch: $0.launch, cwd: $0.currentCwd, projectId: $0.projectId, projectKey: $0.projectKey)
         }
-        let next = Self.launchForNewPane(focused: focused, defaults: defaults)
+        let next = Self.launchForNewPane(focused: focused, defaults: defaults,
+                                         hcAllowsNewPanes: HcSessionManager.allowsNewLocalPanes(defaults: defaults))
         return addPane(cwd: next.cwd, splitAxis: splitAxis, launch: next.launch,
                        projectId: next.projectId, projectKey: next.projectKey)
     }

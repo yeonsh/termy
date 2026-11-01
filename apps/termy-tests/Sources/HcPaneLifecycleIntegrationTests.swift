@@ -92,6 +92,23 @@ final class HcPaneLifecycleIntegrationTests: XCTestCase {
         Set(try await testTerminals(manager).filter { $0.state == "live" }.map(\.address))
     }
 
+    /// R21. "Run local panes in herdr-core"가 켜져 있어도 herdr-core가 없으면 ⌘N·split·새 창의 첫 pane은 local이다
+    /// (셸이 뜨지 않는 "herdr-core unavailable" pane을 만들지 않는다).
+    func testNewPaneIsLocalWhenHcIsNotInstalled() async throws {
+        let manager = HcSessionManager(endpointProvider: { nil })
+        addTeardownBlock { await manager.shutdown() }
+        if savedManager == nil { savedManager = HcSessionManager.shared }
+        HcSessionManager.shared = manager
+        let on = InMemoryUserDefaults()
+        HcFeatureSettings.setLocalPanesEnabled(true, on)
+        let workspace = makeWorkspace()
+        let pane = workspace.addNewPane(defaults: on)
+        addTeardownBlock { @MainActor in if pane.terminal.process.running { pane.terminal.process.terminate() } }
+        XCTAssertEqual(pane.launch, .local)
+        XCTAssertNil(pane.hcBackend)
+        XCTAssertEqual(manager.availability, .unavailable(HcSessionManager.notConnectedReason), "never tried to connect")
+    }
+
     func testClosingHcPaneKillsTerminal() async throws {
         let manager = try installScratchManager()
         let workspace = makeWorkspace()

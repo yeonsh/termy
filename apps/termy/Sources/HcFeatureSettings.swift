@@ -62,15 +62,19 @@ enum HcFeatureSettings {
 }
 
 extension PaneLaunch {
-    /// 사용자가 만드는 새 local pane(새 pane·split)의 backend. 설정이 켜져 있으면 hc, 아니면 local이다.
-    static func forNewLocalPane(defaults: UserDefaults) -> PaneLaunch {
-        HcFeatureSettings.localPanesEnabled(defaults) ? .hc(machine: nil) : .local
+    /// 사용자가 만드는 새 local pane(새 pane·split·새 창의 첫 pane)의 backend. 설정이 켜져 있으면 hc, 아니면 local이다.
+    /// 켜져 있어도 hc를 쓸 수 없는 것이 확실하면(`hcAllowsNewPanes`가 false: herdr-core가 없거나 core가 hello를 거절함)
+    /// 셸이 뜨지 않는 pane 대신 local이다(spec §6.10). `HcSessionManager.allowsNewLocalPanes`를 넘긴다.
+    static func forNewLocalPane(defaults: UserDefaults, hcAllowsNewPanes: Bool) -> PaneLaunch {
+        HcFeatureSettings.localPanesEnabled(defaults) && hcAllowsNewPanes ? .hc(machine: nil) : .local
     }
 
     /// ⌘K로 다시 여는 project의 pane. 닫힌 창의 hc terminal은 죽었으므로 backend가 없는 local 기록은 새 셸이고
-    /// 지금 설정을 따른다. 원격이나 backend가 적힌 기록은 기록 그대로다.
-    static func forReopenedRecord(_ record: PaneRecord, defaults: UserDefaults) -> PaneLaunch {
-        if record.backend == nil, record.machine == nil { return forNewLocalPane(defaults: defaults) }
+    /// 지금 설정을 따른다(`forNewLocalPane`). 원격이나 backend가 적힌 기록은 기록 그대로다.
+    static func forReopenedRecord(_ record: PaneRecord, defaults: UserDefaults, hcAllowsNewPanes: Bool) -> PaneLaunch {
+        if record.backend == nil, record.machine == nil {
+            return forNewLocalPane(defaults: defaults, hcAllowsNewPanes: hcAllowsNewPanes)
+        }
         return record.launch
     }
 }
