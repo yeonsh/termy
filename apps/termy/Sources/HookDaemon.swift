@@ -432,6 +432,15 @@ actor HookDaemon {
         }
     }
 
+    /// herdr-core 7501 status for an hc pane (nil = status gone, hooks take over again).
+    func applyProgramStatus(paneId: String, projectId: String?, status: HcStatus?, now: Date = Date()) async {
+        let previous = panes[paneId] ?? PaneSnapshot.empty(paneId: paneId, projectId: projectId)
+        let next = PaneStateMachine.applyProgramStatus(status, to: previous, now: now)
+        panes[paneId] = next
+        seq &+= 1
+        updateContinuation.yield(DaemonUpdate(seq: seq, snapshot: next))
+    }
+
     private func ingest(_ event: HookEvent) async {
         // Events without a pane_id come from `claude` invocations outside
         // termy (user ran it in iTerm/plain shell). Journal for debug, drop

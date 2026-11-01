@@ -113,6 +113,9 @@ struct PaneSnapshot: Sendable, Codable {
     /// hook), closed by Stop / StopFailure / SessionEnd / PtyExit and by
     /// session resets. Feeds `isMidTurn`, which holds update relaunches.
     var turnOpen: Bool = false
+    /// True while herdr-core's 7501 program status drives this pane's state.
+    /// Hooks then fill only the detail fields. Runtime-only (not in CodingKeys).
+    var programStatusActive: Bool = false
 
     private enum CodingKeys: String, CodingKey {
         case paneId, projectId, state, needsAttention, notificationReason, waitSource
@@ -176,6 +179,69 @@ enum PaneStateMachine {
     }
 
     static func apply(_ event: HookEvent, to previous: PaneSnapshot) -> PaneSnapshot {
+        var next = applyHookRules(event, to: previous)
+        guard previous.programStatusActive else { return next }
+        // 7501 owns the state: hooks keep only the detail fields, except pty/session end.
+        if event.event == .ptyExit || event.event == .sessionEnd {
+            next.programStatusActive = false
+            return next
+        }
+        next.state = previous.state
+        next.needsAttention = previous.needsAttention
+        next.notificationReason = previous.notificationReason
+        next.waitSource = previous.waitSource
+        next.enteredStateAt = previous.enteredStateAt
+        next.turnOpen = previous.turnOpen
+        return next
+    }
+
+    /// Merges herdr-core's 7501 status (nil = the terminal stopped reporting one).
+    /// Re-sent identical statuses (attach/reconnect/missed resync) leave
+    /// `state`/`enteredStateAt` untouched so they never re-alert.
+    static func applyProgramStatus(_ status: HcStatus?, to previous: PaneSnapshot, now: Date) -> PaneSnapshot {
+        var next = previous
+        next.updatedAt = now
+        guard let status else {
+            next.programStatusActive = false
+            return next
+        }
+        next.programStatusActive = true
+        func finish(_ state: PaneState, attention: Bool, reason: String?, source: WaitSource?, turnOpen: Bool) {
+            let changed = previous.state != state
+                || previous.notificationReason != reason
+                || previous.waitSource != source
+            next.state = state
+            next.needsAttention = changed ? attention : (previous.needsAttention && attention)
+            next.notificationReason = reason
+            next.waitSource = source
+            next.turnOpen = turnOpen
+            if changed { next.enteredStateAt = now }
+        }
+        switch status.state {
+        case "working":
+            finish(.thinking, attention: false, reason: nil, source: nil, turnOpen: true)
+        case "blocked":
+            let source: WaitSource = status.kind == "question" ? .askUserQuestion : .permission
+            finish(.waiting, attention: true, reason: status.kind ?? "permission", source: source, turnOpen: true)
+        case "done":
+            finish(.waiting, attention: false, reason: nil, source: .turnEnd, turnOpen: false)
+        case "idle":
+            if previous.turnOpen {
+                finish(.waiting, attention: false, reason: nil, source: .turnEnd, turnOpen: false)
+            } else if previous.state == .waiting {
+                break
+            } else {
+                finish(.idle, attention: false, reason: nil, source: nil, turnOpen: false)
+            }
+        case "error":
+            finish(.errored, attention: false, reason: nil, source: nil, turnOpen: false)
+        default:
+            break
+        }
+        return next
+    }
+
+    private static func applyHookRules(_ event: HookEvent, to previous: PaneSnapshot) -> PaneSnapshot {
         var next = previous
         next.updatedAt = Date()
 

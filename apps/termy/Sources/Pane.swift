@@ -365,6 +365,15 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         backend.onExit = { [weak self] code in self?.shellExited(exitCode: code) }
         backend.onForeground = { [weak self] foreground in self?.hcForegroundChanged(foreground) }
         backend.onConnectionState = { [weak self] state in self?.showHcConnectionState(state) }
+        // 7501 status는 watcher 호출과 같은 순서 큐로 보낸다(working → idle이 뒤집히면 안 된다).
+        backend.onStatus = { [weak self] status in
+            guard let self else { return }
+            let paneId = self.paneId
+            let projectId = self.projectId
+            self.enqueueWatcherCall {
+                await HookDaemon.shared.applyProgramStatus(paneId: paneId, projectId: projectId, status: status)
+            }
+        }
         let paneId = self.paneId
         let projectId = self.projectId
         enqueueWatcherCall {
