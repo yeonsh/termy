@@ -28,12 +28,16 @@ final class FontSettingsPanel: NSPanel {
     private var sizePopUp: NSPopUpButton!
     private var cjkPopUp: NSPopUpButton!
     private var previewLabel: NSTextField!
+    private var hcCheckbox: NSButton!
+    private var hcStatusLabel: NSTextField!
+    private let hcDefaults = UserDefaults.standard
+    private var hcStatusGeneration = 0
 
     private static let sizeChoices: [CGFloat] = [10, 11, 12, 13, 14, 15, 16, 18, 20, 24]
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 280),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 360),
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -83,6 +87,7 @@ final class FontSettingsPanel: NSPanel {
         // Refresh the picker selections from the live preference in case it
         // changed while the panel was hidden (e.g. defaults reset).
         syncFromPreference()
+        refreshHcStatus()
         makeKeyAndOrderFront(nil)
     }
 
@@ -175,6 +180,18 @@ final class FontSettingsPanel: NSPanel {
         ])
         // Theme-aware colors set in applyTheme().
 
+        hcCheckbox = NSButton(checkboxWithTitle: "Run local panes in herdr-core", target: self, action: #selector(hcCheckboxChanged(_:)))
+        hcCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        hcStatusLabel = NSTextField(labelWithString: "")
+        hcStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        hcStatusLabel.textColor = .secondaryLabelColor
+        hcStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        let hcStack = NSStackView(views: [hcCheckbox, hcStatusLabel])
+        hcStack.orientation = .vertical
+        hcStack.alignment = .leading
+        hcStack.spacing = 4
+        hcStack.translatesAutoresizingMaskIntoConstraints = false
+
         let restoreButton = NSButton(title: "Restore Defaults", target: self, action: #selector(restoreDefaults(_:)))
         restoreButton.bezelStyle = .rounded
         restoreButton.translatesAutoresizingMaskIntoConstraints = false
@@ -195,6 +212,7 @@ final class FontSettingsPanel: NSPanel {
         content.addSubview(separator)
         content.addSubview(grid)
         content.addSubview(previewBox)
+        content.addSubview(hcStack)
         content.addSubview(buttonRow)
 
         NSLayoutConstraint.activate([
@@ -218,7 +236,11 @@ final class FontSettingsPanel: NSPanel {
             previewBox.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             previewBox.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
 
-            buttonRow.topAnchor.constraint(equalTo: previewBox.bottomAnchor, constant: 18),
+            hcStack.topAnchor.constraint(equalTo: previewBox.bottomAnchor, constant: 18),
+            hcStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            hcStack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
+
+            buttonRow.topAnchor.constraint(equalTo: hcStack.bottomAnchor, constant: 18),
             buttonRow.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             buttonRow.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
             buttonRow.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -18)
@@ -270,6 +292,7 @@ final class FontSettingsPanel: NSPanel {
         }
 
         refreshPreview()
+        hcCheckbox.state = HcFeatureSettings.localPanesEnabled(hcDefaults) ? .on : .off
     }
 
     @discardableResult
@@ -317,6 +340,47 @@ final class FontSettingsPanel: NSPanel {
             cjkFallbackName: name
         )
         refreshPreview()
+    }
+
+    /// 켤 때 herdr-core가 없으면 설치를 권하고, 설치하지 않으면 체크를 되돌린다. 이미 열린 pane은 그대로다.
+    @objc private func hcCheckboxChanged(_ sender: NSButton) {
+        guard sender.state == .on else {
+            HcFeatureSettings.setLocalPanesEnabled(false, hcDefaults)
+            return
+        }
+        sender.isEnabled = false
+        Task { @MainActor in
+            let installed = await HcInstallSheet.ensureInstalled(over: self)
+            sender.isEnabled = true
+            sender.state = installed ? .on : .off
+            HcFeatureSettings.setLocalPanesEnabled(installed, hcDefaults)
+            refreshHcStatus()
+        }
+    }
+
+    /// 연결하지 않고 지금 availability와 locator 결과만 보여 준다. 버전은 `herdr-core --version`으로 구한다.
+    private func refreshHcStatus() {
+        hcStatusGeneration += 1
+        let generation = hcStatusGeneration
+        let availability = HcSessionManager.shared.availability
+        let environment = ProcessInfo.processInfo.environment
+        let executable = HcLocator.find(environment: environment)
+        hcStatusLabel.stringValue = HcFeatureSettings.statusLine(
+            availability: availability, isInstalled: executable != nil, installedVersion: nil)
+        guard let executable else { return }
+        switch availability {
+        case .connected, .notInstalled: return
+        case .unavailable(let reason) where reason != HcSessionManager.notConnectedReason: return
+        default: break
+        }
+        Task { @MainActor in
+            let version = await Task.detached {
+                HcFeatureSettings.runVersion(executable: executable, environment: environment)
+            }.value
+            guard generation == hcStatusGeneration else { return }
+            hcStatusLabel.stringValue = HcFeatureSettings.statusLine(
+                availability: HcSessionManager.shared.availability, isInstalled: true, installedVersion: version)
+        }
     }
 
     @objc private func restoreDefaults(_ sender: Any?) {

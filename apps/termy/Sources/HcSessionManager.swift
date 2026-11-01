@@ -52,7 +52,9 @@ final class HcSessionManager {
 
     nonisolated private static let log = Logger(subsystem: "app.termy", category: "hc")
 
-    private(set) var availability: HcAvailability = .unavailable("not connected")
+    /// 아직 연결을 시도하지 않은 초기 상태의 사유. 실패가 아니다(설정 패널 상태 줄이 구분한다).
+    nonisolated static let notConnectedReason = "not connected"
+    private(set) var availability: HcAvailability = .unavailable(HcSessionManager.notConnectedReason)
     var onAvailabilityChange: ((HcAvailability) -> Void)?
     private(set) var store = HcEventStore(seq: 0, terminals: [])
     /// 연결이 새로 될 때마다 1씩 오른다. backend는 자기 attach가 지금 연결의 것인지 이것으로 안다.

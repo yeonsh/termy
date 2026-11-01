@@ -130,9 +130,12 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         if let sessionLayout {
             applySessionLayout(sessionLayout)
         } else {
-            workspace.addPane()
+            workspace.addPane(launch: newPaneLaunch)
         }
     }
+
+    /// 사용자가 만드는 새 local pane(새 창의 첫 pane·새 pane·split)의 backend. "Run local panes in herdr-core"를 따른다.
+    private var newPaneLaunch: PaneLaunch { PaneLaunch.forNewLocalPane(defaults: .standard) }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
@@ -361,8 +364,10 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     /// hc pane은 저장된 project를 쓰고(원격 project는 cwd로 정할 수 없다) hook 세부 정보를 되살린다. local pane의
     /// project는 지금처럼 cwd로 정한다(agent resume이 cwd를 바꿀 수 있다). 기록에 없는 값은 지금 동작 그대로다.
     @discardableResult
-    private func addRestoredPane(_ record: PaneRecord, cwd: String, splitAxis: SplitAxis, startupInput: String?) -> Pane {
-        let launch = record.launch
+    private func addRestoredPane(
+        _ record: PaneRecord, cwd: String, splitAxis: SplitAxis, startupInput: String?, launch launchOverride: PaneLaunch? = nil
+    ) -> Pane {
+        let launch = launchOverride ?? record.launch
         let isHc = launch.backendKind == .hc
         let paneId = reusablePaneId(record.paneId)
         let pane = workspace.addPane(
@@ -423,7 +428,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     // MARK: - Menu actions
 
     @IBAction func newPane(_ sender: Any?) {
-        workspace.addPane()
+        workspace.addPane(launch: newPaneLaunch)
     }
 
     /// ⌘/ — open (or toggle) the keyboard-shortcuts overlay.
@@ -526,7 +531,9 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         for savedRow in record.effectiveRows {
             for (colIdx, paneRec) in savedRow.enumerated() {
                 let axis: SplitAxis = (colIdx == 0) ? .row : .column
-                addRestoredPane(paneRec, cwd: paneRec.cwd, splitAxis: axis, startupInput: nil)
+                addRestoredPane(
+                    paneRec, cwd: paneRec.cwd, splitAxis: axis, startupInput: nil,
+                    launch: PaneLaunch.forReopenedRecord(paneRec, defaults: .standard))
             }
         }
         // All new panes belong to the restored project — lock the filter to it.
@@ -534,11 +541,11 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     }
 
     @IBAction func splitColumn(_ sender: Any?) {
-        workspace.addPane(splitAxis: .column)
+        workspace.addPane(splitAxis: .column, launch: newPaneLaunch)
     }
 
     @IBAction func splitRow(_ sender: Any?) {
-        workspace.addPane(splitAxis: .row)
+        workspace.addPane(splitAxis: .row, launch: newPaneLaunch)
     }
 
     @IBAction func closePane(_ sender: Any?) {

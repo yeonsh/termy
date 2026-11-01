@@ -62,13 +62,10 @@ final class WindowManager {
 
     // MARK: - hc 고아 terminal
 
-    /// "Run local panes in herdr-core" 설정의 defaults key. Task 10의 HcFeatureSettings가 이 읽기를 맡는다.
-    nonisolated static let localHcPanesKey = "termy.herdrCore.localPanes"
-
     /// 고아 정리에 hc를 연결할지. hc pane이 있거나 로컬 hc 설정이 켜져 있을 때만이다: local pane만 쓰는 사용자는
     /// herdr-core를 띄우지도, 연결하지도 않는다.
     nonisolated static func shouldAdoptHcOrphans(paneKinds: [PaneBackendKind], defaults: UserDefaults) -> Bool {
-        paneKinds.contains(.hc) || (defaults.object(forKey: localHcPanesKey) as? Bool ?? false)
+        paneKinds.contains(.hc) || HcFeatureSettings.localPanesEnabled(defaults)
     }
 
     /// `restoreSessionWindows` 뒤에 부른다. 자기 instance label이 있는데 어느 창에도 pane이 없는 살아 있는 hc
