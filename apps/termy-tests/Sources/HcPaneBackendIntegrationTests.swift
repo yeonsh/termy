@@ -110,6 +110,31 @@ final class HcPaneBackendIntegrationTests: XCTestCase {
         XCTAssertEqual(terminals.map(\.address), [address])
     }
 
+    /// attach 응답을 기다리는 사이 grid가 바뀌면 그 RESIZE는 session이 없어 버려진다. 붙은 뒤 지금 크기를 한 번
+    /// 보내야 프로그램이 attach 때의 크기(고아를 열 때는 frame이 잡히기 전의 80x25)에 머물지 않는다.
+    func testGridChangeDuringAttachReachesTheProgram() async throws {
+        let manager = try makeManager()
+        let (backend, view) = makeBackend(manager)
+        backend.start()
+        // address는 attach 호출 직전(attach 인자의 grid를 읽은 곳)에 정해지고 session은 응답을 처리할 때 열린다.
+        // main actor를 양보하며 기다리다 그 사이에 크기를 바꾼다.
+        let deadline = Date().addingTimeInterval(5)
+        while backend.address == nil {
+            guard Date() < deadline else { return XCTFail("no terminal address") }
+            await Task.yield()
+        }
+        XCTAssertEqual(backend.connectionState, .connecting, "resized before the attach reply was handled")
+        let sent = (cols: view.getTerminal().cols, rows: view.getTerminal().rows)
+        view.setFrameSize(NSSize(width: 900, height: 560))
+        let grid = (cols: view.getTerminal().cols, rows: view.getTerminal().rows)
+        XCTAssertTrue(grid != sent, "the grid changed")
+        try await waitUntil(5, "attached") { backend.connectionState == .attached }
+        view.send(txt: "stty size\r")
+        try await waitUntil(5, "the shell sees \(grid.rows) \(grid.cols), not \(sent.rows) \(sent.cols)") {
+            screenHasLine(view, "\(grid.rows) \(grid.cols)")
+        }
+    }
+
     func testKillRemovesTerminal() async throws {
         let manager = try makeManager()
         let (backend, _) = makeBackend(manager)

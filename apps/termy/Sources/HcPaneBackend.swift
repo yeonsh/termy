@@ -510,6 +510,12 @@ final class HcPaneBackend {
             return
         }
         openSession(stream, channel: result.channel, on: conn, epoch: epoch)
+        // 응답을 기다리는 사이 grid가 바뀌었으면 그 RESIZE는 session이 없어 버려졌다(view는 이미 알렸다고 기억한다).
+        // 지금 크기를 한 번 보낸다. 그러지 않으면 프로그램이 attach 때의 크기에 머문다.
+        let now = view.getTerminal()
+        if UInt16(clamping: now.cols) != params.cols || UInt16(clamping: now.rows) != params.rows {
+            sendResize(cols: now.cols, rows: now.rows)
+        }
         setState(.attached)
         if focused == true { setFocused(true) }
         onStatus?(result.terminal.status)
