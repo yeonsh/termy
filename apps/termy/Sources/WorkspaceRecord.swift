@@ -111,6 +111,23 @@ struct PaneHookDetails: Codable, Equatable, Sendable {
     var lastAssistantMessage: String?
     var lastCwd: String?
     var agentKind: AgentKind?
+
+    private enum CodingKeys: String, CodingKey {
+        case lastSessionId, lastPrompt, lastAssistantMessage, lastCwd, agentKind
+    }
+}
+
+extension PaneHookDetails {
+    /// agentKind만 너그럽게 읽는다: 모르는 값(다른 빌드가 더한 agent)은 nil이다. Debug와 release가 session.json을
+    /// 함께 쓰는데, 이 값 하나로 decode가 실패하면 SessionPersistence가 파일 전체를 격리해 모든 창 배치를 잃는다.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        lastSessionId = try c.decodeIfPresent(String.self, forKey: .lastSessionId)
+        lastPrompt = try c.decodeIfPresent(String.self, forKey: .lastPrompt)
+        lastAssistantMessage = try c.decodeIfPresent(String.self, forKey: .lastAssistantMessage)
+        lastCwd = try c.decodeIfPresent(String.self, forKey: .lastCwd)
+        agentKind = try c.decodeIfPresent(String.self, forKey: .agentKind).flatMap(AgentKind.init(rawValue:))
+    }
 }
 
 extension PaneHookDetails {

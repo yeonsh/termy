@@ -69,6 +69,38 @@ final class PaneRecordHcTests: XCTestCase {
                        "a detected agent alone is kept: the next SessionStart then keeps the restored session id")
     }
 
+    /// Debug와 release가 session.json을 함께 쓰고 AgentKind는 늘어난다. 모르는 agentKind 하나가 파일 전체를
+    /// 격리하게(모든 창 배치를 잃게) 하면 안 된다: 그 값만 nil로 읽고 나머지는 그대로다.
+    func testUnknownAgentKindDecodesAsNil() throws {
+        let json = #"{"lastSessionId":"s","lastPrompt":"p","lastAssistantMessage":"a","lastCwd":"/srv","agentKind":"gemini"}"#
+        let details = try JSONDecoder().decode(PaneHookDetails.self, from: Data(json.utf8))
+        XCTAssertEqual(details, PaneHookDetails(lastSessionId: "s", lastPrompt: "p", lastAssistantMessage: "a",
+                                                lastCwd: "/srv", agentKind: nil))
+        let known = try JSONDecoder().decode(PaneHookDetails.self, from: Data(#"{"agentKind":"codex"}"#.utf8))
+        XCTAssertEqual(known.agentKind, .codex)
+        XCTAssertNil(try JSONDecoder().decode(PaneHookDetails.self, from: Data("{}".utf8)).agentKind)
+        let roundTrip = PaneHookDetails(lastSessionId: "s", lastPrompt: nil, lastAssistantMessage: nil, lastCwd: nil, agentKind: .opencode)
+        XCTAssertEqual(try JSONDecoder().decode(PaneHookDetails.self, from: JSONEncoder().encode(roundTrip)), roundTrip)
+    }
+
+    func testSessionWithUnknownAgentKindLoads() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("termy-kind-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let persistence = try SessionPersistence(rootDir: root)
+        let file = #"""
+        {"schemaVersion":1,"windows":[{"frame":{"x":0,"y":0,"width":1200,"height":760},
+          "rows":[[{"cwd":"/a"},{"cwd":"/b","paneId":"P","backend":"hc","hookDetails":{"lastPrompt":"p","agentKind":"gemini"}}]]}]}
+        """#
+        try Data(file.utf8).write(to: persistence.fileURL)
+        guard case .loaded(let record) = await persistence.load() else {
+            return XCTFail("an unknown agent kind must not quarantine session.json")
+        }
+        let panes = record.windows.flatMap { $0.rows.flatMap { $0 } }
+        XCTAssertEqual(panes.map(\.cwd), ["/a", "/b"])
+        XCTAssertEqual(panes[1].hookDetails?.lastPrompt, "p")
+        XCTAssertNil(panes[1].hookDetails?.agentKind)
+    }
+
     func testRestoreDetailsFillsFieldsWithoutTouchingState() async {
         let daemon = HookDaemon.testInstance()
         let details = PaneHookDetails(lastSessionId: "s", lastPrompt: "p", lastAssistantMessage: "a", lastCwd: "/srv", agentKind: .codex)
