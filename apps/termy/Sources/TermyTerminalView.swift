@@ -66,7 +66,40 @@ final class TermyTerminalView: LocalProcessTerminalView {
         guard sizePropagationFreezeDepth == 0 else { return }
         if let pending = pendingSizeWhileFrozen {
             pendingSizeWhileFrozen = nil
-            super.setFrameSize(pending)
+            applyFrameSize(pending)
+        }
+    }
+
+    /// hc pane 전용. nil이 아니면 사용자 입력(키, 붙여넣기, 마우스, `send(txt:)`)이
+    /// local process 대신 여기로 간다. local pane은 nil이라 동작이 그대로다.
+    var remoteInput: ((ArraySlice<UInt8>) -> Void)?
+
+    /// hc pane 전용. freeze 중이 아닐 때 터미널 cols/rows가 바뀌면(thaw로 미뤄진
+    /// 크기가 적용될 때 포함) 불린다. HcPaneBackend가 RESIZE frame을 보내는 데 쓴다.
+    var onGridSizeChanged: ((_ cols: Int, _ rows: Int) -> Void)?
+
+    override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        if let remoteInput {
+            remoteInput(data)
+        } else {
+            super.send(source: source, data: data)
+        }
+    }
+
+    /// hc가 보낸 출력. `dataReceived`와 같은 부수 효과를 낸다.
+    func receiveRemote(_ bytes: ArraySlice<UInt8>) {
+        feed(byteArray: bytes)
+        afterOutput()
+    }
+
+    // thaw 경로는 super.setFrameSize를 직접 부르므로(self.setFrameSize 재진입 없음)
+    // 크기 비교와 콜백은 두 경로가 공유하는 이 함수에 둔다.
+    private func applyFrameSize(_ size: NSSize) {
+        let before = (terminal.cols, terminal.rows)
+        super.setFrameSize(size)
+        let after = (terminal.cols, terminal.rows)
+        if before != after {
+            onGridSizeChanged?(after.0, after.1)
         }
     }
 
@@ -78,7 +111,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
             pendingSizeWhileFrozen = newSize
             return
         }
-        super.setFrameSize(newSize)
+        applyFrameSize(newSize)
     }
 
     public override init(frame: CGRect) {
@@ -906,6 +939,10 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// to the current caret position after each PTY echo.
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
+        afterOutput()
+    }
+
+    private func afterOutput() {
         onOutput?()
 
         // Liveness ping: revert POSSIBLY_WAITING → THINKING while PTY is
