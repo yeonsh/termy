@@ -181,9 +181,9 @@ events, documents)와 `hc schema`(OpenRPC)다. 빌더는 원문을 읽는다. �
 | Herdr.app 공존 | 같은 core를 써도 서로의 터미널을 건드리지 않는다 | 사용자(제안을 승인) |
 | pane 닫기 / 창 닫기 / 마지막 창 닫기 | hc terminal을 kill한다. 마지막 창 닫기도 사용자가 pane을 닫는 것이다 | 사용자 |
 | ⌘Q / 크래시 / 업데이트 | hc terminal을 그대로 둔다. 다음 실행 때 다시 붙는다 | 내 판단(사용자가 확인) |
-| 상태 우선순위 | 7501을 보고한 terminal은 7501이 상태를 정하고, hook은 세부 정보만 채운다 | 내 판단 |
+| 상태 우선순위 | 7501 status가 있는 terminal은 7501이 상태를 정하고, hook은 세부 정보만 채운다 | 내 판단 |
 | hook 세부 정보 보존 | pane id별로 session.json에 저장한다. termy가 꺼진 동안의 hook 이벤트는 잃는다 | 내 판단 |
-| 여러 termy instance | terminal에 `termy.instance=<bundle id>` label. 각 termy는 자기 instance terminal에만 붙는다 | 내 판단 |
+| 여러 termy instance | terminal에 `termy.instance=debug|release` label. 각 termy는 자기 instance terminal에만 붙는다 | 내 판단 |
 | hc를 쓸 수 없을 때의 hc pane | local로 바꾸지 않는다. "herdr-core unavailable" 상태로 두고 다시 연결을 시도한다 | 내 판단 |
 | pane별 backend | `PaneRecord`에 기록한다. 설정을 바꿔도 이미 열린 pane의 backend는 그대로 | 내 판단 |
 | keep | termy가 만드는 terminal은 `keep: true` | 내 판단 |
@@ -203,13 +203,35 @@ termy.app
  ├─ PaneBackend (protocol)
  │   ├─ LocalPtyBackend          ─ 지금의 SwiftTerm LocalProcess 경로(로컬 pane 기본)
  │   └─ HcPaneBackend            ─ terminal.run / attach / DATA / RESIZE / FOCUS / FACTS / kill
- ├─ TermyTerminalView            ─ TerminalView 상속(LocalProcessTerminalView 아님), 입출력은 backend로
+ ├─ TermyTerminalView            ─ LocalProcessTerminalView 상속 유지. hc pane은 send override + receiveRemote로 입출력
  ├─ HookDaemon                   ─ hook 이벤트 + hc 상태/foreground/종료를 합쳐 PaneSnapshot 생성
  └─ ⌘K / Workspace               ─ 원격 project(머신 + 폴더)
           │
-          ▼ Unix socket (JSON-RPC + framed)
+          ▼ `herdr-core connect` 하위 프로세스의 stdin/stdout (JSON-RPC + framed)
  herdr-core (hc serve) ── ssh ──► 원격 머신의 hc
 ```
+
+**계획 단계에서 바꾼 것(2026-11-01, 코드 확인 후):**
+
+- 연결은 socket을 직접 열지 않고 `herdr-core connect` 하위 프로세스의 stdin/stdout으로
+  한다. hc의 endpoint 규칙(`HC_SOCKET`, `XDG_RUNTIME_DIR`, `HC_SESSION`)을 hc가 직접
+  처리하고, core가 꺼져 있으면 `connect`가 띄운다(직접 확인). termy가 `connect`를 최소
+  환경으로 띄우므로 새로 뜨는 core도 깨끗한 환경을 갖는다.
+- `TermyTerminalView`는 `LocalProcessTerminalView` 상속을 유지한다. SwiftTerm의
+  `sizeChanged`는 `public`(open 아님)이라 override할 수 없고 `cellDimension`은 internal이라,
+  `TerminalView`로 바꾸면 기본 경로인 local pane의 동작을 그대로 지키기 어렵다. hc pane은
+  `send(source:data:)`(open) override로 입력을, `receiveRemote(_:)`로 출력을,
+  `setFrameSize` 뒤의 격자 크기 콜백으로 크기를 주고받는다. 그래서 `PaneBackend` protocol과
+  `LocalPtyBackend`는 만들지 않고, `PaneLaunch`(local / hc) enum과 `HcPaneBackend`만 둔다.
+- instance label은 `termy.instance=debug|release`다. Debug와 release의 bundle id가
+  `app.termy.macos`로 같아서 bundle id로는 구분되지 않는다. 테스트는 `TERMY_INSTANCE`로
+  바꾼다.
+- 7501이 상태를 정하는 조건은 "`status`가 지금 null이 아님"이다. hc는 프로그램이 끝나면
+  `status`를 null로 지우지만 `reported`는 남기므로, 같은 pane에서 다른 agent로 바뀌면
+  hook 경로로 돌아가야 하기 때문이다. `turn` 이벤트는 쓰지 않는다. "turn이 열린 채
+  `idle`이 오면 turn 끝" 규칙이 같은 경우를 중복 알림 없이 잡는다.
+- 로컬 hc pane의 표식 변수 제거는 `env -u` 대신 `/bin/sh -c` 래퍼로 한다. 지금 규칙대로
+  `GIT_EDITOR`는 값이 `true`일 때만 지워야 하기 때문이다.
 
 ### 6.2 hc 연결 계층
 
@@ -263,7 +285,7 @@ termy.app
   `agentSessionMarkerEnvKeys`와 `GIT_EDITOR=true`를 지운다. termy가 core를 직접 띄울 때도
   깨끗한 환경으로 띄운다(§6.10).
 - `labels`: `termy.pane=<paneId>`, `termy.project=<project 키>`,
-  `termy.instance=<bundle identifier>`. instance label이 있어서 Debug termy와 release
+  `termy.instance=debug|release`(§6.1 끝의 변경 참고). instance label이 있어서 Debug termy와 release
   termy가 같은 core를 써도 서로의 terminal에 붙거나 kill하지 않는다. 원격 머신 목록은
   core 단위라서 Debug도 같은 머신을 본다.
 - `keep: true`, `no_parent: true`, `no_notify: true`.
@@ -286,7 +308,7 @@ termy.app
 - **pane별 backend를 저장한다.** `PaneRecord`에 `backend`(local / hc)를 추가한다. 없으면
   local(예전 파일).
 - **pane ↔ terminal 대응은 label이 기준이다.** `termy.pane=<paneId>` +
-  `termy.instance=<자기 bundle id>`. 주소(`t7`, `bdpc01/t3`)는 저장해도 캐시로만 쓴다.
+  `termy.instance=<자기 instance>`. 주소(`t7`, `bdpc01/t3`)는 저장해도 캐시로만 쓴다.
 - **실행 순서:** 저장된 레이아웃을 그린다 → local pane은 지금처럼 새 셸 → hc pane이
   하나라도 있으면 연결 → subscribe(snapshot) → hc pane마다 살아 있는 terminal을 label로
   찾아 attach(history 포함), 없거나 끝났으면 같은 pane id·cwd(원격은 같은 머신·폴더)로
@@ -314,15 +336,14 @@ termy.app
 PaneSnapshot의 입력은 셋이다. hook 이벤트(로컬만), hc `status`/`turn`(7501), hc
 `foreground`/종료.
 
-- **7501을 보고한 terminal(`reported == true`):** 상태는 7501이 정한다.
+- **7501 status가 지금 있는 terminal(`status != null`):** 상태는 7501이 정한다.
   - `working` → `thinking`
   - `blocked`(permission / question / auth) → `waiting`(사유는 kind)
-  - `idle` → `idle`
-  - `done` → turn 끝(지금 Stop과 같은 처리: 알림, `idle`)
+  - `idle` → turn이 열려 있었으면 turn 끝(Codex처럼 `done`을 보내지 않는 agent의 완료),
+    이미 turn 끝 대기(`waiting`)면 그대로, 아니면 `idle`
+  - `done` → turn 끝(지금 Stop과 같은 처리: `waiting` + 알림, 30초 뒤 `idle`)
   - `error` → `errored`
-  - `turn` 이벤트(working에서 벗어남)도 turn 끝으로 본다. Codex처럼 `done`을 보내지
-    않는 agent가 나중에 7501을 지원해도 완료를 잡기 위해서다. 같은 turn을 두 번 알리지
-    않는다.
+  - `turn` 이벤트는 쓰지 않는다(위 `idle` 규칙이 같은 경우를 중복 없이 잡는다).
   - hook 이벤트는 세부 정보(`lastSessionId`, prompt, `lastAssistantMessage`, toolName,
     cwd)만 갱신하고 상태는 바꾸지 않는다.
 - **보고하지 않은 terminal:** 지금 hook 상태 머신 그대로. 그 입력을 바꾼다.
