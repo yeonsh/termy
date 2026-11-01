@@ -6,6 +6,14 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.2.22 — 2026-11-01
+
+- Claude Code's status line no longer comes back cut to a few letters
+  per row (`[Op...`, `ter...`) after you look at another project. Going
+  from ALL to a single project squeezed the hidden panes down to a sliver,
+  and an agent that redrew its status line in the meantime drew it for
+  that width. Hidden panes now keep the size they had on screen.
+
 ## 0.2.21 — 2026-10-31
 
 - You can now remove a project from the ⌘K list. Each row has a trash
