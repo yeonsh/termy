@@ -280,8 +280,8 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     /// window (nothing worth restoring). `includeAgentResume` adds each
     /// pane's live agent session — only the update-relaunch save asks.
     ///
-    /// 모든 pane에 id·backend·project를 남기고, hc pane에만 hook 세부 정보를 남긴다(hc pane은 다시 켜면 같은
-    /// terminal에 다시 붙고, 그사이 HookDaemon이 비어 있기 때문이다). agent resume은 local pane만 한다.
+    /// 모든 pane에 id·backend·project를 남기고, hc pane에만 hook 세부 정보와 자기 instance를 남긴다(hc pane은 다시
+    /// 켜면 같은 terminal에 다시 붙고, 그사이 HookDaemon이 비어 있기 때문이다). agent resume은 local pane만 한다.
     func sessionWindowRecord(includeAgentResume: Bool = false) -> WindowRecord? {
         guard let window, !workspace.panes.isEmpty else { return nil }
         let rows: [[PaneRecord]] = workspace.rows.map { row in
@@ -296,6 +296,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
                 if case .hc(let machine) = pane.launch {
                     record.machine = machine
                     record.hookDetails = PaneHookDetails(snapshot: snapshot) ?? pane.restoredHookDetails
+                    record.instance = HcSessionManager.instanceLabel
                 }
                 record.projectId = pane.projectId
                 record.projectKey = pane.projectKey
@@ -356,17 +357,19 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         }
     }
 
-    /// 저장된 pane 하나를 다시 만든다. 저장된 id와 backend를 그대로 쓰므로 hc pane은 label로 자기 terminal을 찾아
+    /// 저장된 pane 하나를 다시 만든다. hc pane은 저장된 id와 backend를 그대로 쓰므로 label로 자기 terminal을 찾아
     /// 다시 붙고, hc를 쓸 수 없어도 local로 바뀌지 않는다(backend가 unavailable로 두고 다시 연결한다).
-    /// hc pane은 저장된 project를 쓰고(원격 project는 cwd로 정할 수 없다) hook 세부 정보를 되살린다. local pane의
-    /// project는 지금처럼 cwd로 정한다(agent resume이 cwd를 바꿀 수 있다). 기록에 없는 값은 지금 동작 그대로다.
+    /// hc pane은 저장된 project를 쓰고(원격 project는 cwd로 정할 수 없다) hook 세부 정보를 되살린다. local pane은
+    /// 지금처럼 새 id이고 project를 cwd로 정한다(agent resume이 cwd를 바꿀 수 있다). local pane의 id는 다시 붙을 것이
+    /// 없고, Debug와 release가 함께 쓰는 session.json에서 다른 instance의 id를 가져오면 그쪽 agent hook이 이 pane을
+    /// 움직인다. 기록에 없는 값은 지금 동작 그대로다.
     @discardableResult
     private func addRestoredPane(
         _ record: PaneRecord, cwd: String, splitAxis: SplitAxis, startupInput: String?, launch launchOverride: PaneLaunch? = nil
     ) -> Pane {
         let launch = launchOverride ?? record.launch
         let isHc = launch.backendKind == .hc
-        let paneId = reusablePaneId(record.paneId)
+        let paneId = isHc ? reusablePaneId(record.paneId) : nil
         let pane = workspace.addPane(
             cwd: cwd,
             splitAxis: splitAxis,

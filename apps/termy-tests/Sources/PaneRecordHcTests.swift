@@ -13,11 +13,13 @@ final class PaneRecordHcTests: XCTestCase {
         XCTAssertNil(r.projectId)
         XCTAssertNil(r.projectKey)
         XCTAssertNil(r.hookDetails)
+        XCTAssertNil(r.instance)
     }
 
     func testHcPaneRecordRoundTrips() throws {
         let r = PaneRecord(cwd: "/srv/app", paneId: "P", backend: .hc, machine: "bdpc01", projectId: "app@bdpc01",
-                           projectKey: "bdpc01:/srv/app", hookDetails: PaneHookDetails(lastSessionId: "s", lastPrompt: "p", lastAssistantMessage: nil, lastCwd: "/srv/app", agentKind: .claude))
+                           projectKey: "bdpc01:/srv/app", hookDetails: PaneHookDetails(lastSessionId: "s", lastPrompt: "p", lastAssistantMessage: nil, lastCwd: "/srv/app", agentKind: .claude),
+                           instance: "release")
         XCTAssertEqual(try JSONDecoder().decode(PaneRecord.self, from: JSONEncoder().encode(r)), r)
         XCTAssertEqual(r.launch, .hc(machine: "bdpc01"))
     }
@@ -30,7 +32,7 @@ final class PaneRecordHcTests: XCTestCase {
     /// 새 필드가 없는 pane은 예전과 같은 JSON이 된다(키가 생기지 않는다).
     func testRecordWithoutNewFieldsEncodesLikeBefore() throws {
         let json = String(decoding: try JSONEncoder().encode(PaneRecord(cwd: "/a")), as: UTF8.self)
-        for key in ["paneId", "backend", "machine", "projectId", "projectKey", "hookDetails"] {
+        for key in ["paneId", "backend", "machine", "projectId", "projectKey", "hookDetails", "instance"] {
             XCTAssertFalse(json.contains(key), key)
         }
     }
@@ -47,6 +49,59 @@ final class PaneRecordHcTests: XCTestCase {
         XCTAssertEqual(panes.map(\.cwd), ["/a", "/b", "/c"])
         XCTAssertTrue(panes.allSatisfy { $0.paneId == nil && $0.launch == .local && $0.hookDetails == nil })
         XCTAssertEqual(panes[1].agentResume?.sessionId, "s1")
+    }
+
+    // MARK: - R20: 다른 instance의 hc pane
+
+    private func hc(_ id: String, instance: String?, project: String = "app") -> PaneRecord {
+        PaneRecord(cwd: "/srv", paneId: id, backend: .hc, projectId: project, projectKey: "/srv", instance: instance)
+    }
+
+    private func local(_ id: String, project: String = "app") -> PaneRecord {
+        PaneRecord(cwd: "/srv", paneId: id, backend: .local, projectId: project)
+    }
+
+    private func ids(_ record: WindowRecord?) -> [[String?]]? {
+        record.map { $0.rows.map { $0.map(\.paneId) } }
+    }
+
+    func testRestorableKeepsWindowsWithoutOtherInstancePanes() {
+        let window = WindowRecord(frame: FrameRecord(x: 0, y: 0, width: 800, height: 600),
+                                  rows: [[hc("A", instance: "debug"), local("B")], [hc("C", instance: nil)]],
+                                  filterProjectId: "app", focusedPaneIndex: 2, projectOrder: ["app"])
+        XCTAssertEqual(window.restorable(instance: "debug"), window, "nil instance (older file) counts as this instance")
+        let empty = WindowRecord(frame: FrameRecord(x: 0, y: 0, width: 800, height: 600), rows: [])
+        XCTAssertEqual(empty.restorable(instance: "debug"), empty, "nothing skipped: restore as before")
+    }
+
+    func testRestorableDropsOtherInstanceHcPanes() {
+        let window = WindowRecord(frame: FrameRecord(x: 0, y: 0, width: 800, height: 600),
+                                  rows: [[hc("R1", instance: "release"), local("L")],
+                                         [hc("R2", instance: "release", project: "other")],
+                                         [hc("D", instance: "debug"), hc("O", instance: nil)]],
+                                  filterProjectId: "app", focusedPaneIndex: 3, projectOrder: ["app", "other"])
+        let kept = window.restorable(instance: "debug")
+        XCTAssertEqual(ids(kept), [["L"], ["D", "O"]], "empty rows go too")
+        XCTAssertEqual(kept?.focusedPaneIndex, 1, "focus follows the same pane (D)")
+        XCTAssertEqual(kept?.filterProjectId, "app")
+        XCTAssertEqual(kept?.projectOrder, ["app", "other"])
+        XCTAssertEqual(kept?.frame, window.frame)
+
+        var focusedOnSkipped = window
+        focusedOnSkipped.focusedPaneIndex = 0
+        XCTAssertNil(focusedOnSkipped.restorable(instance: "debug")?.focusedPaneIndex)
+
+        // 필터의 project에 남은 pane이 없으면 빈 화면 대신 전체를 보여 준다.
+        var filteredToSkipped = window
+        filteredToSkipped.filterProjectId = "other"
+        XCTAssertNil(filteredToSkipped.restorable(instance: "debug")?.filterProjectId)
+    }
+
+    func testRestorableIsNilWhenEveryPaneBelongsToAnotherInstance() {
+        let window = WindowRecord(frame: FrameRecord(x: 0, y: 0, width: 800, height: 600),
+                                  rows: [[hc("R1", instance: "release")], [hc("R2", instance: "release")]])
+        XCTAssertNil(window.restorable(instance: "debug"))
+        XCTAssertNotNil(window.restorable(instance: "release"))
     }
 
     // MARK: - hook 세부 정보

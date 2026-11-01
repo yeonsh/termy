@@ -54,6 +54,34 @@ struct WindowRecord: Codable, Equatable {
     }
 }
 
+extension WindowRecord {
+    /// 이 termy(`instance`)가 복원할 창. Debug와 release는 session.json을 함께 쓰므로, 다른 instance가 남긴 hc pane을
+    /// 복원하면 그 pane id의 terminal을 자기 label로 찾지 못해 같은 id로 셸을 또 띄우고 hook이 섞인다. 그런 pane은
+    /// 빼고, 그 terminal은 그 instance가 다음에 켤 때 고아로 되찾는다. local pane과 instance가 없는 hc pane(이 필드
+    /// 전의 파일)은 그대로다. 뺀 pane이 없으면 기록 그대로, 빼고 남은 pane이 없으면 nil(창을 열지 않는다).
+    func restorable(instance: String) -> WindowRecord? {
+        func kept(_ pane: PaneRecord) -> Bool {
+            pane.backend != .hc || pane.instance == nil || pane.instance == instance
+        }
+        let flat = rows.flatMap { $0 }
+        guard !flat.allSatisfy(kept) else { return self }
+        var result = self
+        result.rows = rows.map { $0.filter(kept) }.filter { !$0.isEmpty }
+        let remaining = result.rows.flatMap { $0 }
+        guard !remaining.isEmpty else { return nil }
+        // 포커스는 같은 pane을 따라가고(그 pane을 뺐으면 없다), 필터의 project에 남은 pane이 없으면 빈 화면 대신 전체다.
+        if let index = focusedPaneIndex, flat.indices.contains(index), kept(flat[index]) {
+            result.focusedPaneIndex = flat[..<index].filter(kept).count
+        } else {
+            result.focusedPaneIndex = nil
+        }
+        if let projectId = filterProjectId, !remaining.contains(where: { $0.projectId == projectId }) {
+            result.filterProjectId = nil
+        }
+        return result
+    }
+}
+
 /// Plain-`Double` window frame. `CGRect` is Codable, but an explicit struct
 /// keeps the JSON shape stable and human-readable.
 struct FrameRecord: Codable, Equatable {

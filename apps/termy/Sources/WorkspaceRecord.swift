@@ -96,6 +96,9 @@ struct PaneRecord: Codable, Equatable {
     var projectKey: String? = nil
     /// hc pane만: termy가 꺼진 동안 잃지 않게 남기는 hook 세부 정보.
     var hookDetails: PaneHookDetails? = nil
+    /// hc pane만: 이 기록을 쓴 termy의 `termy.instance`(debug/release). Debug와 release는 session.json을 함께 쓰므로
+    /// 다른 instance의 hc pane은 복원하지 않는다(`WindowRecord.restorable`). nil이면 이 필드 전의 파일이고 자기 것이다.
+    var instance: String? = nil
 
     /// 이 기록으로 만들 pane의 backend. hc를 쓸 수 없어도 local로 바꾸지 않는다(같은 pane id의 셸이 둘이 된다).
     var launch: PaneLaunch {

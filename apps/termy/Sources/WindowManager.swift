@@ -43,13 +43,16 @@ final class WindowManager {
     }
 
     /// Restore saved windows. Returns true if at least one window opened.
+    /// 다른 instance(Debug ↔ release)가 남긴 hc pane은 빼고 열고, 그래서 pane이 남지 않는 창은 열지 않는다
+    /// (`WindowRecord.restorable`).
     func restoreSessionWindows() async -> Bool {
         guard let sessionPersistence else { return false }
-        guard case .loaded(let record) = await sessionPersistence.load(),
-              !record.windows.isEmpty else {
+        guard case .loaded(let record) = await sessionPersistence.load() else {
             return false
         }
-        for windowRecord in record.windows {
+        let windows = record.windows.compactMap { $0.restorable(instance: HcSessionManager.instanceLabel) }
+        guard !windows.isEmpty else { return false }
+        for windowRecord in windows {
             restoreWindow(from: windowRecord)
         }
         // Rewrite session.json now. Restored windows replay their panes

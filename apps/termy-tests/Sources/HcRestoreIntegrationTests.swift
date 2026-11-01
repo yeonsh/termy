@@ -56,7 +56,8 @@ final class HcRestoreIntegrationTests: XCTestCase {
     }
 
     /// 임시 폴더의 session.json에 windows를 쓰고, 그 폴더만 쓰는 WindowManager로 복원한다.
-    private func restore(_ windows: [WindowRecord], defaults: UserDefaults = InMemoryUserDefaults()) async throws -> WindowManager {
+    private func restore(_ windows: [WindowRecord], defaults: UserDefaults = InMemoryUserDefaults(),
+                         expectWindow: Bool = true) async throws -> WindowManager {
         let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("termy-restore-\(UUID().uuidString)", isDirectory: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
@@ -69,7 +70,7 @@ final class HcRestoreIntegrationTests: XCTestCase {
         // manager.shutdown·core.stop보다 먼저 돈다(teardown block은 역순).
         addTeardownBlock { @MainActor in await Self.retire(windowManager) }
         let restored = await windowManager.restoreSessionWindows()
-        XCTAssertTrue(restored, "the saved session opened a window")
+        XCTAssertEqual(restored, expectWindow, "the saved session opened a window")
         return windowManager
     }
 
@@ -312,5 +313,58 @@ final class HcRestoreIntegrationTests: XCTestCase {
         XCTAssertFalse(manager.hasSeenMachine("hct-ghost"))
         let terminals = try await testTerminals(manager)
         XCTAssertFalse(terminals.contains { $0.labels["termy.pane"] == paneId }, "no shell for a machine never seen")
+    }
+
+    // MARK: - Debug와 release가 session.json을 함께 쓸 때(R19, R20)
+
+    /// R19. local pane은 저장된 id를 다시 쓰지 않는다. 다시 붙을 것이 없고, 함께 쓰는 session.json에서 다른 instance의
+    /// local pane id를 가져오면 그 instance의 agent hook이 이 pane의 상태를 움직인다.
+    func testLocalRecordGetsAFreshPaneId() async throws {
+        let manager = HcSessionManager(endpointProvider: { nil })
+        addTeardownBlock { await manager.shutdown() }
+        install(manager)
+        let saved = UUID().uuidString
+        let windowManager = try await restore([window([
+            PaneRecord(cwd: "/tmp", paneId: saved, backend: .local, projectId: "tmp"),
+        ])])
+        let pane = try XCTUnwrap(windowManager.controllers.first?.panes.first)
+        XCTAssertEqual(pane.launch, .local)
+        XCTAssertNotEqual(pane.paneId, saved, "a local pane gets a new id")
+    }
+
+    /// R20. 다른 instance가 남긴 hc pane은 복원하지 않는다(그 terminal은 그 instance가 고아로 되찾는다). instance가
+    /// 없는 hc 기록(이 필드 전의 파일)은 이 instance의 것이다. 저장할 때는 hc pane에만 자기 instance를 남긴다.
+    func testOtherInstanceHcPanesAreNotRestored() async throws {
+        let manager = HcSessionManager(endpointProvider: { nil })
+        addTeardownBlock { await manager.shutdown() }
+        install(manager)
+        let other = UUID().uuidString, mine = UUID().uuidString, older = UUID().uuidString
+        func hc(_ id: String, _ instance: String?) -> PaneRecord {
+            PaneRecord(cwd: "/tmp", paneId: id, backend: .hc, projectId: "tmp", projectKey: "/private/tmp", instance: instance)
+        }
+        let windowManager = try await restore([
+            window([hc(other, "release"), PaneRecord(cwd: "/tmp", backend: .local, projectId: "tmp"),
+                    hc(mine, "test"), hc(older, nil)]),
+            window([hc(UUID().uuidString, "release")]),
+        ])
+        XCTAssertEqual(windowManager.controllers.count, 1, "a window of only another instance's panes is not opened")
+        let controller = try XCTUnwrap(windowManager.controllers.first)
+        XCTAssertEqual(controller.panes.map(\.launch), [.local, .hc(machine: nil), .hc(machine: nil)])
+        XCTAssertEqual(controller.panes.dropFirst().map(\.paneId), [mine, older])
+        XCTAssertFalse(controller.panes.contains { $0.paneId == other })
+
+        let records = try XCTUnwrap(controller.sessionWindowRecord()?.rows.flatMap { $0 })
+        XCTAssertEqual(records.map(\.instance), [nil, "test", "test"], "hc panes record this instance; local panes don't")
+    }
+
+    func testSessionOfOnlyOtherInstancePanesOpensNoWindow() async throws {
+        let manager = HcSessionManager(endpointProvider: { nil })
+        addTeardownBlock { await manager.shutdown() }
+        install(manager)
+        let windowManager = try await restore([window([
+            PaneRecord(cwd: "/tmp", paneId: UUID().uuidString, backend: .hc, projectId: "tmp", projectKey: "/private/tmp",
+                       instance: "release"),
+        ])], expectWindow: false)
+        XCTAssertTrue(windowManager.controllers.isEmpty)
     }
 }
