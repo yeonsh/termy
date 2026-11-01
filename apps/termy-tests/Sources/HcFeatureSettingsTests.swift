@@ -66,6 +66,7 @@ final class HcFeatureSettingsTests: XCTestCase {
 
     func testParseVersion() {
         XCTAssertEqual(HcFeatureSettings.parseVersion("herdr-core 0.4.1\n"), "0.4.1")
+        XCTAssertEqual(HcFeatureSettings.parseVersion("hc 0.1.16\n"), "0.1.16")
         XCTAssertEqual(HcFeatureSettings.parseVersion("0.4.1"), "0.4.1")
         XCTAssertNil(HcFeatureSettings.parseVersion("  \n"))
         XCTAssertNil(HcFeatureSettings.parseVersion("herdr-core"))

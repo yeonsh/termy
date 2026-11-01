@@ -33,17 +33,14 @@ enum HcFeatureSettings {
         }
     }
 
-    /// `herdr-core --version` 출력에서 버전만 뽑는다("herdr-core 0.4.1" → "0.4.1", "0.4.1" → "0.4.1").
+    /// `herdr-core --version` 출력의 첫 줄에서 마지막 토큰을 버전으로 본다("hc 0.1.16" → "0.1.16", "0.1.16" → "0.1.16").
+    /// 이름만 있는 줄은 버전이 없다.
     static func parseVersion(_ output: String) -> String? {
-        let line = output.split(whereSeparator: \.isNewline).first.map(String.init)?
-            .trimmingCharacters(in: .whitespaces) ?? ""
-        guard !line.isEmpty else { return nil }
-        let prefix = "herdr-core"
-        if line.hasPrefix(prefix) {
-            let rest = line.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
-            return rest.isEmpty ? nil : rest
-        }
-        return line
+        let tokens = output.split(whereSeparator: \.isNewline).first
+            .map { $0.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init) } ?? []
+        guard let last = tokens.last else { return nil }
+        if tokens.count == 1, last == "herdr-core" || last == "hc" { return nil }
+        return last
     }
 
     /// `herdr-core --version`만 실행한다(버전만 찍고 core를 건드리지 않는다). 실패하면 nil.
