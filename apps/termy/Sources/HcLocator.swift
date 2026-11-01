@@ -3,6 +3,8 @@ import Foundation
 // herdr-core 실행 파일을 찾고, `herdr-core connect` 프로세스에 줄 환경을 만든다.
 // 앱 환경에는 agent marker(CLAUDECODE 등)나 사용자 core를 가리키는 HC_SOCKET/HC_SESSION이 섞여 있을 수
 // 있다. connect가 core를 새로 띄우면 그 환경을 물려받으므로 필요한 키만 골라 넘긴다.
+// SSH_AUTH_SOCK은 넘긴다. 그 core가 원격 머신에 `ssh -o BatchMode=yes`로 붙으므로 없으면 agent의 키를
+// 못 써서 원격 머신이 needs_login/unreachable이 된다(같은 core를 쓰는 Herdr.app도 마찬가지다).
 
 enum HcLocator {
     /// `~/.local/bin`, Homebrew 두 곳, 그다음 PATH 순서로 실행 가능한 `herdr-core`를 찾는다.
@@ -37,7 +39,8 @@ struct HcEndpoint: Sendable {
         self.extraEnvironment = extraEnvironment
     }
 
-    private static let inheritedKeys = ["HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR"]
+    /// base에 있을 때만 옮긴다. SSH_AUTH_SOCK은 core의 원격 머신 ssh 연결용이다.
+    private static let inheritedKeys = ["HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "SSH_AUTH_SOCK"]
 
     static func minimalEnvironment(base: [String: String]) -> [String: String] {
         var env = base.filter { inheritedKeys.contains($0.key) }

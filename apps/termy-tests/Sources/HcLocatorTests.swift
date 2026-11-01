@@ -38,6 +38,12 @@ final class HcLocatorTests: XCTestCase {
         XCTAssertEqual(env, ["HOME": "/h", "LANG": "ko_KR.UTF-8", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
     }
 
+    func testMinimalEnvironmentKeepsSSHAgentSocket() {
+        // core가 원격 머신에 ssh로 붙을 때 agent 키를 쓰려면 SSH_AUTH_SOCK이 넘어가야 한다.
+        let env = HcEndpoint.minimalEnvironment(base: ["HOME": "/h", "SSH_AUTH_SOCK": "/tmp/agent.sock", "CLAUDECODE": "1"])
+        XCTAssertEqual(env, ["HOME": "/h", "SSH_AUTH_SOCK": "/tmp/agent.sock", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+    }
+
     func testProcessEnvironmentAddsSessionAndExtrasOnly() {
         let endpoint = HcEndpoint(executable: URL(fileURLWithPath: "/x/herdr-core"), session: "s1",
                                   extraEnvironment: ["XDG_STATE_HOME": "/st"])
