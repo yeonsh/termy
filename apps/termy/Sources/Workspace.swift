@@ -894,7 +894,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
                     width: columnWidth,
                     height: paneHeight
                 )
-                row.addArrangedSubview(pane)
+                arrange(pane, in: row)
             }
         }
     }
@@ -940,7 +940,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
                     width: paneWidth,
                     height: rowHeight
                 )
-                rowSplit.addArrangedSubview(pane)
+                arrange(pane, in: rowSplit)
             }
             start += size
         }
@@ -1031,9 +1031,24 @@ final class Workspace: NSView, NSSplitViewDelegate {
 
             parkedPaneFrames[id] = frameInWorkspace
             guard pane.superview !== hiddenPaneParkingView else { continue }
+            // Panes are constraint-sized inside the splits, and the parking
+            // view adds no constraints, so Auto Layout would shrink a parked
+            // pane to its header's fitting size and push a ~5×1 PTY to the
+            // agent still running in it (claude-hud then cuts every
+            // status-line row to that width). Let the frame set here hold
+            // while the pane is parked; `arrange(_:in:)` undoes it.
+            pane.translatesAutoresizingMaskIntoConstraints = true
+            pane.autoresizingMask = []
             hiddenPaneParkingView.addSubview(pane)
             pane.frame = hiddenPaneParkingView.convert(frameInWorkspace, from: self)
         }
+    }
+
+    /// Put `pane` into a split, constraint-sized like every split member —
+    /// undoing the frame-held layout `parkHiddenPanes` gives a parked pane.
+    private func arrange(_ pane: Pane, in split: NSSplitView) {
+        pane.translatesAutoresizingMaskIntoConstraints = false
+        split.addArrangedSubview(pane)
     }
 
     private func withoutRelayoutAnimation(_ updates: () -> Void) {
