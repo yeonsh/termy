@@ -200,6 +200,11 @@ actor HcConnection {
         tearDown(nil)
     }
 
+    /// 테스트 전용: connect 프로세스만 끝낸다. core 재시작처럼 EOF로 끊기는 경로를 그대로 탄다.
+    func _debugTerminateProcess() {
+        if let process, process.isRunning { process.terminate() }
+    }
+
     // MARK: - 읽기
 
     private func ingest(_ chunk: Data) {
