@@ -75,6 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         MissionControlModel.shared.onLivePanesChanged = {
             Updater.shared.gate.reevaluate()
         }
+        // hc pane의 prompt·마지막 응답·sessionId는 session.json에만 남는다. 바뀌면 저장한다.
+        MissionControlModel.shared.onHookDetailsChanged = { [weak self] paneId in
+            self?.windowManager.hookDetailsChanged(paneId: paneId)
+        }
         Updater.shared.onWillRelaunch = { [weak self] in
             self?.windowManager.prepareForUpdateRelaunch()
         }

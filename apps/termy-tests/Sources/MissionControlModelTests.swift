@@ -89,4 +89,40 @@ final class MissionControlModelTests: XCTestCase {
         model.applySnapshot(snap("p1", turnOpen: true))
         XCTAssertEqual(seen, ["p1"])
     }
+
+    /// session.json에 남기는 hook 세부 정보가 바뀔 때만 알린다. 상태·시각만 바뀐 update(대부분의 hook)는 알리지 않는다.
+    func test_applySnapshot_reportsOnlyHookDetailChanges() {
+        let model = MissionControlModel(startPump: false)
+        var changed: [String] = []
+        model.onHookDetailsChanged = { changed.append($0) }
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: "proj")
+        model.applySnapshot(s)
+        s.state = .thinking
+        s.turnOpen = true
+        s.updatedAt = Date().addingTimeInterval(5)
+        s.lastPtyActivityAt = Date()
+        model.applySnapshot(s)
+        XCTAssertEqual(changed, [], "nothing worth saving yet")
+
+        s.lastPrompt = "fix the bug"
+        model.applySnapshot(s)
+        XCTAssertEqual(changed, ["p1"])
+        s.state = .waiting
+        s.needsAttention = true
+        model.applySnapshot(s)
+        XCTAssertEqual(changed, ["p1"], "a state change keeps the details")
+
+        s.lastSessionId = "s1"
+        model.applySnapshot(s)
+        s.lastAssistantMessage = "fixed"
+        model.applySnapshot(s)
+        s.agentKind = .codex
+        model.applySnapshot(s)
+        XCTAssertEqual(changed, ["p1", "p1", "p1", "p1"])
+
+        var other = PaneSnapshot.empty(paneId: "p2", projectId: "proj")
+        other.lastSessionId = "s2"
+        model.applySnapshot(other)
+        XCTAssertEqual(changed.last, "p2")
+    }
 }

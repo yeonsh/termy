@@ -93,6 +93,17 @@ final class WindowManager {
         }
     }
 
+    /// hook 세부 정보가 바뀐 pane이 hc pane이면 session 저장을 요청한다(SessionAutosaver가 debounce한다). hc pane의
+    /// 세부 정보는 session.json에만 남는데(다시 켜면 HookDaemon이 비어 있다) hook은 레이아웃을 바꾸지 않아 다른 저장
+    /// 요청이 오지 않고, 종료 때의 저장에는 기댈 수 없다. local pane은 세부 정보를 남기지 않으므로 저장하지 않는다.
+    func hookDetailsChanged(paneId: String) {
+        let isHcPane = controllers.contains { controller in
+            controller.panes.contains { $0.paneId == paneId && $0.launch.backendKind == .hc }
+        }
+        guard isHcPane else { return }
+        sessionAutosaver?.requestSave()
+    }
+
     /// Final session save before a Sparkle update relaunch: snapshot every
     /// window with each pane's live agent session and seal session.json so
     /// nothing written during shutdown replaces it. The next launch reopens

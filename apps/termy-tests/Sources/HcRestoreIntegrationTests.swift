@@ -367,4 +367,56 @@ final class HcRestoreIntegrationTests: XCTestCase {
         ])], expectWindow: false)
         XCTAssertTrue(windowManager.controllers.isEmpty)
     }
+
+    // MARK: - hook 세부 정보 저장(I1)
+
+    /// hc pane의 hook 세부 정보가 바뀌면 레이아웃이 그대로여도 session.json에 저장한다(⌘Q나 강제 종료 뒤에도 prompt·
+    /// 마지막 응답·sessionId가 남게). local pane은 세부 정보를 남기지 않으므로 저장을 요청하지 않는다.
+    /// MissionControlModel → WindowManager 연결은 AppDelegate처럼 이어 붙인다(테스트 host에서는 AppDelegate가 잇지 않는다).
+    func testHcHookDetailsChangeSavesTheSession() async throws {
+        let manager = HcSessionManager(endpointProvider: { nil })
+        addTeardownBlock { await manager.shutdown() }
+        install(manager)
+        let hcId = UUID().uuidString
+        let windowManager = try await restore([window([
+            PaneRecord(cwd: "/tmp", paneId: hcId, backend: .hc, projectId: "tmp", projectKey: "/private/tmp"),
+            PaneRecord(cwd: "/tmp", backend: .local, projectId: "tmp"),
+        ])])
+        let model = MissionControlModel.shared
+        model.onHookDetailsChanged = { [weak windowManager] in windowManager?.hookDetailsChanged(paneId: $0) }
+        addTeardownBlock { @MainActor in MissionControlModel.shared.onHookDetailsChanged = nil }
+        let controller = try XCTUnwrap(windowManager.controllers.first)
+        let localId = try XCTUnwrap(controller.panes.last?.paneId)
+        let autosaver = try XCTUnwrap(windowManager.sessionAutosaver)
+        let file = autosaver.persistence.fileURL
+
+        // 복원이 요청한 저장(과 그 뒤의 헤더 갱신 저장)을 끝낸 뒤 파일을 지워 다음 저장만 본다.
+        try await Task.sleep(for: .milliseconds(700))
+        await autosaver.flushSync()
+        try FileManager.default.removeItem(at: file)
+
+        var local = PaneSnapshot.empty(paneId: localId, projectId: "tmp")
+        local.lastSessionId = "local-session"
+        local.lastPrompt = "local prompt"
+        model.applySnapshot(local)
+        try await Task.sleep(for: .milliseconds(900))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path), "a local pane's hook details don't save the session")
+
+        var hc = PaneSnapshot.empty(paneId: hcId, projectId: "tmp")
+        hc.state = .thinking
+        model.applySnapshot(hc)
+        try await Task.sleep(for: .milliseconds(900))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path), "a state-only update doesn't save the session")
+
+        hc.lastSessionId = "hc-session"
+        hc.lastPrompt = "ship it"
+        hc.agentKind = .codex
+        model.applySnapshot(hc)
+        try await waitUntil(3, "session saved after the hook") { FileManager.default.fileExists(atPath: file.path) }
+        guard case .loaded(let saved) = await autosaver.persistence.load() else { return XCTFail("the saved session loads") }
+        let record = saved.windows.flatMap { $0.rows.flatMap { $0 } }.first { $0.paneId == hcId }
+        XCTAssertEqual(record?.hookDetails,
+                       PaneHookDetails(lastSessionId: "hc-session", lastPrompt: "ship it", lastAssistantMessage: nil,
+                                       lastCwd: nil, agentKind: .codex))
+    }
 }

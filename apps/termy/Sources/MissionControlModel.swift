@@ -71,6 +71,9 @@ final class MissionControlModel {
     /// panes on it, since closing a busy window changes the count without
     /// any snapshot update.
     var onLivePanesChanged: (() -> Void)?
+    /// session.json에 남기는 hook 세부 정보(`PaneHookDetails`: sessionId·prompt·마지막 응답·cwd·agent)가 바뀐 pane id.
+    /// 상태나 시각만 바뀐 update(대부분의 hook)에는 부르지 않는다. WindowManager가 hc pane이면 저장을 요청한다.
+    var onHookDetailsChanged: ((String) -> Void)?
 
     /// Single app-wide instance. Every window's `MissionControlView`
     /// observes this one model, and it is the sole consumer of
@@ -159,9 +162,13 @@ final class MissionControlModel {
     /// Fold one daemon update into the model. The pump calls this for every
     /// HookDaemon update; tests call it directly.
     func applySnapshot(_ snapshot: PaneSnapshot) {
+        let previous = snapshotsById[snapshot.paneId]
         snapshotsById[snapshot.paneId] = snapshot
         recomputeItems()
         onSnapshotUpdate?(snapshot)
+        if PaneHookDetails(snapshot: snapshot) != PaneHookDetails(snapshot: previous) {
+            onHookDetailsChanged?(snapshot.paneId)
+        }
     }
 
     /// Latest snapshot for a pane, or nil before its first hook event.
