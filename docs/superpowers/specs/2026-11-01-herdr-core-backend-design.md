@@ -471,6 +471,86 @@ PaneSnapshot의 입력은 셋이다. hook 이벤트(로컬만), hc `status`/`tur
 8. **core 환경:** 이 Mac의 core 환경에 agent 표식 변수가 있는지, `env -u` 감싸기가 잘
    되는지.
 
+### 결과(2026-11-01, hc 0.1.16)
+
+scratch core(`HC_SESSION=termy-spike`, 임시 `XDG_STATE_HOME`/`XDG_CONFIG_HOME`, `env -i`)에
+`herdr-core connect`로 붙는 Python spike로 확인했다. 사용자 core는 `ps eww`와 `hc ls`로 읽기만
+했고, spike 전후 `hc ls`가 같다.
+
+1. **attach 기본:** SwiftTerm에 붙이는 부분은 Task 6 통합 테스트와 Task 12 실제 확인에서 본다.
+   프로토콜 쪽은 확인했다. framed mode가 `herdr-core connect` 위에서 동작한다(hello 응답은 `\n`으로
+   끝나는 plain 한 줄, 바로 뒤부터 frame). CREDIT을 돌려주면 8 MiB 출력과 `END`가 끝까지 온다
+   (8,388,980 bytes, 2.2초). 돌려주지 않으면 first paint를 포함해 정확히 262,144 bytes에서 멈추고,
+   프로그램은 막히지 않고 끝난다. 그 뒤 credit을 돌려주면 새 first paint(`\x18\x1b[!p`로 시작)와
+   남은 출력이 와서 `END`까지 받는다. 종료 CLOSE payload는
+   `{"exit_code":0,"finished_ms":1793525761160,"reason":"exited","signal":null}`(`finished_ms`가
+   붙는다). kill은 sh가 `{"exit_code":null,…,"reason":"killed","signal":1}`, claude가
+   `{"exit_code":129,…,"reason":"killed","signal":null}`. viewer가 CLOSE를 보내면 core는 빈 CLOSE로 답한다.
+2. **다시 attach:** 같은 연결에서 CLOSE한 뒤에도, 연결 프로세스를 죽이고 새 연결로 붙어도 first
+   paint에 모드가 다시 온다. `\x1b[?2004h`, `\x1b[?1000h`, `\x1b[?1006h`, `\x1b[?1049h`는 그대로이고,
+   kitty flags는 `\x1b[>1u` 대신 `\x1b[=N;1u`(현재 값 설정)로 온다(`>3u` → `=3;1u`, `>1u` 뒤
+   `>5u` → `=5;1u`). Claude Code(fullscreen)는 다시 붙은 뒤 `=5;1u`, `?1000h ?1002h ?1003h ?1004h
+   ?1006h ?1049h ?2004h ?2031h`. stack은 맨 위 값만 오고, flags는 화면(main/alt)별이라 main에서 push한
+   뒤 `?1049h`로 넘어간 프로그램은 alt 값(0)만 복원된다(kitty 규격대로). SwiftTerm fork는
+   `CSI = n ; 1 u`와 화면별 stack을 처리한다(코드에서 확인).
+3. **IME:** Task 6 통합 테스트와 Task 12 실제 확인에서 본다.
+4. **Claude 7501**(Claude Code 2.1.316, `status` 이벤트 data의 `status`):
+   - 권한 프롬프트: `{"app":"claude-code","kind":"permission","msg":"approve Bash: touch spike-file","state":"blocked"}`
+   - AskUserQuestion: `{"app":"claude-code","kind":"question","msg":"answer: 차와 커피 중 어느 쪽을 고르시겠어요? (차 · 커피)","state":"blocked"}`
+   - turn 끝: `{"app":"claude-code","state":"done"}`. 다음 prompt까지 그대로이고 스스로 `idle`로 바뀌지 않는다.
+   - 오류: `{"app":"claude-code","msg":"There's an issue with the selected model (nonexistent-model-xyz). It may not exist or you may not have access to it. Run /model to pick a different model.","state":"error"}`.
+     `/model`은 사용자 설정에 저장될 수 있어서 `--model nonexistent-model-xyz`로 띄워 만들었다.
+   - 그 밖: 시작하면 `{"app":"claude-code","state":"idle"}`, 시작 dialog(fullscreen renderer 제안)가
+     열려 있으면 `{"app":"claude-code","msg":"dialog open","state":"blocked"}`로 **kind가 없다**. 작업 중은
+     `{"app":"claude-code","state":"working"}`(msg가 붙기도 한다). 폴더 신뢰 dialog에서는 아직 보고하지 않는다.
+   - 이벤트 data 전체는 `{"records":{},"reported":true,"status":{…}}`. `turn`은 `working`을 벗어날 때마다
+     오른다(`{"state":"blocked","turn":1}`, `done`, `error`, `null` 모두).
+   - Task 8 표와 값은 맞다. 다만 kind 없는 `blocked`(`dialog open`)는 지금 표대로면 `.permission`과 알림이 된다.
+5. **agent 교체:** `/exit`하면 claude가 `working`을 한 번 보낸 뒤 `status: null`(3번 반복)과
+   `turn {"state":null}`, 그다음 foreground가 zsh로 바뀐다. `reported`는 terminal이 살아 있는 동안
+   `true`로 남는다. 이어서 띄운 `codex --no-daemon`은 7501을 보내지 않는다(foreground
+   `{"name":"codex","argv":["codex","--no-daemon"],…}`만 오고 status는 null, reported는 true 그대로).
+   7501 경로인지는 `reported`가 아니라 `status != null`로 판단해야 한다(§6.6과 같다). `null` 직전 값이
+   `working`이라 Task 8의 `nil` 규칙(상태 유지)만으로는 `.thinking`이 남고, hook SessionEnd나
+   foreground로 만든 synthetic SessionEnd가 풀어 준다. claude의 foreground name은 `"2.1.316"`, argv[0]은 `"claude"`.
+6. **`TERM_PROGRAM`:** env로 주면 identity `"termy 0.2.22"`. 주지 않으면 hc가 `TERM_PROGRAM=ghostty`를
+   넣고 identity와 XTVERSION도 `"ghostty"`. Claude Code는 ghostty일 때만 OSC 8 hyperlink를 쓰고,
+   fullscreen 제안 문구가 조금 다르다. kitty flags(`>5u`), sync output(2026), 7501은 같다.
+   **결론: `"termy"`를 유지한다**(지금 local pane도 `TERM_PROGRAM`이 비어 있어 Claude에게는 같은 동작이다).
+7. **Herdr.app 공존:** termy label만 붙은 terminal은 Herdr.app에 전혀 나타나지 않고, Herdr가 지우거나
+   바꾸지 않는다(사용자 확인, 2026-11-01).
+8. **core 환경:** 사용자 core(`herdr-core serve`, Herdr.app이 띄움)에는 `agentSessionMarkerEnvKeys`도
+   `GIT_EDITOR`도 없다. `LANG`/`LC_ALL`/`TERM`도 없다. hc는 terminal에 `TERM=xterm-256color`,
+   `COLORTERM`, `LANG=ko_KR.UTF-8`(시스템 locale), `TERM_PROGRAM`, `HC_SESSION`/`HC_TERMINAL_ID`/
+   `HC_TERMINAL_SOCKET`/`HC_SCOPE`를 넣는다. `env`로 넣은 `CLAUDECODE` 등은
+   `/usr/bin/env -u … /bin/sh -c '[ "$GIT_EDITOR" = true ] && unset GIT_EDITOR; …'`로 감싸면 모두
+   지워진다(scratch core에서 확인).
+
+Swift 구현자가 알아야 할 프로토콜 사실:
+
+- channel 0의 DATA frame 하나는 JSON-RPC 메시지 하나이고 끝에 `\n`이 없다. 동시에 보낸 호출도 id로 짝지어 돌아온다.
+- framed mode의 `events.subscribe` 결과는 `{channel, seq, terminals}`이고, 이벤트와 heartbeat는 channel 0이
+  아니라 그 channel로 온다. DATA frame 하나에 `\n`으로 끝나는 JSON 한 줄이며, 이 channel에도 CREDIT을
+  돌려준다. snapshot `terminals`에는 `finished` terminal도 들어 있다.
+- wire에서는 attach 응답이 그 channel의 첫 frame보다 먼저 온다. 하지만 reader가 곧바로 다음 frame을
+  읽으므로, 호출한 쪽에서 channel을 등록하면 first paint가 등록 전에 도착한다(spike에서 매번). 모르는
+  channel의 frame은 버리지 말고 모아 두거나, reader가 응답을 처리하는 자리에서 channel을 등록한다.
+- first paint 순서: `\x18\x1b[!p`(CAN + DECSTR)와 모드 해제 → 화면 → 모드 → 마지막 7501
+  (`\x1b]7501;state=…`) → title(OSC 2) → OSC 7 → `\x1b[?9001l`. first paint 바이트도 credit을 쓴다.
+- 7501 OSC는 viewer 스트림에도 그대로 온다(live와 first paint 모두). SwiftTerm이 모르는 OSC로 무시해야 한다.
+- first paint의 OSC 7은 `\x1b]7;file://host/path\x00\x1b\\`처럼 ST 앞에 NUL이 붙는다(live OSC 7에는
+  없다). termy의 OSC 7 처리에서 NUL이 경로에 섞이지 않는지 본다.
+- attach하자마자 그 viewer의 크기가 terminal 크기가 되고(`size` 이벤트), 그 viewer가 떠나면 남은
+  viewer의 크기로 돌아간다. channel 번호는 연결마다 1부터 오르고 다시 쓰지 않는다.
+- `herdr-core connect`는 core가 없으면 띄운다(hello까지 0.04초). symlink `hc`로 뜬 core는 프로세스
+  이름이 `hc serve`라서 `pgrep -f 'herdr-core serve'`에 잡히지 않는다.
+- kill하면 `status: null`이 `finished`보다 먼저 온다(약 0.45초). `terminal.get`의 `records`는 `null`,
+  이벤트에서는 `{}`다.
+
+gate(Task 1 Step 9): 네 조건 모두 해당하지 않는다. 다시 붙은 화면에 kitty flags(`=N;1u`)와 bracketed
+paste가 있고, framed mode가 동작하고, CREDIT을 돌려주면 `END`가 오고, Herdr.app은 termy terminal을
+건드리지 않는다.
+
 ## 9. 수용 기준
 
 - 기본 설정(로컬 hc 꺼짐)에서 hc를 지우거나 꺼도, 로컬 pane만 쓰는 동안 termy는 지금과
