@@ -21,6 +21,10 @@
 //
 // Both can be added as optional fields in a later commit once Workspace.swift
 // carries enough structure to serialize them.
+//
+// 원격 project(머신 + 폴더)도 같은 v1 기록이다. `machine`이 있으면 원격이고, 키(`canonicalPath`)는
+// `<machine>:<folder>`라 로컬 경로와 겹치지 않으며 `displayLabel`은 `<folder basename>@<machine>`이다.
+// `machine`이 없는 예전 파일은 지금처럼 로컬 project다.
 
 import Foundation
 
@@ -39,6 +43,8 @@ struct WorkspaceRecord: Codable, Equatable {
     /// v1 records that only had `panes`; restore infers a single-row layout
     /// (all column splits) when this is missing.
     var rows: [[PaneRecord]]?
+    /// 원격 project의 머신(hc `machine.list`의 이름). 로컬 project와 예전 파일은 nil.
+    var machine: String?
 
     init(
         schemaVersion: Int = Self.currentSchemaVersion,
@@ -46,7 +52,8 @@ struct WorkspaceRecord: Codable, Equatable {
         displayLabel: String,
         updatedAt: Date = Date(),
         panes: [PaneRecord],
-        rows: [[PaneRecord]]? = nil
+        rows: [[PaneRecord]]? = nil,
+        machine: String? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.canonicalPath = canonicalPath
@@ -54,6 +61,7 @@ struct WorkspaceRecord: Codable, Equatable {
         self.updatedAt = updatedAt
         self.panes = panes
         self.rows = rows
+        self.machine = machine
     }
 
     /// Effective grid layout: prefer the structured `rows` when present,

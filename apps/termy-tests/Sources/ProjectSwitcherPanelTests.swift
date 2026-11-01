@@ -12,6 +12,7 @@ final class ProjectSwitcherPanelTests: XCTestCase {
     private static var retiredPanels: [ProjectSwitcherPanel] = []
 
     override func setUp() async throws {
+        Self.keepAWindowOpen()
         panel = ProjectSwitcherPanel()
         removed = []
         panel.onDelete = { [weak self] record in self?.removed.append(record.canonicalPath) }
@@ -98,6 +99,49 @@ final class ProjectSwitcherPanelTests: XCTestCase {
 
         XCTAssertEqual(removed, [])
         XCTAssertEqual(visibleLabels(), ["alpha", "beta", "gamma"])
+    }
+
+    /// The footer opens the remote-project sheet. The panel steps aside first
+    /// so the sheet lands on the main window.
+    func test_newRemoteProjectButton_closesThePanelAndReports() throws {
+        var tapped = 0
+        panel.onNewRemoteProject = { tapped += 1 }
+        panel.present(records: records, openPaths: [], over: nil)
+
+        let button = try XCTUnwrap(descendants(of: panel.contentView!, as: NSButton.self)
+            .first { $0.title == "New Remote Project…" })
+        button.performClick(nil)
+
+        XCTAssertEqual(tapped, 1)
+        XCTAssertFalse(panel.isVisible)
+    }
+
+    /// A remote project's row reads `app@bdpc01` over `bdpc01:/srv/app`, and
+    /// its trash hides while one of its panes is open (the key is the
+    /// project key, not a local path).
+    func test_remoteProjectRow() throws {
+        let remote = RemoteProject.record(machine: "bdpc01", folder: "/srv/app", now: Date(timeIntervalSince1970: 4_000))
+        panel.present(records: [remote] + records, openPaths: ["bdpc01:/srv/app"], over: nil)
+
+        XCTAssertEqual(visibleLabels(), ["app@bdpc01", "alpha", "beta", "gamma"])
+        XCTAssertEqual(try XCTUnwrap(removeButton(row: 0)).isHidden, true)
+        let texts = descendants(of: try XCTUnwrap(cell(row: 0)), as: NSTextField.self).map(\.stringValue)
+        XCTAssertTrue(texts.contains("bdpc01:/srv/app"), "the path line shows machine:folder, got \(texts)")
+    }
+
+    /// Hiding or closing the panel must not take away the host's last window:
+    /// the test host then quits, and run alone this class lost every second
+    /// test. An invisible titled window stays open for the run.
+    private static var sentinel: NSWindow?
+    private static func keepAWindowOpen() {
+        guard sentinel == nil else { return }
+        let window = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: 40, height: 40),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
+        window.orderFront(nil)
+        sentinel = window
     }
 
     // MARK: - View lookup

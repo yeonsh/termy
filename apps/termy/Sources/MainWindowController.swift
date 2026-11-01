@@ -130,12 +130,9 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         if let sessionLayout {
             applySessionLayout(sessionLayout)
         } else {
-            workspace.addPane(launch: newPaneLaunch)
+            workspace.addNewPane(defaults: .standard)
         }
     }
-
-    /// 사용자가 만드는 새 local pane(새 창의 첫 pane·새 pane·split)의 backend. "Run local panes in herdr-core"를 따른다.
-    private var newPaneLaunch: PaneLaunch { PaneLaunch.forNewLocalPane(defaults: .standard) }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
@@ -427,8 +424,10 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
 
     // MARK: - Menu actions
 
+    /// 새 pane과 split은 `Workspace.launchForNewPane`을 따른다: 원격 pane 옆이면 같은 머신·폴더의 원격 pane이고,
+    /// 아니면 "Run local panes in herdr-core"가 backend를 정한다.
     @IBAction func newPane(_ sender: Any?) {
-        workspace.addPane(launch: newPaneLaunch)
+        workspace.addNewPane(defaults: .standard)
     }
 
     /// ⌘/ — open (or toggle) the keyboard-shortcuts overlay.
@@ -485,6 +484,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
             p.onDelete = { record in
                 Task { await persistence.delete(canonicalPath: record.canonicalPath) }
             }
+            p.onNewRemoteProject = { [weak self] in self?.newRemoteProject() }
             self.projectSwitcher = p
             return p
         }()
@@ -493,7 +493,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         // records back on its next save, so the panel offers no remove for them.
         let openPaths = Set((windowManager?.controllers ?? [self])
             .flatMap { $0.workspace.panes }
-            .map { ProjectIdentity.canonicalPath(for: $0.currentCwd) })
+            .map(\.workspaceRecordKey))
 
         // persistence.all() is async — hop off MainActor, grab the list,
         // then toggle the panel from the main actor with the result.
@@ -501,6 +501,29 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
             let records = await persistence.all()
             panel.toggle(records: records, openPaths: openPaths, over: self.window)
         }
+    }
+
+    /// ⌘K "New Remote Project…": 시트에서 머신과 폴더를 고르면 그 project를 저장하고 연다.
+    private func newRemoteProject() {
+        guard let window else { return }
+        RemoteProjectSheet.present(over: window, manager: .shared) { [weak self] record in
+            Task { @MainActor in await self?.openRemoteProject(record) }
+        }
+    }
+
+    /// 새로 만든 원격 project를 저장하고 연다. 같은 머신·폴더의 기록이 이미 있으면 덮어쓰지 않고 그 레이아웃으로
+    /// 연다(덮어쓰면 저장해 둔 pane 배치를 잃는다).
+    func openRemoteProject(_ record: WorkspaceRecord) async {
+        guard let persistence = autosaver?.persistence else {
+            restore(workspace: record)
+            return
+        }
+        if case .loaded(let saved) = await persistence.load(canonicalPath: record.canonicalPath), saved.machine != nil {
+            restore(workspace: saved)
+            return
+        }
+        try? await persistence.save(record)
+        restore(workspace: record)
     }
 
     /// Take a saved workspace record and bring it onscreen.
@@ -512,11 +535,10 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     ///   `.column` axis to sit beside the prior one. This reproduces
     ///   vertical splits (multiple rows) vs horizontal splits (panes within
     ///   one row) the way the user left them.
-    private func restore(workspace record: WorkspaceRecord) {
+    /// 원격 기록(`machine` 있음)의 pane은 그 머신의 hc pane이고 project는 기록의 것이다(`RemoteProject.reopenedPane`).
+    func restore(workspace record: WorkspaceRecord) {
         let ws = workspace
-        let alive = ws.panes.filter { pane in
-            ProjectIdentity.canonicalPath(for: pane.currentCwd) == record.canonicalPath
-        }
+        let alive = ws.panes.filter { $0.workspaceRecordKey == record.canonicalPath }
         if !alive.isEmpty {
             ws.filter = .project(record.displayLabel)
             if let first = alive.first {
@@ -529,8 +551,9 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         // `.row` for the first pane of each saved row and `.column` for
         // each pane that follows on the same row.
         for savedRow in record.effectiveRows {
-            for (colIdx, paneRec) in savedRow.enumerated() {
+            for (colIdx, saved) in savedRow.enumerated() {
                 let axis: SplitAxis = (colIdx == 0) ? .row : .column
+                let paneRec = RemoteProject.reopenedPane(saved, in: record)
                 addRestoredPane(
                     paneRec, cwd: paneRec.cwd, splitAxis: axis, startupInput: nil,
                     launch: PaneLaunch.forReopenedRecord(paneRec, defaults: .standard))
@@ -541,11 +564,11 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     }
 
     @IBAction func splitColumn(_ sender: Any?) {
-        workspace.addPane(splitAxis: .column, launch: newPaneLaunch)
+        workspace.addNewPane(splitAxis: .column, defaults: .standard)
     }
 
     @IBAction func splitRow(_ sender: Any?) {
-        workspace.addPane(splitAxis: .row, launch: newPaneLaunch)
+        workspace.addNewPane(splitAxis: .row, defaults: .standard)
     }
 
     @IBAction func closePane(_ sender: Any?) {

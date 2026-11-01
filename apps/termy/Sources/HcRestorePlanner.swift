@@ -36,6 +36,6 @@ enum HcRestorePlanner {
         let prefix = machine + ":"
         let folder = orphan.projectKey.flatMap { $0.hasPrefix(prefix) ? String($0.dropFirst(prefix.count)) : nil }
             ?? orphan.cwd ?? "~"
-        return "\((folder as NSString).lastPathComponent)@\(machine)"
+        return RemoteProject.projectId(machine: machine, folder: folder)
     }
 }

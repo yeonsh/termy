@@ -14,6 +14,12 @@ enum PaneLaunch: Equatable, Sendable {
         case .hc: return .hc
         }
     }
+
+    /// 원격 hc pane의 머신. local과 로컬 hc pane은 nil.
+    var machine: String? {
+        if case .hc(let machine) = self { return machine }
+        return nil
+    }
 }
 
 enum PaneBackendKind: String, Codable, Sendable {

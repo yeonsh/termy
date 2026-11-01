@@ -28,9 +28,19 @@ struct HcPaneLookupParams: Encodable, Sendable {
 }
 
 /// `terminal.list` 결과. machines에는 연결되지 않은 머신도 기다리지 않고 그 줄 상태와 함께 나온다.
+/// hc 0.1.16은 schema가 필수라고 적은 배열도 비어 있으면 뺀다(머신이 없으면 `machines`). 맞는 terminal이 없는
+/// 새 원격 pane의 조회가 decode 오류로 끝나지 않게 둘 다 없으면 비어 있는 것으로 읽는다.
 struct HcPaneLookup: Decodable, Sendable {
     let terminals: [HcTerminal]
     let machines: [HcMachine]?
+
+    private enum CodingKeys: String, CodingKey { case terminals, machines }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        terminals = try c.decodeIfPresent([HcTerminal].self, forKey: .terminals) ?? []
+        machines = try c.decodeIfPresent([HcMachine].self, forKey: .machines)
+    }
 }
 
 /// `terminal.run` 인자. labels는 termy 쪽에서 `"k=v"`로 다루고, wire에서는 hc가 받는 `{k: v}` 객체로 쓴다.
@@ -212,7 +222,7 @@ final class HcPaneBackend {
         dropSession(sendClose: false)   // kill이 core 쪽에서 stream을 닫는다
         manager.unregister(self)
         if let address {
-            manager.kill(address: address)
+            manager.kill(address: address, paneId: paneId)
         } else {
             // 아직 붙지 못했다(연결 전·unavailable). terminal.run이 도는 중이면 performAttach가 끝난 뒤 kill한다.
             manager.killPane(paneId: paneId)
@@ -401,7 +411,7 @@ final class HcPaneBackend {
         let check = Self.remoteRunCheck(paneId: paneId, instance: instance, machine: machine,
                                         terminals: lookup.terminals, machines: lookup.machines ?? [])
         if lifecycle == .killed, case .attach(let found) = check {
-            manager.kill(address: found)   // 묻는 사이에 pane이 닫혔다
+            manager.kill(address: found, paneId: paneId)   // 묻는 사이에 pane이 닫혔다
         }
         guard lifecycle == .running else { return nil }
         if case .wait(let state) = check {
@@ -473,7 +483,7 @@ final class HcPaneBackend {
                 return
             }
             if lifecycle == .killed {
-                manager.kill(address: record.address)   // run이 도는 사이에 pane이 닫혔다
+                manager.kill(address: record.address, paneId: paneId)   // run이 도는 사이에 pane이 닫혔다
                 return
             }
             target = record.address

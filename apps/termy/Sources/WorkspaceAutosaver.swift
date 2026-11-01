@@ -19,6 +19,10 @@
 //   then hops onto the serial `WorkspacePersistence` actor for the actual
 //   write. No two writes to the same record run in parallel because
 //   `WorkspacePersistence` is an actor.
+//
+// 원격 pane은 cwd가 그 머신의 경로라 이 Mac의 worktree로 묶을 수 없다(묶으면 로컬로 다시 열리는 가짜 project가
+// 생긴다). 그래서 만들 때 정한 project 키(`<machine>:<folder>`)로 묶어 원격 기록으로 남긴다. pane id는 ⌘K
+// 기록에 남기지 않는다: 창을 닫으면 그 terminal은 kill되므로 다시 붙을 것이 없다.
 
 import Foundation
 
@@ -82,33 +86,57 @@ final class WorkspaceAutosaver {
         guard let workspace else { return }
 
         // Snapshot the live grid structure into a Sendable payload.
-        struct PaneInfo: Sendable {
-            let paneId: String
-            let cwd: String
-            let canonical: String
-            let label: String
-        }
         // rows[i] is the workspace's i-th horizontal row.
-        let wsRows: [[PaneInfo]] = workspace.rows.map { row in
-            row.map { pane in
-                let cwd = pane.currentCwd
-                return PaneInfo(
-                    paneId: pane.paneId,
-                    cwd: cwd,
-                    canonical: ProjectIdentity.canonicalPath(for: cwd),
-                    label: ProjectIdentity.derive(for: cwd)
-                )
+        let wsRows: [[PaneInfo]] = workspace.rows.map { row in row.map { PaneInfo(pane: $0) } }
+        for record in Self.records(rows: wsRows, now: Date()) {
+            try? await persistence.save(record)
+        }
+    }
+}
+
+extension WorkspaceAutosaver {
+    /// pane 하나가 ⌘K 기록에 남기는 것.
+    struct PaneInfo: Sendable, Equatable {
+        var cwd: String
+        /// 이 pane이 들어갈 기록의 키: local은 cwd의 worktree root, 원격은 project 키(`<machine>:<folder>`).
+        var key: String
+        var label: String
+        /// 원격 pane의 머신. local(로컬 hc 포함)은 nil.
+        var machine: String?
+
+        @MainActor init(pane: Pane) {
+            let cwd = pane.currentCwd
+            if let machine = pane.launch.machine {
+                self.init(cwd: cwd, key: pane.projectKey, label: pane.projectId, machine: machine)
+            } else {
+                self.init(cwd: cwd, key: ProjectIdentity.canonicalPath(for: cwd), label: ProjectIdentity.derive(for: cwd),
+                          machine: nil)
             }
         }
-        // Empty workspace — nothing to save. Don't write an empty record.
-        if wsRows.flatMap({ $0 }).isEmpty { return }
 
-        // Per-project aggregation that preserves the row structure: for each
-        // workspace row, we split it by project and append each project's
-        // slice as a row in that project's record. A project whose panes
-        // straddle multiple workspace rows gets its own multi-row record.
+        init(cwd: String, key: String, label: String, machine: String?) {
+            self.cwd = cwd
+            self.key = key
+            self.label = label
+            self.machine = machine
+        }
+
+        /// local pane은 지금처럼 cwd만 남긴다(다시 열 때 지금 설정을 따른다). 원격 pane은 다시 열 머신과 project를 남긴다.
+        var paneRecord: PaneRecord {
+            guard let machine else { return PaneRecord(cwd: cwd) }
+            return PaneRecord(cwd: cwd, backend: .hc, machine: machine, projectId: label, projectKey: key)
+        }
+    }
+
+    /// Per-project aggregation that preserves the row structure: for each
+    /// workspace row, we split it by project and append each project's
+    /// slice as a row in that project's record. A project whose panes
+    /// straddle multiple workspace rows gets its own multi-row record.
+    /// An empty workspace gives no records (never write an empty one).
+    nonisolated static func records(rows wsRows: [[PaneInfo]], now: Date) -> [WorkspaceRecord] {
         struct ProjectAccum {
             var displayLabel: String
+            var machine: String?
             var rows: [[PaneRecord]] = []
         }
         var perProject: [String: ProjectAccum] = [:]
@@ -117,31 +145,31 @@ final class WorkspaceAutosaver {
             var sliceByProject: [String: [PaneRecord]] = [:]
             var encounterOrder: [String] = []
             for info in wsRow {
-                let rec = PaneRecord(cwd: info.cwd)
-                if sliceByProject[info.canonical] == nil {
-                    encounterOrder.append(info.canonical)
-                    sliceByProject[info.canonical] = [rec]
+                let rec = info.paneRecord
+                if sliceByProject[info.key] == nil {
+                    encounterOrder.append(info.key)
+                    sliceByProject[info.key] = [rec]
                 } else {
-                    sliceByProject[info.canonical]!.append(rec)
+                    sliceByProject[info.key]!.append(rec)
                 }
-                perProject[info.canonical, default: ProjectAccum(displayLabel: info.label)]
+                perProject[info.key, default: ProjectAccum(displayLabel: info.label, machine: info.machine)]
                     .displayLabel = info.label
             }
-            for canonical in encounterOrder {
-                let slice = sliceByProject[canonical]!
-                perProject[canonical]!.rows.append(slice)
+            for key in encounterOrder {
+                let slice = sliceByProject[key]!
+                perProject[key]!.rows.append(slice)
             }
         }
 
-        for (canonical, accum) in perProject {
-            let flatPanes = accum.rows.flatMap { $0 }
-            let record = WorkspaceRecord(
-                canonicalPath: canonical,
+        return perProject.map { key, accum in
+            WorkspaceRecord(
+                canonicalPath: key,
                 displayLabel: accum.displayLabel,
-                panes: flatPanes,
-                rows: accum.rows
+                updatedAt: now,
+                panes: accum.rows.flatMap { $0 },
+                rows: accum.rows,
+                machine: accum.machine
             )
-            try? await persistence.save(record)
         }
     }
 }

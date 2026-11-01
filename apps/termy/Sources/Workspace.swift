@@ -454,10 +454,35 @@ final class Workspace: NSView, NSSplitViewDelegate {
 
     // MARK: - Add / close
 
+    /// 사용자가 만드는 새 pane(⌘N·split·새 창의 첫 pane)의 backend와 자리. 포커스된 pane이 원격이면 같은 머신·
+    /// cwd·project의 원격 pane이다(원격 project 안에서 만든 pane이 이 Mac의 셸이 되면 안 된다). 아니면 "Run local
+    /// panes in herdr-core" 설정이 backend를 정하고, cwd와 project는 addPane이 지금 규칙(포커스된 pane)으로 정한다.
+    nonisolated static func launchForNewPane(
+        focused: (launch: PaneLaunch, cwd: String, projectId: String, projectKey: String)?,
+        defaults: UserDefaults
+    ) -> (launch: PaneLaunch, cwd: String?, projectId: String?, projectKey: String?) {
+        if let focused, focused.launch.machine != nil {
+            return (focused.launch, focused.cwd, focused.projectId, focused.projectKey)
+        }
+        return (PaneLaunch.forNewLocalPane(defaults: defaults), nil, nil, nil)
+    }
+
+    /// 사용자가 만드는 새 pane. `launchForNewPane`의 규칙을 따른다.
+    @discardableResult
+    func addNewPane(splitAxis: SplitAxis = .balanced, defaults: UserDefaults) -> Pane {
+        let focused = focusedPane.map {
+            (launch: $0.launch, cwd: $0.currentCwd, projectId: $0.projectId, projectKey: $0.projectKey)
+        }
+        let next = Self.launchForNewPane(focused: focused, defaults: defaults)
+        return addPane(cwd: next.cwd, splitAxis: splitAxis, launch: next.launch,
+                       projectId: next.projectId, projectKey: next.projectKey)
+    }
+
     /// - Parameters:
     ///   - paneId: 복원할 pane의 id(hc terminal을 label로 다시 찾는다). nil이면 새 id.
     ///   - launch: local PTY 셸 또는 herdr-core terminal.
-    ///   - projectId, projectKey: 원격 project처럼 cwd로 정할 수 없을 때 호출하는 쪽이 준다.
+    ///   - projectId, projectKey: 원격 project처럼 cwd로 정할 수 없을 때 호출하는 쪽이 준다. 원격 pane에 주지
+    ///     않으면 그 머신의 cwd로 정한다(`<basename>@<machine>`, `<machine>:<cwd>`).
     @discardableResult
     func addPane(
         cwd: String? = nil,
@@ -468,22 +493,31 @@ final class Workspace: NSView, NSSplitViewDelegate {
         projectId: String? = nil,
         projectKey: String? = nil
     ) -> Pane {
+        // 원격 pane의 cwd는 그 머신의 경로다. 원격 pane은 포커스된 pane의 cwd를 빌리지 않고, local pane은 포커스된
+        // 원격 pane의 cwd·project(그 머신의 것)를 빌리지 않는다.
+        let remoteMachine = launch.machine
+        let remoteFocus = focusedPane?.isRemote == true
+        let localFocus = remoteFocus ? nil : focusedPane
+        let paneCwd = remoteMachine == nil ? (cwd ?? localFocus?.currentCwd) : cwd
         // Project id = focused pane's project if available, else derive
         // from cwd or the current filter.
         let projectId: String = projectId ?? {
+            if let remoteMachine {
+                return RemoteProject.projectId(machine: remoteMachine, folder: cwd ?? "~")
+            }
             if let cwd, !cwd.isEmpty {
                 return ProjectIdentity.derive(for: cwd)
             }
-            if let focused = focusedPane {
+            if let focused = localFocus {
                 return focused.projectId
             }
-            if case .project(let id) = filter { return id }
+            if !remoteFocus, case .project(let id) = filter { return id }
             return ProjectIdentity.derive(for: FileManager.default.homeDirectoryForCurrentUser.path)
         }()
 
         let pane = Pane(
             projectId: projectId,
-            cwd: cwd ?? focusedPane?.currentCwd,
+            cwd: paneCwd,
             startupInput: startupInput,
             paneId: paneId ?? UUID().uuidString,
             launch: launch,

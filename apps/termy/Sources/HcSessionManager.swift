@@ -12,7 +12,8 @@ import os
 // 기억한다. address를 모르는 원격 pane은 그 전에는 새 셸을 띄우지 않는다: 머신 줄이 다시 이어지기 전에는 살아
 // 있는 그 pane의 terminal이 snapshot에 없어서, 띄우면 셸이 둘이 된다. "봤다"는 깨우는 신호일 뿐이고(줄이
 // 이어진 뒤에도 그 머신의 terminal은 늦게 온다), 띄우기 직전에 backend가 terminal.list로 다시 확인한다.
-// address를 모른 채 닫힌 pane의 terminal은 나중에 오는 대로 kill한다.
+// address를 모른 채 닫힌 pane의 terminal은 나중에 오는 대로 kill한다. 원격 terminal의 kill이 거절되면(그 머신이
+// 끊겨 있어 core가 닿지 못했다) 같은 길로 넘긴다: 그 머신이 다시 이어져 terminal이 오면 그때 kill한다.
 
 enum HcAvailability: Equatable, Sendable {
     case notInstalled, connecting, connected(version: String), unavailable(String)
@@ -23,6 +24,35 @@ struct HcMachine: Decodable, Sendable, Equatable {
     let host: String?
     let state: String
     let why: String?
+}
+
+/// `machine.list` 결과. hc 0.1.16은 머신이 없으면 schema가 필수라고 적은 `machines`도 빼므로 없으면 비어 있다.
+struct HcMachineList: Decodable, Sendable {
+    let machines: [HcMachine]
+
+    private enum CodingKeys: String, CodingKey { case machines }
+
+    init(from decoder: Decoder) throws {
+        machines = try decoder.container(keyedBy: CodingKeys.self).decodeIfPresent([HcMachine].self, forKey: .machines) ?? []
+    }
+}
+
+/// `terminal.kill` 하나의 결과.
+enum HcKillResult: Equatable, Sendable {
+    case killed
+    /// core가 오류로 답했다(not_found, unavailable 등).
+    case rejected(kind: String?)
+    /// 응답 전에 연결이 끊겼다.
+    case connectionLost
+}
+
+/// kill 결과를 받은 뒤 할 일.
+enum HcKillFollowUp: Equatable, Sendable {
+    case done
+    /// 다음 연결에서 같은 address로 다시 보낸다.
+    case retry
+    /// 그 pane label의 terminal이 (머신이 다시 이어져) 오면 kill한다.
+    case killOnArrival(paneId: String)
 }
 
 @MainActor
@@ -69,6 +99,8 @@ final class HcSessionManager {
     private var backends: [ObjectIdentifier: WeakBackend] = [:]
     /// kill할 address → 지금 연결에서 terminal.kill을 보내 응답을 기다리는 중인지.
     private var pendingKills: [String: Bool] = [:]
+    /// kill할 address → 그 terminal을 연 pane id. 원격 kill이 거절되면 이 label로 다시 찾는다.
+    private var killPaneIds: [String: String] = [:]
     /// address를 모르는 채 닫힌 pane(연결 전·unavailable). 연결되면 label로 찾아 kill한다.
     private var pendingPaneKills: Set<String> = []
     /// address를 모른 채 닫힌 pane들(앱이 도는 동안). 끊겨 있던 머신의 terminal은 줄이 다시 이어진 뒤에야
@@ -347,10 +379,8 @@ final class HcSessionManager {
         return try await conn.call(method, params)
     }
 
-    private struct MachineList: Decodable, Sendable { let machines: [HcMachine] }
-
     func machines() async throws -> [HcMachine] {
-        let result: MachineList = try await call("machine.list", HcEmptyParams())
+        let result: HcMachineList = try await call("machine.list", HcEmptyParams())
         return result.machines
     }
 
@@ -380,7 +410,7 @@ final class HcSessionManager {
         }
         let epoch = self.epoch
         machineRefresh = Task { [weak self] in
-            let result: MachineList? = try? await conn.call("machine.list", HcEmptyParams())
+            let result: HcMachineList? = try? await conn.call("machine.list", HcEmptyParams())
             self?.machinesListed(result?.machines, epoch: epoch)
         }
     }
@@ -424,7 +454,9 @@ final class HcSessionManager {
     /// 응답 본문(terminal 레코드)은 쓰지 않는다. 모양이 바뀌어도 kill이 실패로 남지 않게 아무것도 읽지 않는다.
     private struct Ignored: Decodable, Sendable { init(from decoder: Decoder) {} }
 
-    func kill(address: String) {
+    /// paneId: 그 terminal을 연 pane. 원격 terminal의 kill이 거절되면 그 label로 나중에 kill한다.
+    func kill(address: String, paneId: String? = nil) {
+        if let paneId { killPaneIds[address] = paneId }
         guard pendingKills[address] == nil else { return }
         pendingKills[address] = false
         if let conn = connection {
@@ -470,24 +502,48 @@ final class HcSessionManager {
     private func sendKill(_ address: String, on conn: HcConnection) {
         pendingKills[address] = true
         Task.detached { [weak self] in
-            var done = true
+            let result: HcKillResult
             do {
                 let _: Ignored = try await conn.call("terminal.kill", KillParams(terminal: address))
+                result = .killed
             } catch HcError.rpc(let kind, let message) {
-                // not_found 등: 이미 없는 terminal이다. 다시 보낼 것이 없다.
                 Self.log.info("hc: terminal.kill \(address, privacy: .public): \(kind ?? "", privacy: .public) \(message, privacy: .public)")
+                result = .rejected(kind: kind)
             } catch {
-                done = false   // 연결이 끊겼다: 다음 연결에서 다시 보낸다
+                result = .connectionLost
             }
-            await self?.killFinished(address, done: done)
+            await self?.killFinished(address, result: result)
         }
     }
 
-    private func killFinished(_ address: String, done: Bool) {
-        if done {
+    /// 로컬 terminal을 core가 모르면(not_found 등) 이미 없는 것이다. 원격 terminal은 그 머신이 끊겨 있으면 core가
+    /// 닿지 못해 거절할 뿐 그 머신에서는 살아 있을 수 있다: pane label로 넘겨 그 머신이 다시 이어져 terminal이
+    /// 오면 kill한다(오지 않으면 그것으로 끝이다). pane을 모르면 더 할 것이 없다.
+    nonisolated static func killFollowUp(address: String, paneId: String?, result: HcKillResult) -> HcKillFollowUp {
+        switch result {
+        case .killed: return .done
+        case .connectionLost: return .retry
+        case .rejected:
+            if HcAddress.machine(of: address) != nil, let paneId { return .killOnArrival(paneId: paneId) }
+            return .done
+        }
+    }
+
+    private func killFinished(_ address: String, result: HcKillResult) {
+        switch Self.killFollowUp(address: address, paneId: killPaneIds[address], result: result) {
+        case .done:
             pendingKills[address] = nil
+            killPaneIds[address] = nil
             resumeFlushWaitersIfDone()
-        } else if pendingKills[address] != nil {
+        case .killOnArrival(let paneId):
+            // 지금 store를 다시 훑지 않는다: 끊긴 머신의 옛 레코드가 남아 있으면 같은 kill이 바로 또 거절된다.
+            // 그 머신의 terminal은 다시 이어질 때 `missed`·`created`로 오고, 그때 kill한다.
+            pendingKills[address] = nil
+            killPaneIds[address] = nil
+            closedPaneIds.insert(paneId)
+            resumeFlushWaitersIfDone()
+        case .retry:
+            guard pendingKills[address] != nil else { return }
             pendingKills[address] = false
             if let conn = connection { sendKill(address, on: conn) } else { scheduleReconnect() }
         }

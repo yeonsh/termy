@@ -56,6 +56,12 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         return false
     }
 
+    /// 이 pane이 속한 ⌘K 기록의 키(`WorkspaceRecord.canonicalPath`). local은 지금 cwd의 worktree root라 `cd`를
+    /// 따라가고, 원격은 만들 때 정한 project 키(`<machine>:<folder>`)다.
+    var workspaceRecordKey: String {
+        isRemote ? projectKey : ProjectIdentity.canonicalPath(for: currentCwd)
+    }
+
     /// Fires (on the main actor) when `cd` causes the pane to belong to a
     /// different project than it did a moment ago.
     var onProjectChanged: (() -> Void)?

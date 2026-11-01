@@ -25,6 +25,9 @@
 // is for projects whose folder was renamed or deleted. Projects with open
 // panes get no trash: the autosaver would write them back on its next save.
 //
+// 원격 project(머신 + 폴더)도 같은 행이다: 이름은 `app@bdpc01`, 경로 줄은 `bdpc01:/srv/app`. 아래쪽
+// "New Remote Project…" 버튼은 패널을 닫고 창 쪽에 시트를 띄우게 한다(`onNewRemoteProject`).
+//
 // Accessibility: each row gets a single-line VoiceOver label that
 // concatenates every visible cell; the empty state has its own role.
 // Reduced-motion support is inherent — this panel has no transitions.
@@ -42,6 +45,9 @@ final class ProjectSwitcherPanel: NSPanel {
     /// list; the callback forgets the saved record.
     var onDelete: ((WorkspaceRecord) -> Void)?
 
+    /// "New Remote Project…"를 눌렀다. 패널은 먼저 닫힌다.
+    var onNewRemoteProject: (() -> Void)?
+
     // Plain NSTextField instead of NSSearchField: the bezel-less NSSearchField
     // draws a magnifier glyph inside the cell's text rect, which overlaps the
     // placeholder. We re-add the magnifier manually (below) as a separate
@@ -51,6 +57,7 @@ final class ProjectSwitcherPanel: NSPanel {
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
     private let emptyLabel = NSTextField(wrappingLabelWithString: "")
+    private let newRemoteButton = NSButton(title: "New Remote Project…", target: nil, action: nil)
     private let searchDelegate = SearchDelegate()
 
     private var records: [WorkspaceRecord] = []
@@ -224,11 +231,24 @@ final class ProjectSwitcherPanel: NSPanel {
         emptyLabel.isHidden = true
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        let footerSeparator = NSBox()
+        footerSeparator.boxType = .separator
+        footerSeparator.translatesAutoresizingMaskIntoConstraints = false
+        newRemoteButton.bezelStyle = .inline
+        newRemoteButton.isBordered = false
+        newRemoteButton.contentTintColor = .secondaryLabelColor
+        newRemoteButton.font = NSFont.systemFont(ofSize: 12)
+        newRemoteButton.target = self
+        newRemoteButton.action = #selector(newRemoteProjectClicked)
+        newRemoteButton.translatesAutoresizingMaskIntoConstraints = false
+
         content.addSubview(searchIcon)
         content.addSubview(searchField)
         content.addSubview(separator)
         content.addSubview(scrollView)
         content.addSubview(emptyLabel)
+        content.addSubview(footerSeparator)
+        content.addSubview(newRemoteButton)
 
         NSLayoutConstraint.activate([
             searchIcon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
@@ -252,7 +272,15 @@ final class ProjectSwitcherPanel: NSPanel {
             scrollView.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 6),
             scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 4),
             scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -4),
-            scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8),
+            scrollView.bottomAnchor.constraint(equalTo: footerSeparator.topAnchor, constant: -6),
+
+            footerSeparator.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            footerSeparator.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            footerSeparator.heightAnchor.constraint(equalToConstant: 1),
+            footerSeparator.bottomAnchor.constraint(equalTo: newRemoteButton.topAnchor, constant: -8),
+
+            newRemoteButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            newRemoteButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10),
 
             emptyLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 40),
             emptyLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -40),
@@ -326,6 +354,11 @@ final class ProjectSwitcherPanel: NSPanel {
 
     fileprivate func cancelAndClose() {
         close()
+    }
+
+    @objc private func newRemoteProjectClicked() {
+        close()
+        onNewRemoteProject?()
     }
 
     // MARK: - Removing
@@ -495,10 +528,15 @@ private final class ProjectSwitcherRowView: NSTableCellView {
 
         labelField.stringValue = record.displayLabel
         // Path tail — show the parent dir + basename for disambiguation
-        // between same-named repos in different parents.
+        // between same-named repos in different parents. 원격 project는 키(`bdpc01:/srv/app`)를 그대로 보인다:
+        // 이름(`app@bdpc01`)이 basename이 아니고 그 경로는 이 Mac의 것이 아니다.
         let parent = (record.canonicalPath as NSString).deletingLastPathComponent
         let shortParent = shorten(path: parent)
-        pathField.stringValue = shortParent.isEmpty ? record.canonicalPath : "\(shortParent)/\(record.displayLabel)"
+        if record.machine != nil {
+            pathField.stringValue = record.canonicalPath
+        } else {
+            pathField.stringValue = shortParent.isEmpty ? record.canonicalPath : "\(shortParent)/\(record.displayLabel)"
+        }
         paneCountField.stringValue = "\(record.panes.count) pane\(record.panes.count == 1 ? "" : "s")"
         lastUsedField.stringValue = Self.dateFormatter.localizedString(for: record.updatedAt, relativeTo: now)
 
