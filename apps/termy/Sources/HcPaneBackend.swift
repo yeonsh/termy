@@ -306,22 +306,37 @@ final class HcPaneBackend {
         }
     }
 
-    private enum Plan { case attach(String), run, finished(HcTerminal), waitForMachine(String) }
+    enum AttachPlan: Equatable {
+        case attach(String), run, finished(HcTerminal)
+        /// 아는 원격 address의 레코드가 없다: 그 머신이 끊겨 있다(unavailable로 보여 준다).
+        case waitForMachine(String)
+        /// address를 모르는 원격 pane(복원 직후): 그 머신이 연결된 것을 아직 못 봤다(connecting으로 기다린다).
+        case awaitMachine(String)
+    }
 
     /// 아는 address가 있으면 그 레코드, 없으면 같은 pane label의 살아 있는 terminal, 그것도 없으면 새로 띄운다.
-    private func plan() -> Plan {
+    /// 원격 pane(machine 있음)은 지금 구독에서 그 머신이 연결된 것을 본 뒤에만 새로 띄운다(machineSeen). 그 전에는
+    /// 머신 줄이 아직 이어지지 않아 살아 있는 자기 terminal이 snapshot에 없을 수 있고, 띄우면 셸이 둘이 된다.
+    nonisolated static func plan(paneId: String, address: String?, machine: String?, machineSeen: Bool,
+                                 store: HcEventStore, instance: String) -> AttachPlan {
         if let address {
-            if let record = manager.store.terminals[address] {
+            if let record = store.terminals[address] {
                 return record.state == "finished" ? .finished(record) : .attach(address)
             }
             // 원격 terminal은 그 머신의 줄이 다시 이어질 때까지 snapshot에 없을 수 있다(core 재시작 직후 등).
             // 그 머신에서는 살아 있으므로 새로 띄우면 셸이 둘이 된다. `created`가 다시 오면 붙는다.
             if let machine = HcAddress.machine(of: address) { return .waitForMachine(machine) }
         }
-        let mine = manager.store.termyTerminals(instance: HcSessionManager.instanceLabel)
-            .first { $0.labels["termy.pane"] == paneId }
+        let mine = store.termyTerminals(instance: instance).first { $0.labels["termy.pane"] == paneId }
         if let mine { return .attach(mine.address) }
+        if let machine, !machineSeen { return .awaitMachine(machine) }
         return .run
+    }
+
+    private func plan() -> AttachPlan {
+        Self.plan(paneId: paneId, address: address, machine: launch.machine,
+                  machineSeen: launch.machine.map { manager.hasSeenMachine($0) } ?? true,
+                  store: manager.store, instance: HcSessionManager.instanceLabel)
     }
 
     private struct AttachParams: Encodable, Sendable {
@@ -353,6 +368,11 @@ final class HcPaneBackend {
             return
         case .waitForMachine(let machine):
             setState(.unavailable("\(machine) is not connected"))
+            return
+        case .awaitMachine:
+            // manager가 그 머신을 보면(machine.list, 그 머신의 terminal이나 `missed`) 다시 부른다.
+            setState(.connecting)
+            manager.refreshMachines()
             return
         case .attach(let found):
             target = found

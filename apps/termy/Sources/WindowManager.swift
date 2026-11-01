@@ -13,11 +13,26 @@ final class WindowManager {
     private(set) var controllers: [MainWindowController] = []
     private let sessionPersistence: SessionPersistence?
     private(set) var sessionAutosaver: SessionAutosaver?
+    /// Each new window's ⌘K autosave target.
+    private let workspacePersistence: () -> WorkspacePersistence?
+    private let defaults: UserDefaults
 
-    init() {
+    convenience init() {
         // Persistence init can fail if app-support is unwritable — session
         // restore/save then silently degrades to no-op (best-effort feature).
-        self.sessionPersistence = try? SessionPersistence()
+        self.init(sessionPersistence: try? SessionPersistence(),
+                  workspacePersistence: { try? WorkspacePersistence() },
+                  defaults: .standard)
+    }
+
+    /// Tests pass a temporary folder's persistence and in-memory defaults so
+    /// nothing reaches the user's ~/Library/Application Support/termy.
+    init(sessionPersistence: SessionPersistence?,
+         workspacePersistence: @escaping () -> WorkspacePersistence?,
+         defaults: UserDefaults) {
+        self.sessionPersistence = sessionPersistence
+        self.workspacePersistence = workspacePersistence
+        self.defaults = defaults
         self.sessionAutosaver = nil
         if let sessionPersistence {
             self.sessionAutosaver = SessionAutosaver(
@@ -43,6 +58,39 @@ final class WindowManager {
         // later launch.
         sessionAutosaver?.requestSave()
         return true
+    }
+
+    // MARK: - hc 고아 terminal
+
+    /// "Run local panes in herdr-core" 설정의 defaults key. Task 10의 HcFeatureSettings가 이 읽기를 맡는다.
+    nonisolated static let localHcPanesKey = "termy.herdrCore.localPanes"
+
+    /// 고아 정리에 hc를 연결할지. hc pane이 있거나 로컬 hc 설정이 켜져 있을 때만이다: local pane만 쓰는 사용자는
+    /// herdr-core를 띄우지도, 연결하지도 않는다.
+    nonisolated static func shouldAdoptHcOrphans(paneKinds: [PaneBackendKind], defaults: UserDefaults) -> Bool {
+        paneKinds.contains(.hc) || (defaults.object(forKey: localHcPanesKey) as? Bool ?? false)
+    }
+
+    /// `restoreSessionWindows` 뒤에 부른다. 자기 instance label이 있는데 어느 창에도 pane이 없는 살아 있는 hc
+    /// terminal(autosave 전에 꺼진 경우 등)을 첫 창에 pane으로 열어 붙인다. 보이지 않는 곳에서 agent가 도는 일을
+    /// 막는다. 연결하지 못하면 아무것도 하지 않는다(복원한 hc pane은 각자 unavailable로 남아 다시 연결한다).
+    func adoptHcOrphans() async {
+        let kinds = controllers.flatMap(\.panes).map(\.launch.backendKind)
+        guard !controllers.isEmpty, Self.shouldAdoptHcOrphans(paneKinds: kinds, defaults: defaults) else { return }
+        let manager = HcSessionManager.shared
+        do {
+            try await manager.ensureConnected()
+        } catch {
+            return
+        }
+        // 연결을 기다리는 사이 창과 pane이 바뀌었을 수 있다. 지금 것으로 다시 본다.
+        guard let target = controllers.first else { return }
+        let known = Set(controllers.flatMap(\.panes).map(\.paneId))
+        let live = manager.store.termyTerminals(instance: HcSessionManager.instanceLabel)
+            .filter { !manager.isKilling(address: $0.address) }   // 방금 닫은 pane의 terminal(kill 응답 대기)
+        for orphan in HcRestorePlanner.orphans(live: live, knownPaneIds: known) {
+            target.adoptHcOrphan(orphan)
+        }
     }
 
     /// Final session save before a Sparkle update relaunch: snapshot every
@@ -71,7 +119,8 @@ final class WindowManager {
     func newWindow() -> MainWindowController {
         let previousFrame = controllers.last?.window?.frame
         let frame = previousFrame.map { WindowManager.nextCascadeFrame(after: $0) }
-        let controller = MainWindowController(initialFrame: frame, sessionLayout: nil)
+        let controller = MainWindowController(initialFrame: frame, sessionLayout: nil,
+                                              workspacePersistence: workspacePersistence())
         register(controller)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
@@ -86,7 +135,8 @@ final class WindowManager {
     func restoreWindow(from record: WindowRecord) -> MainWindowController {
         let visibleFrames = NSScreen.screens.map(\.visibleFrame)
         let frame = WindowManager.clampedFrame(record.frame.cgRect, toVisible: visibleFrames)
-        let controller = MainWindowController(initialFrame: frame, sessionLayout: record)
+        let controller = MainWindowController(initialFrame: frame, sessionLayout: record,
+                                              workspacePersistence: workspacePersistence())
         register(controller)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)

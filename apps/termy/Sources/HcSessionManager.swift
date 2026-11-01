@@ -8,6 +8,9 @@ import os
 // 않는다. events는 필터 없이 하나만 구독하고, 변화는 address로 해당 backend에 넘긴다.
 // kill은 앱이 곧 끝날 때도 hc에 닿아야 하므로 보류 목록에 넣고, 쓰기는 main actor를 기다리지 않는 task에서
 // 한다. AppDelegate는 종료 직전에 flushPendingKills로 응답을 기다린다.
+// 원격 머신은 연결마다 그 머신이 연결된 것을 봤는지(machine.list의 connected, 그 머신의 terminal이나 `missed`)
+// 기억한다. address를 모르는 원격 pane은 그 전에는 새 셸을 띄우지 않는다: 머신 줄이 다시 이어지기 전에는 살아
+// 있는 그 pane의 terminal이 snapshot에 없어서, 띄우면 셸이 둘이 된다.
 
 enum HcAvailability: Equatable, Sendable {
     case notInstalled, connecting, connected(version: String), unavailable(String)
@@ -65,6 +68,11 @@ final class HcSessionManager {
     /// address를 모르는 채 닫힌 pane(연결 전·unavailable). 연결되면 label로 찾아 kill한다.
     private var pendingPaneKills: Set<String> = []
     private var flushWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    /// 지금 연결(구독)에서 연결된 것을 본 원격 머신. 연결이 바뀌면 비운다.
+    private var seenMachines: Set<String> = []
+    private var machineRefresh: Task<Void, Never>?
+    /// machine.list가 도는 사이에 다시 요청이 왔다(그사이 머신이 붙었을 수 있다): 끝나면 한 번 더 부른다.
+    private var machineRefreshAgain = false
 
     private struct WeakBackend { weak var value: HcPaneBackend? }
 
@@ -129,6 +137,7 @@ final class HcSessionManager {
         connection = conn
         reconnectAttempt = 0
         store = HcEventStore(seq: subscription.seq, terminals: subscription.terminals)
+        seenMachines = Self.machines(of: subscription.terminals)
         readEvents(events, channel: channel, on: conn, epoch: epoch)
         watchDisconnect(conn)
         setAvailability(.connected(version: hello.version))
@@ -156,6 +165,7 @@ final class HcSessionManager {
     private func connectionDropped(_ conn: HcConnection) {
         guard connection === conn else { return }
         connection = nil
+        seenMachines = []
         Task { await conn.close() }   // 이미 끊겼어도 닫아 두고 참조를 놓는다(fd는 해제될 때 닫힌다)
         guard !isShutDown else { return }
         setAvailability(.connecting)
@@ -245,7 +255,8 @@ final class HcSessionManager {
         await conn.close()
     }
 
-    private struct MissedParams: Decodable { let seq: UInt64; let terminals: [HcTerminal] }
+    /// `machine`은 schema에 없지만 원격 머신의 `missed`가 그 이름을 실어 오면 쓴다.
+    private struct MissedParams: Decodable { let seq: UInt64; let terminals: [HcTerminal]; let machine: String? }
 
     private func handleEventLine(_ line: Data, epoch: Int) {
         guard epoch == self.epoch, line.contains(where: { $0 != 0x20 && $0 != 0x0D }) else { return }
@@ -260,12 +271,16 @@ final class HcSessionManager {
                 return
             }
             if let change = store.apply(event) { route(change) }
+            // 원격 terminal의 이벤트가 왔다: 그 머신의 줄이 이어져 있다.
+            if let address = event.terminal, let machine = HcAddress.machine(of: address) { markMachinesSeen([machine]) }
         case "missed":
             guard let missed = try? HcRPC.decodeParams(MissedParams.self, from: raw) else {
                 Self.log.error("hc: undecodable missed notification")
                 return
             }
             store.resetFromMissed(seq: missed.seq, terminals: missed.terminals)
+            // 원격 머신의 구독이 (다시) 이어질 때도 `missed`로 온다. 이름이 없으면 waiting pane이 machine.list로 다시 본다.
+            markMachinesSeen(Self.machines(of: missed.terminals).union(missed.machine.map { [$0] } ?? []))
             for backend in liveBackends { backend.resync() }
         default:
             break   // heartbeat
@@ -320,6 +335,52 @@ final class HcSessionManager {
     func machines() async throws -> [HcMachine] {
         let result: MachineList = try await call("machine.list", HcEmptyParams())
         return result.machines
+    }
+
+    // MARK: - 원격 머신을 봤는지
+
+    /// 지금 연결에서 이 머신이 연결된 것을 봤는지. address를 모르는 원격 pane은 그 전에는 새 셸을 띄우지 않는다.
+    func hasSeenMachine(_ name: String) -> Bool {
+        seenMachines.contains(name)
+    }
+
+    nonisolated static func machines(of terminals: [HcTerminal]) -> Set<String> {
+        Set(terminals.compactMap { HcAddress.machine(of: $0.address) })
+    }
+
+    /// 머신을 기다리는 pane이 부른다. 지금 연결에서 machine.list를 읽어 connected인 머신을 본 것으로 친다.
+    func refreshMachines() {
+        guard let conn = connection else { return }   // 연결되면 backend들이 다시 plan을 돌린다
+        if machineRefresh != nil {
+            machineRefreshAgain = true
+            return
+        }
+        let epoch = self.epoch
+        machineRefresh = Task { [weak self] in
+            let result: MachineList? = try? await conn.call("machine.list", HcEmptyParams())
+            self?.machinesListed(result?.machines, epoch: epoch)
+        }
+    }
+
+    private func machinesListed(_ machines: [HcMachine]?, epoch: Int) {
+        machineRefresh = nil
+        if let machines, epoch == self.epoch, connection != nil {
+            markMachinesSeen(Set(machines.filter { $0.state == "connected" }.map(\.name)))
+        }
+        if machineRefreshAgain {
+            machineRefreshAgain = false
+            refreshMachines()
+        }
+    }
+
+    /// 새로 본 머신이 있으면 그 머신을 기다리던 pane(address 없음)을 다시 붙인다.
+    private func markMachinesSeen(_ names: Set<String>) {
+        let new = names.subtracting(seenMachines)
+        guard !new.isEmpty else { return }
+        seenMachines.formUnion(new)
+        for backend in liveBackends where backend.address == nil {
+            if let machine = backend.launch.machine, new.contains(machine) { backend.reattach() }
+        }
     }
 
     private struct ExecParams: Encodable, Sendable { let argv: [String]; let on: String?; let timeout: Int }
@@ -392,6 +453,11 @@ final class HcSessionManager {
             pendingKills[address] = false
             if let conn = connection { sendKill(address, on: conn) } else { scheduleReconnect() }
         }
+    }
+
+    /// 이 terminal에 kill을 보냈거나 보낼 참인지(pane은 이미 닫혔다).
+    func isKilling(address: String) -> Bool {
+        pendingKills[address] != nil
     }
 
     /// 응답을 기다리는 kill이 있는지. 종료 직전 AppDelegate가 기다릴지 정하는 데 쓴다.

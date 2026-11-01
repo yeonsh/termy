@@ -442,6 +442,30 @@ actor HookDaemon {
         updateContinuation.yield(DaemonUpdate(seq: seq, snapshot: next))
     }
 
+    /// 복원한 hc pane의 hook 세부 정보를 되살린다. 상태는 건드리지 않는다(7501 status나 다음 hook이 정한다).
+    /// 그사이 다른 session의 hook이 이미 왔으면 그쪽이 새것이므로 그대로 두고, 아니면 비어 있는 필드만 채운다.
+    func restoreDetails(paneId: String, projectId: String?, details: PaneHookDetails) async {
+        let next: PaneSnapshot
+        if var current = panes[paneId] {
+            if let live = current.lastSessionId, let saved = details.lastSessionId, live != saved { return }
+            current.lastSessionId = current.lastSessionId ?? details.lastSessionId
+            current.lastPrompt = current.lastPrompt ?? details.lastPrompt
+            current.lastAssistantMessage = current.lastAssistantMessage ?? details.lastAssistantMessage
+            current.lastCwd = current.lastCwd ?? details.lastCwd
+            next = current
+        } else {
+            var fresh = PaneSnapshot.empty(paneId: paneId, projectId: projectId, agentKind: details.agentKind ?? .claude)
+            fresh.lastSessionId = details.lastSessionId
+            fresh.lastPrompt = details.lastPrompt
+            fresh.lastAssistantMessage = details.lastAssistantMessage
+            fresh.lastCwd = details.lastCwd
+            next = fresh
+        }
+        panes[paneId] = next
+        seq &+= 1
+        updateContinuation.yield(DaemonUpdate(seq: seq, snapshot: next))
+    }
+
     private func ingest(_ event: HookEvent) async {
         // Events without a pane_id come from `claude` invocations outside
         // termy (user ran it in iTerm/plain shell). Journal for debug, drop

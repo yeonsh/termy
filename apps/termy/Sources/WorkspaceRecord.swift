@@ -74,4 +74,46 @@ struct PaneRecord: Codable, Equatable {
     /// in every other session save and in ⌘K workspace records, so the key
     /// is absent from those files.
     var agentResume: AgentResumeRecord? = nil
+
+    // hc pane은 termy가 꺼져도 core 안에서 살아 있고 `termy.pane` label로 다시 찾는다. 그래서 pane id와 backend를
+    // 남겨 같은 id로 복원한다. 아래 필드가 없는 예전 파일은 지금처럼 새 id의 local pane이 된다.
+    /// 복원할 때 다시 쓰는 pane id(`TERMY_PANE_ID`, hc terminal의 `termy.pane` label).
+    var paneId: String? = nil
+    /// nil이면 local(예전 파일).
+    var backend: PaneBackendKind? = nil
+    /// 원격 hc pane의 머신. local과 로컬 hc pane은 nil.
+    var machine: String? = nil
+    var projectId: String? = nil
+    /// hc terminal의 `termy.project` label(local은 worktree root, 원격은 `<machine>:<folder>`).
+    var projectKey: String? = nil
+    /// hc pane만: termy가 꺼진 동안 잃지 않게 남기는 hook 세부 정보.
+    var hookDetails: PaneHookDetails? = nil
+
+    /// 이 기록으로 만들 pane의 backend. hc를 쓸 수 없어도 local로 바꾸지 않는다(같은 pane id의 셸이 둘이 된다).
+    var launch: PaneLaunch {
+        backend == .hc ? .hc(machine: machine) : .local
+    }
+}
+
+/// hc pane의 `PaneSnapshot` 가운데 다시 켰을 때 되살릴 hook 정보. 상태는 남기지 않는다: 켜진 뒤의 7501 status나
+/// 다음 hook이 정한다.
+struct PaneHookDetails: Codable, Equatable, Sendable {
+    var lastSessionId: String?
+    var lastPrompt: String?
+    var lastAssistantMessage: String?
+    var lastCwd: String?
+    var agentKind: AgentKind?
+}
+
+extension PaneHookDetails {
+    /// 남길 것이 없으면(snapshot이 없거나 hook이 한 번도 오지 않았으면) nil.
+    init?(snapshot: PaneSnapshot?) {
+        guard let snapshot else { return nil }
+        let texts = [snapshot.lastSessionId, snapshot.lastPrompt, snapshot.lastAssistantMessage, snapshot.lastCwd]
+        let defaultKind = PaneSnapshot.empty(paneId: snapshot.paneId, projectId: nil).agentKind
+        guard texts.contains(where: { $0 != nil }) || snapshot.agentKind != defaultKind else { return nil }
+        self.init(lastSessionId: snapshot.lastSessionId, lastPrompt: snapshot.lastPrompt,
+                  lastAssistantMessage: snapshot.lastAssistantMessage, lastCwd: snapshot.lastCwd,
+                  agentKind: snapshot.agentKind)
+    }
 }

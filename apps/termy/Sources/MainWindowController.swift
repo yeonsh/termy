@@ -58,11 +58,21 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         self.init(initialFrame: nil, sessionLayout: nil)
     }
 
+    convenience init(initialFrame: NSRect?, sessionLayout: WindowRecord?) {
+        // WorkspacePersistence init can fail if the app-support dir is
+        // unwritable (FDA denied, disk full). Autosave silently degrades to
+        // no-op in that case — the feature is best-effort, not load-bearing.
+        self.init(initialFrame: initialFrame, sessionLayout: sessionLayout,
+                  workspacePersistence: try? WorkspacePersistence())
+    }
+
     /// - Parameters:
     ///   - initialFrame: window frame to apply; `nil` centers the window.
     ///   - sessionLayout: when present, the window replays this saved pane
     ///     layout instead of seeding a single HOME pane.
-    init(initialFrame: NSRect?, sessionLayout: WindowRecord?) {
+    ///   - workspacePersistence: where ⌘K layouts are autosaved; nil turns
+    ///     autosave off. Tests pass a temporary folder.
+    init(initialFrame: NSRect?, sessionLayout: WindowRecord?, workspacePersistence: WorkspacePersistence?) {
         let window = TermyWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -100,11 +110,8 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         setupMissionControlBar()
         setupWorkspace()
 
-        // WorkspacePersistence init can fail if the app-support dir is
-        // unwritable (FDA denied, disk full). Autosave silently degrades to
-        // no-op in that case — the feature is best-effort, not load-bearing.
-        if let persistence = try? WorkspacePersistence() {
-            self.autosaver = WorkspaceAutosaver(persistence: persistence, workspace: workspace)
+        if let workspacePersistence {
+            self.autosaver = WorkspaceAutosaver(persistence: workspacePersistence, workspace: workspace)
         }
 
         workspace.onPanesChanged = { [weak self] in
@@ -258,6 +265,9 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         workspace.panes.contains { $0.paneId == paneId }
     }
 
+    /// This window's panes in creation order.
+    var panes: [Pane] { workspace.panes }
+
     /// Forward an agent state to the pane if this window owns it.
     @discardableResult
     func applyAgentState(_ state: PaneState, toPaneId paneId: String) -> Bool {
@@ -269,18 +279,27 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     /// Snapshot this window's restorable state. Returns nil for a paneless
     /// window (nothing worth restoring). `includeAgentResume` adds each
     /// pane's live agent session — only the update-relaunch save asks.
+    ///
+    /// 모든 pane에 id·backend·project를 남기고, hc pane에만 hook 세부 정보를 남긴다(hc pane은 다시 켜면 같은
+    /// terminal에 다시 붙고, 그사이 HookDaemon이 비어 있기 때문이다). agent resume은 local pane만 한다.
     func sessionWindowRecord(includeAgentResume: Bool = false) -> WindowRecord? {
         guard let window, !workspace.panes.isEmpty else { return nil }
         let rows: [[PaneRecord]] = workspace.rows.map { row in
             row.map { pane in
-                PaneRecord(
+                let snapshot = missionControlModel.snapshot(paneId: pane.paneId)
+                var record = PaneRecord(
                     cwd: pane.currentCwd,
-                    agentResume: includeAgentResume
-                        ? pane.agentResumeRecord(
-                            snapshot: missionControlModel.snapshot(paneId: pane.paneId)
-                        )
-                        : nil
+                    agentResume: includeAgentResume ? pane.agentResumeRecord(snapshot: snapshot) : nil
                 )
+                record.paneId = pane.paneId
+                record.backend = pane.launch.backendKind
+                if case .hc(let machine) = pane.launch {
+                    record.machine = machine
+                    record.hookDetails = PaneHookDetails(snapshot: snapshot) ?? pane.restoredHookDetails
+                }
+                record.projectId = pane.projectId
+                record.projectKey = pane.projectKey
+                return record
             }
         }
         if rows.flatMap({ $0 }).isEmpty { return nil }
@@ -315,11 +334,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
                     resume: paneRec.agentResume,
                     directoryExists: { FileManager.default.directoryExists(atPath: $0) }
                 )
-                workspace.addPane(
-                    cwd: plan.cwd,
-                    splitAxis: axis,
-                    startupInput: plan.startupInput
-                )
+                addRestoredPane(paneRec, cwd: plan.cwd, splitAxis: axis, startupInput: plan.startupInput)
             }
         }
         // Defensive: an empty saved record would leave a paneless window.
@@ -339,6 +354,53 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
            idx >= 0, idx < workspace.panes.count {
             workspace.focus(pane: workspace.panes[idx])
         }
+    }
+
+    /// 저장된 pane 하나를 다시 만든다. 저장된 id와 backend를 그대로 쓰므로 hc pane은 label로 자기 terminal을 찾아
+    /// 다시 붙고, hc를 쓸 수 없어도 local로 바뀌지 않는다(backend가 unavailable로 두고 다시 연결한다).
+    /// hc pane은 저장된 project를 쓰고(원격 project는 cwd로 정할 수 없다) hook 세부 정보를 되살린다. local pane의
+    /// project는 지금처럼 cwd로 정한다(agent resume이 cwd를 바꿀 수 있다). 기록에 없는 값은 지금 동작 그대로다.
+    @discardableResult
+    private func addRestoredPane(_ record: PaneRecord, cwd: String, splitAxis: SplitAxis, startupInput: String?) -> Pane {
+        let launch = record.launch
+        let isHc = launch.backendKind == .hc
+        let paneId = reusablePaneId(record.paneId)
+        let pane = workspace.addPane(
+            cwd: cwd,
+            splitAxis: splitAxis,
+            startupInput: startupInput,
+            paneId: paneId,
+            launch: launch,
+            projectId: isHc ? record.projectId : nil,
+            projectKey: isHc ? record.projectKey : nil
+        )
+        if isHc, paneId != nil, let details = record.hookDetails {
+            pane.restoreHookDetails(details)
+        }
+        return pane
+    }
+
+    /// 저장된 pane id를 다시 써도 되면 그 값, 아니면 nil(새 id). 같은 id의 pane이 이미 어느 창에 있으면(⌘K 기록의
+    /// pane이 `cd`로 다른 project에 옮겨 가 살아 있는 경우 등) 다시 쓰지 않는다. hc pane 둘이 한 terminal에 붙는다.
+    private func reusablePaneId(_ saved: String?) -> String? {
+        guard let saved, !saved.isEmpty,
+              !missionControlModel.livePaneIds.contains(saved),
+              !workspace.panes.contains(where: { $0.paneId == saved })
+        else { return nil }
+        return saved
+    }
+
+    /// hc에 살아 있는데 저장된 레이아웃에 없던 terminal을 이 창의 pane으로 연다. 같은 pane id로 만들므로
+    /// backend가 label로 그 terminal을 찾아 붙는다. 이미 그 id의 pane이 있으면 아무것도 하지 않는다.
+    func adoptHcOrphan(_ orphan: HcOrphan) {
+        guard let paneId = reusablePaneId(orphan.paneId) else { return }
+        workspace.addPane(
+            cwd: orphan.cwd,
+            paneId: paneId,
+            launch: .hc(machine: orphan.machine),
+            projectId: HcRestorePlanner.projectId(for: orphan),
+            projectKey: orphan.projectKey
+        )
     }
 
     // MARK: - Menu validation
@@ -464,7 +526,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         for savedRow in record.effectiveRows {
             for (colIdx, paneRec) in savedRow.enumerated() {
                 let axis: SplitAxis = (colIdx == 0) ? .row : .column
-                ws.addPane(cwd: paneRec.cwd, splitAxis: axis)
+                addRestoredPane(paneRec, cwd: paneRec.cwd, splitAxis: axis, startupInput: nil)
             }
         }
         // All new panes belong to the restored project — lock the filter to it.

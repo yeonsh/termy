@@ -87,6 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             if !restored {
                 self.windowManager.newWindow()
             }
+            // hc pane이 있거나 로컬 hc 설정이 켜져 있으면, 레이아웃에 없는 자기 hc terminal을 pane으로 연다.
+            await self.windowManager.adoptHcOrphans()
         }
 
         // First-run: nudge the user to grant Full Disk Access so they don't

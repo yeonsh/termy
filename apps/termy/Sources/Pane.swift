@@ -111,6 +111,9 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     private var factsThemeVariant: TermyThemeVariant?
     /// ForegroundProcessWatcher·HookDaemon 호출의 꼬리. 보낸 순서대로 처리하게 이어 붙인다.
     private var watcherCalls: Task<Void, Never>?
+    /// 복원한 hc pane의 hook 세부 정보. HookDaemon에 되살리고, 그 snapshot이 MissionControlModel에 닿기 전에
+    /// 저장이 돌아도 잃지 않게 들고 있는다.
+    private(set) var restoredHookDetails: PaneHookDetails?
 
     init(
         projectId: String,
@@ -385,6 +388,18 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         terminal.remoteInput = { [weak backend] bytes in
             guard backend?.connectionState == .attached else { return }
             forward?(bytes)
+        }
+    }
+
+    /// session.json에 남긴 hook 세부 정보를 HookDaemon에 되살린다. watcher 큐에 넣어 attach 뒤에 오는
+    /// status·foreground보다 먼저 닿게 한다. local pane은 아무것도 하지 않는다.
+    func restoreHookDetails(_ details: PaneHookDetails) {
+        guard hcBackend != nil else { return }
+        restoredHookDetails = details
+        let paneId = self.paneId
+        let projectId = self.projectId
+        enqueueWatcherCall {
+            await HookDaemon.shared.restoreDetails(paneId: paneId, projectId: projectId, details: details)
         }
     }
 
