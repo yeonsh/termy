@@ -484,7 +484,7 @@ scratch core(`HC_SESSION=termy-spike`, 임시 `XDG_STATE_HOME`/`XDG_CONFIG_HOME`
    프로그램은 막히지 않고 끝난다. 그 뒤 credit을 돌려주면 새 first paint(`\x18\x1b[!p`로 시작)와
    남은 출력이 와서 `END`까지 받는다. 종료 CLOSE payload는
    `{"exit_code":0,"finished_ms":1793525761160,"reason":"exited","signal":null}`(`finished_ms`가
-   붙는다). kill은 sh가 `{"exit_code":null,…,"reason":"killed","signal":1}`, claude가
+   붙는다. 값은 이번 실행의 예시다). kill은 sh가 `{"exit_code":null,…,"reason":"killed","signal":1}`, claude가
    `{"exit_code":129,…,"reason":"killed","signal":null}`. viewer가 CLOSE를 보내면 core는 빈 CLOSE로 답한다.
 2. **다시 attach:** 같은 연결에서 CLOSE한 뒤에도, 연결 프로세스를 죽이고 새 연결로 붙어도 first
    paint에 모드가 다시 온다. `\x1b[?2004h`, `\x1b[?1000h`, `\x1b[?1006h`, `\x1b[?1049h`는 그대로이고,
@@ -492,7 +492,8 @@ scratch core(`HC_SESSION=termy-spike`, 임시 `XDG_STATE_HOME`/`XDG_CONFIG_HOME`
    `>5u` → `=5;1u`). Claude Code(fullscreen)는 다시 붙은 뒤 `=5;1u`, `?1000h ?1002h ?1003h ?1004h
    ?1006h ?1049h ?2004h ?2031h`. stack은 맨 위 값만 오고, flags는 화면(main/alt)별이라 main에서 push한
    뒤 `?1049h`로 넘어간 프로그램은 alt 값(0)만 복원된다(kitty 규격대로). SwiftTerm fork는
-   `CSI = n ; 1 u`와 화면별 stack을 처리한다(코드에서 확인).
+   `CSI = n ; 1 u`와 화면별 stack을 처리한다(코드에서 확인). `history`는 확인하지 못했다(시험한
+   화면이 다 차지 않아 `history` 0과 50의 first paint가 같았다).
 3. **IME:** Task 6 통합 테스트와 Task 12 실제 확인에서 본다.
 4. **Claude 7501**(Claude Code 2.1.316, `status` 이벤트 data의 `status`):
    - 권한 프롬프트: `{"app":"claude-code","kind":"permission","msg":"approve Bash: touch spike-file","state":"blocked"}`
@@ -508,15 +509,23 @@ scratch core(`HC_SESSION=termy-spike`, 임시 `XDG_STATE_HOME`/`XDG_CONFIG_HOME`
    - Task 8 표와 값은 맞다. 다만 kind 없는 `blocked`(`dialog open`)는 지금 표대로면 `.permission`과 알림이 된다.
 5. **agent 교체:** `/exit`하면 claude가 `working`을 한 번 보낸 뒤 `status: null`(3번 반복)과
    `turn {"state":null}`, 그다음 foreground가 zsh로 바뀐다. `reported`는 terminal이 살아 있는 동안
-   `true`로 남는다. 이어서 띄운 `codex --no-daemon`은 7501을 보내지 않는다(foreground
-   `{"name":"codex","argv":["codex","--no-daemon"],…}`만 오고 status는 null, reported는 true 그대로).
+   `true`로 남는다. 이어서 띄운 `codex --no-daemon`은 관찰한 범위(시작 dialog부터 idle 프롬프트까지)에서
+   7501을 보내지 않았다(foreground `{"name":"codex","argv":["codex","--no-daemon"],…}`만 오고 status는
+   null, reported는 true 그대로). 프롬프트를 보내지 않아 turn 중 동작은 확인하지 않았고, "Hooks need
+   review" dialog를 Esc로 넘겨 hook이 꺼진 상태였다.
    7501 경로인지는 `reported`가 아니라 `status != null`로 판단해야 한다(§6.6과 같다). `null` 직전 값이
    `working`이라 Task 8의 `nil` 규칙(상태 유지)만으로는 `.thinking`이 남고, hook SessionEnd나
    foreground로 만든 synthetic SessionEnd가 풀어 준다. claude의 foreground name은 `"2.1.316"`, argv[0]은 `"claude"`.
-6. **`TERM_PROGRAM`:** env로 주면 identity `"termy 0.2.22"`. 주지 않으면 hc가 `TERM_PROGRAM=ghostty`를
-   넣고 identity와 XTVERSION도 `"ghostty"`. Claude Code는 ghostty일 때만 OSC 8 hyperlink를 쓰고,
+6. **`TERM_PROGRAM`:** env로 주면 terminal 기록의 `identity`가 `"termy 0.2.22"`. 주지 않으면 hc가
+   프로그램 환경에 `TERM_PROGRAM=ghostty`를 넣고 `identity`도 `"ghostty"`(schema 설명으로는 XTVERSION도
+   이 값으로 답한다. XTVERSION 응답 자체는 보지 않았다). 비교는 `termy`와 `ghostty` 사이이고, 비어 있는
+   `TERM_PROGRAM`은 hc가 채우므로 시험할 수 없었다. Claude Code는 ghostty일 때만 OSC 8 hyperlink를 쓰고,
    fullscreen 제안 문구가 조금 다르다. kitty flags(`>5u`), sync output(2026), 7501은 같다.
-   **결론: `"termy"`를 유지한다**(지금 local pane도 `TERM_PROGRAM`이 비어 있어 Claude에게는 같은 동작이다).
+   **결론: `"termy"`를 유지한다.** 근거는 추론이다. local pane은 `Pane.startShell`이
+   `shellEnvironment(base: ProcessInfo.processInfo.environment, …)`로 termy 자신의 환경을 넘기고
+   `TERM_PROGRAM`을 넣지도 지우지도 않는다(Finder/Dock으로 띄우면 보통 없다). XTVERSION은 SwiftTerm이
+   자기 이름으로 답한다(`Terminal.cmdXTVERSION`). 그래서 local pane도 Claude가 모르는 터미널이고,
+   `termy`가 `ghostty`보다 지금 동작에 가깝다고 본다. empty와 `termy`의 Claude 동작이 같은지는 확인하지 않았다.
 7. **Herdr.app 공존:** termy label만 붙은 terminal은 Herdr.app에 전혀 나타나지 않고, Herdr가 지우거나
    바꾸지 않는다(사용자 확인, 2026-11-01).
 8. **core 환경:** 사용자 core(`herdr-core serve`, Herdr.app이 띄움)에는 `agentSessionMarkerEnvKeys`도
@@ -541,7 +550,11 @@ Swift 구현자가 알아야 할 프로토콜 사실:
 - first paint의 OSC 7은 `\x1b]7;file://host/path\x00\x1b\\`처럼 ST 앞에 NUL이 붙는다(live OSC 7에는
   없다). termy의 OSC 7 처리에서 NUL이 경로에 섞이지 않는지 본다.
 - attach하자마자 그 viewer의 크기가 terminal 크기가 되고(`size` 이벤트), 그 viewer가 떠나면 남은
-  viewer의 크기로 돌아간다. channel 번호는 연결마다 1부터 오르고 다시 쓰지 않는다.
+  viewer의 크기로 돌아간다. 설명하지 못한 관찰이 하나 있다. 새 연결에서 `history: 200`으로 attach했다가
+  닫을 때 `size {"cols":200,"rows":120}` 이벤트가 한 번 왔다(두 viewer 모두 120x40). 같은 조건으로 다시
+  해 봤을 때는 나오지 않았다.
+- channel 번호는 이번 spike에서 연결마다 1부터 올랐고, 닫은 번호를 다시 받은 적은 없었다(관찰일 뿐,
+  보장인지는 모른다).
 - `herdr-core connect`는 core가 없으면 띄운다(hello까지 0.04초). symlink `hc`로 뜬 core는 프로세스
   이름이 `hc serve`라서 `pgrep -f 'herdr-core serve'`에 잡히지 않는다.
 - kill하면 `status: null`이 `finished`보다 먼저 온다(약 0.45초). `terminal.get`의 `records`는 `null`,
