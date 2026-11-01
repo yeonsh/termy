@@ -56,11 +56,12 @@ enum RemoteProject {
     }
 
     /// `uname` 결과로 Windows인지와 그 판정을 기억해도 되는지. 0이 아니거나 호출이 실패하면 Windows로 본다.
-    /// 기억은 머신이 답한 것(exit code, 실행 실패 `spawn_failed`)만 한다. 줄이 잠깐 끊겨 실패한 것까지 기억하면 그
-    /// 머신은 앱을 다시 켤 때까지 고를 수 없다.
-    static func windowsVerdict(_ result: Result<Int32, any Error>) -> (isWindows: Bool, cache: Bool) {
+    /// 기억은 머신이 답한 것(스스로 끝나 낸 exit code, 실행 실패 `spawn_failed`)만 한다. 줄이 잠깐 끊겨 실패했거나
+    /// 느린 머신에서 시간이 다 돼(또는 signal로) 끝난 것까지 기억하면, 멀쩡한 머신을 앱을 다시 켤 때까지 고를 수 없다.
+    static func windowsVerdict(_ result: Result<HcExecResult, any Error>) -> (isWindows: Bool, cache: Bool) {
         switch result {
-        case .success(let code):
+        case .success(let run):
+            guard let code = run.exitCode else { return (true, false) }
             return (code != 0, true)
         case .failure(HcError.rpc(kind: "spawn_failed", _)):
             return (true, true)

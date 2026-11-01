@@ -128,11 +128,22 @@ final class HcRemoteProjectIntegrationTests: XCTestCase {
     func testExecRunsArgvAndReturnsTheExitCode() async throws {
         let manager = try scratchManager()
         let present = try await manager.exec(on: nil, argv: ["test", "-d", "/tmp"])
-        XCTAssertEqual(present, 0)
+        XCTAssertEqual(present, HcExecResult(code: 0, timedOut: false))
         let missing = try await manager.exec(on: nil, argv: ["test", "-d", "/nonexistent-\(UUID().uuidString)"])
-        XCTAssertNotEqual(missing, 0)
+        XCTAssertNotNil(missing.exitCode)
+        XCTAssertNotEqual(missing.exitCode, 0)
         let uname = try await manager.exec(on: nil, argv: ["uname"])
-        XCTAssertEqual(uname, 0)
+        XCTAssertEqual(uname.exitCode, 0)
+    }
+
+    /// 시간이 다 된 실행은 오류가 아니라 결과로 온다(`timed_out`). termy는 그것을 프로그램의 답으로 읽지 않는다.
+    func testExecTimeoutIsAResultWithoutAnExitCode() async throws {
+        let manager = try scratchManager()
+        let slow = try await manager.exec(on: nil, argv: ["sleep", "5"], timeout: 1)
+        XCTAssertTrue(slow.timedOut)
+        XCTAssertNil(slow.exitCode)
+        let verdict = RemoteProject.windowsVerdict(.success(slow))
+        XCTAssertFalse(verdict.cache, "a timed-out uname is not remembered")
     }
 
     /// 없는 머신에서 uname을 부르면 실패한다: Windows로 보여 주되(만들 수 없다) 기억하지 않는다.

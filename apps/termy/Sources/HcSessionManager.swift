@@ -37,6 +37,30 @@ struct HcMachineList: Decodable, Sendable {
     }
 }
 
+/// `machine.exec` 결과 가운데 termy가 쓰는 것. hc는 0이 아닌 exit와 timeout을 오류가 아니라 결과로 돌려준다.
+struct HcExecResult: Sendable, Equatable {
+    /// exit code. signal로 끝났으면(시간이 다 돼 끝난 경우 포함) nil.
+    var code: Int32?
+    /// 시간이 다 돼 끝났다.
+    var timedOut: Bool
+
+    /// 프로그램이 스스로 끝나 낸 exit code. 시간이 다 됐거나 signal로 끝났으면 nil이다: 그 프로그램의 답이 아니다.
+    var exitCode: Int32? { timedOut ? nil : code }
+}
+
+extension HcExecResult: Decodable {
+    private enum CodingKeys: String, CodingKey {
+        case code
+        case timedOut = "timed_out"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        code = try c.decodeIfPresent(Int32.self, forKey: .code)
+        timedOut = try c.decodeIfPresent(Bool.self, forKey: .timedOut) ?? false
+    }
+}
+
 /// `terminal.kill` 하나의 결과.
 enum HcKillResult: Equatable, Sendable {
     case killed
@@ -440,12 +464,10 @@ final class HcSessionManager {
     }
 
     private struct ExecParams: Encodable, Sendable { let argv: [String]; let on: String?; let timeout: Int }
-    private struct ExecResult: Decodable, Sendable { let code: Int32? }
 
-    /// exit code만 돌려준다. signal로 끝났거나 시간이 다 돼 code가 없으면 -1.
-    func exec(on machine: String?, argv: [String], timeout: Int = 10) async throws -> Int32 {
-        let result: ExecResult = try await call("machine.exec", ExecParams(argv: argv, on: machine, timeout: timeout))
-        return result.code ?? -1
+    /// 프로그램이 끝까지 돌아 낸 exit code와 시간이 다 됐는지. 0이 아닌 exit와 timeout은 오류가 아니라 결과로 온다.
+    func exec(on machine: String?, argv: [String], timeout: Int = 10) async throws -> HcExecResult {
+        try await call("machine.exec", ExecParams(argv: argv, on: machine, timeout: timeout))
     }
 
     // MARK: - kill

@@ -211,7 +211,7 @@ final class RemoteProjectSheet: NSObject, NSTextFieldDelegate {
     /// `uname`이 0이 아니거나 실패하면 Windows로 본다. 그 머신이 답한 판정은 이름별로 기억한다.
     static func isWindows(machine: String, manager: HcSessionManager) async -> Bool {
         if let remembered = rememberedWindows[machine] { return remembered }
-        let result: Result<Int32, any Error>
+        let result: Result<HcExecResult, any Error>
         do {
             result = .success(try await manager.exec(on: machine, argv: ["uname"], timeout: 5))
         } catch {
@@ -238,7 +238,8 @@ final class RemoteProjectSheet: NSObject, NSTextFieldDelegate {
         }
         isChecking = true
         refresh()
-        let code = try? await manager.exec(on: name, argv: ["test", "-d", folder])
+        // 시간이 다 돼 끝난 확인은 폴더가 있다는 답이 아니다(exitCode가 nil).
+        let code = (try? await manager.exec(on: name, argv: ["test", "-d", folder]))?.exitCode
         guard !isDismissed else { return }
         isChecking = false
         refresh()

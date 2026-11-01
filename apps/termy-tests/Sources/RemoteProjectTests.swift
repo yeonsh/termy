@@ -75,14 +75,31 @@ final class RemoteProjectTests: XCTestCase {
     }
 
     /// `uname`이 0이 아니거나 호출이 실패하면 Windows로 본다. 기억은 머신이 확실히 답한 것만 한다: 연결이 잠깐
-    /// 끊겨 실패한 것까지 기억하면 그 머신은 앱을 다시 켤 때까지 만들 수 없다.
+    /// 끊겨 실패했거나 느린 머신에서 시간이 다 된 것까지 기억하면 그 머신은 앱을 다시 켤 때까지 만들 수 없다.
     func testWindowsVerdict() {
-        XCTAssertTrue(RemoteProject.windowsVerdict(.success(0)) == (false, true))
-        XCTAssertTrue(RemoteProject.windowsVerdict(.success(1)) == (true, true))
-        XCTAssertTrue(RemoteProject.windowsVerdict(.success(-1)) == (true, true))
+        let ran = { (code: Int32?, timedOut: Bool) in RemoteProject.windowsVerdict(.success(HcExecResult(code: code, timedOut: timedOut))) }
+        XCTAssertTrue(ran(0, false) == (false, true))
+        XCTAssertTrue(ran(1, false) == (true, true))
+        XCTAssertTrue(ran(127, false) == (true, true))
+        XCTAssertTrue(ran(nil, true) == (true, false), "uname ran out of time: a slow line, not an answer")
+        XCTAssertTrue(ran(0, true) == (true, false), "a timed-out run's code is not uname's answer")
+        XCTAssertTrue(ran(nil, false) == (true, false), "ended by a signal: no answer")
         XCTAssertTrue(RemoteProject.windowsVerdict(.failure(HcError.rpc(kind: "spawn_failed", message: "no uname"))) == (true, true))
         XCTAssertTrue(RemoteProject.windowsVerdict(.failure(HcError.rpc(kind: "unavailable", message: "line down"))) == (true, false))
         XCTAssertTrue(RemoteProject.windowsVerdict(.failure(HcError.disconnected)) == (true, false))
+    }
+
+    /// hc 0.1.16 `machine.exec` 결과(ExecResult). timeout은 오류가 아니라 `timed_out: true`와 null code로 온다.
+    func testExecResultDecodes() throws {
+        let done = try JSONDecoder().decode(HcExecResult.self, from: Data(
+            #"{"code":0,"ms":3,"signal":null,"stderr":"","stdout":"TGludXgK","timed_out":false,"truncated":false}"#.utf8))
+        XCTAssertEqual(done, HcExecResult(code: 0, timedOut: false))
+        XCTAssertEqual(done.exitCode, 0)
+        let timedOut = try JSONDecoder().decode(HcExecResult.self, from: Data(
+            #"{"code":null,"ms":5001,"signal":9,"stderr":"","stdout":"","timed_out":true,"truncated":false}"#.utf8))
+        XCTAssertEqual(timedOut, HcExecResult(code: nil, timedOut: true))
+        XCTAssertNil(timedOut.exitCode, "a timed-out folder check must not read as \"exists\"")
+        XCTAssertNil(HcExecResult(code: 0, timedOut: true).exitCode)
     }
 
     // MARK: - 시트
