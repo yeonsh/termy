@@ -67,6 +67,8 @@ final class TermyTerminalView: LocalProcessTerminalView {
         if let pending = pendingSizeWhileFrozen {
             pendingSizeWhileFrozen = nil
             applyFrameSize(pending)
+        } else {
+            reportGridIfChanged()
         }
     }
 
@@ -93,14 +95,10 @@ final class TermyTerminalView: LocalProcessTerminalView {
     }
 
     // thaw 경로는 super.setFrameSize를 직접 부르므로(self.setFrameSize 재진입 없음)
-    // 크기 비교와 콜백은 두 경로가 공유하는 이 함수에 둔다.
+    // 크기 변경은 두 경로가 공유하는 이 함수를 거친다.
     private func applyFrameSize(_ size: NSSize) {
-        let before = (terminal.cols, terminal.rows)
         super.setFrameSize(size)
-        let after = (terminal.cols, terminal.rows)
-        if before != after {
-            onGridSizeChanged?(after.0, after.1)
-        }
+        reportGridIfChanged()
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -114,9 +112,33 @@ final class TermyTerminalView: LocalProcessTerminalView {
         applyFrameSize(newSize)
     }
 
+    private var lastReportedGrid: (cols: Int, rows: Int)?
+
+    /// grid 변경을 `onGridSizeChanged`로 알리는 단일 통로. frame 변경뿐 아니라
+    /// 글꼴/줄 간격 변경도 grid를 바꾸는데, process가 없는 hc pane에서는 SwiftTerm이
+    /// 그 변화를 알리지 않으므로 여기서 직접 비교한다. freeze 중에는 보류하고 thaw에서 알린다.
+    func reportGridIfChanged() {
+        guard sizePropagationFreezeDepth == 0 else { return }
+        let now = (cols: terminal.cols, rows: terminal.rows)
+        if let last = lastReportedGrid, last == now { return }
+        lastReportedGrid = now
+        onGridSizeChanged?(now.cols, now.rows)
+    }
+
+    /// 글꼴 변경 후 grid 변화까지 알린다. Pane의 `terminal.font =` 대신 쓴다.
+    func setTerminalFont(_ font: NSFont) {
+        self.font = font
+        reportGridIfChanged()
+    }
+
+    override var lineSpacing: CGFloat {
+        didSet { reportGridIfChanged() }
+    }
+
     public override init(frame: CGRect) {
         super.init(frame: frame)
         terminal.changeScrollback(Self.scrollbackLines)
+        lastReportedGrid = (terminal.cols, terminal.rows)
         installLinkClickMonitor()
         installSelectionClearMonitor()
         installControlKeyRetargetMonitor()

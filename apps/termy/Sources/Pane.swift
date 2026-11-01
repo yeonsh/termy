@@ -102,7 +102,7 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         wantsLayer = true
         layer?.cornerRadius = 10
         layer?.masksToBounds = true
-        terminal.font = TerminalFontPreference.shared.resolvedFont()
+        terminal.setTerminalFont(TerminalFontPreference.shared.resolvedFont())
 
         // Drive the hover-underline UX for URLs. `.implicit` picks up
         // plain-text URLs in addition to OSC 8 hyperlinks;
@@ -150,7 +150,7 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.terminal.font = TerminalFontPreference.shared.resolvedFont()
+                self?.terminal.setTerminalFont(TerminalFontPreference.shared.resolvedFont())
             }
         }
     }

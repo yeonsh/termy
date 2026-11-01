@@ -32,6 +32,32 @@ final class TermyTerminalViewRemoteIOTests: XCTestCase {
         XCTAssertTrue(sizes.isEmpty)
         view.thawSizePropagation()
         let t = view.getTerminal()
-        XCTAssertEqual(sizes.last, [t.cols, t.rows])
+        XCTAssertEqual(sizes, [[t.cols, t.rows]])
+    }
+
+    func testFontChangeReportsGrid() {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        var sizes: [[Int]] = []
+        view.onGridSizeChanged = { sizes.append([$0, $1]) }
+        view.setTerminalFont(NSFont.monospacedSystemFont(ofSize: 30, weight: .regular))
+        let t = view.getTerminal()
+        XCTAssertEqual(sizes, [[t.cols, t.rows]])
+    }
+
+    func testUnfrozenFrameChangeFiresOnce() {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        var sizes: [[Int]] = []
+        view.onGridSizeChanged = { sizes.append([$0, $1]) }
+        view.setFrameSize(NSSize(width: 800, height: 600))
+        let t = view.getTerminal()
+        XCTAssertEqual(sizes, [[t.cols, t.rows]])
+    }
+
+    func testFrameChangeWithSameGridFiresNothing() {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        var sizes: [[Int]] = []
+        view.onGridSizeChanged = { sizes.append([$0, $1]) }
+        view.setFrameSize(NSSize(width: 400, height: 300))
+        XCTAssertTrue(sizes.isEmpty)
     }
 }
