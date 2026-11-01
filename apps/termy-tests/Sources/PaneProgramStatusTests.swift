@@ -83,4 +83,38 @@ final class PaneProgramStatusTests: XCTestCase {
         XCTAssertEqual(b.state, a.state)
         XCTAssertFalse(WaitAlertRule.shouldAlert(previous: obs(a), next: obs(b)))
     }
+
+    func testWorkingThenDoneAlerts() {
+        let w = PaneStateMachine.applyProgramStatus(st("working"), to: base(), now: Date())
+        let d = PaneStateMachine.applyProgramStatus(st("done"), to: w, now: Date())
+        XCTAssertEqual(d.state, .waiting); XCTAssertEqual(d.waitSource, .turnEnd)
+        XCTAssertTrue(WaitAlertRule.shouldAlert(previous: obs(w), next: obs(d)))
+    }
+    func testDoneOnIdleWithoutTurnStaysIdle() {
+        var p = base(); p.state = .idle; p.turnOpen = false
+        let n = PaneStateMachine.applyProgramStatus(st("done"), to: p, now: Date())
+        XCTAssertEqual(n.state, .idle)
+        XCTAssertFalse(WaitAlertRule.shouldAlert(previous: obs(p), next: obs(n)))
+    }
+    func testResentDoneOnWaitingTurnEndUnchanged() {
+        let t0 = Date(timeIntervalSince1970: 1000)
+        let w = PaneStateMachine.applyProgramStatus(st("working"), to: base(), now: t0)
+        let d1 = PaneStateMachine.applyProgramStatus(st("done"), to: w, now: t0)
+        let d2 = PaneStateMachine.applyProgramStatus(st("done"), to: d1, now: t0.addingTimeInterval(90))
+        XCTAssertEqual(d2.enteredStateAt, d1.enteredStateAt)
+        XCTAssertFalse(WaitAlertRule.shouldAlert(previous: obs(d1), next: obs(d2)))
+    }
+    func testResentIdleOnIdleNoChange() {
+        let a = PaneStateMachine.applyProgramStatus(st("idle"), to: base(), now: Date(timeIntervalSince1970: 1000))
+        let b = PaneStateMachine.applyProgramStatus(st("idle"), to: a, now: Date(timeIntervalSince1970: 2000))
+        XCTAssertEqual(b.state, .idle); XCTAssertEqual(b.enteredStateAt, a.enteredStateAt)
+    }
+    func testReconcilerSkipsActiveProgramStatus() {
+        var p = PaneSnapshot.empty(paneId: "P", projectId: "app", agentKind: .codex)
+        p.state = .thinking
+        let now = p.updatedAt.addingTimeInterval(60)
+        XCTAssertNotNil(CodexForegroundReconciler.possiblyWaitingSnapshotIfQuiet(p, now: now, silenceThreshold: 8))
+        p.programStatusActive = true
+        XCTAssertNil(CodexForegroundReconciler.possiblyWaitingSnapshotIfQuiet(p, now: now, silenceThreshold: 8))
+    }
 }

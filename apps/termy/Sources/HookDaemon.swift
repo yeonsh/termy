@@ -53,6 +53,7 @@ enum CodexForegroundReconciler {
         silenceThreshold: TimeInterval
     ) -> PaneSnapshot? {
         guard snapshot.agentKind == .codex,
+              !snapshot.programStatusActive,   // 7501 is authoritative while active
               snapshot.state == .thinking,
               !snapshot.needsAttention
         else { return nil }
@@ -498,7 +499,7 @@ actor HookDaemon {
     /// and `needsAttention = true`, which Notifier turns into a sound +
     /// dock badge. Called from `idleLoop`.
     func tickPromotePossiblyWaiting(now: Date = Date()) {
-        for (id, snapshot) in panes where snapshot.state == .possiblyWaiting {
+        for (id, snapshot) in panes where snapshot.state == .possiblyWaiting && !snapshot.programStatusActive {
             let elapsed = now.timeIntervalSince(snapshot.enteredStateAt)
             guard elapsed >= codexPromotionThreshold else { continue }
             var updated = snapshot

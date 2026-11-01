@@ -223,9 +223,8 @@ enum PaneStateMachine {
         case "blocked":
             let source: WaitSource = status.kind == "question" ? .askUserQuestion : .permission
             finish(.waiting, attention: true, reason: status.kind ?? "permission", source: source, turnOpen: true)
-        case "done":
-            finish(.waiting, attention: false, reason: nil, source: .turnEnd, turnOpen: false)
-        case "idle":
+        case "done", "idle":
+        // done only ends a turn that is open; a re-sent done (attach/reconnect/resync) follows the idle rule.
             if previous.turnOpen {
                 finish(.waiting, attention: false, reason: nil, source: .turnEnd, turnOpen: false)
             } else if previous.state == .waiting {
