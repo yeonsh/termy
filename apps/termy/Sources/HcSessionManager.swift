@@ -394,7 +394,8 @@ final class HcSessionManager {
         }
     }
 
-    private var hasPendingKills: Bool { !pendingKills.isEmpty || !pendingPaneKills.isEmpty }
+    /// 응답을 기다리는 kill이 있는지. 종료 직전 AppDelegate가 기다릴지 정하는 데 쓴다.
+    var hasPendingKills: Bool { !pendingKills.isEmpty || !pendingPaneKills.isEmpty }
 
     /// 보류 중인 kill이 모두 hc의 응답을 받거나 timeout이 지날 때까지 기다린다.
     func flushPendingKills(timeout: TimeInterval) async {

@@ -43,8 +43,16 @@ actor ForegroundProcessWatcher {
     private var tickTask: Task<Void, Never>?
 
     private struct Entry {
-        let masterFd: Int32
-        let shellPid: pid_t
+        /// Where the foreground comes from. A local pane's PTY is polled with
+        /// syscalls; an hc pane has no PTY in termy, so herdr-core's
+        /// `foreground` events push the latest classification instead and
+        /// each tick reads that value as "detected".
+        enum Source {
+            case pty(masterFd: Int32, shellPid: pid_t)
+            case pushed(AgentKind?)
+        }
+
+        var source: Source
         let projectId: String?
         /// Last classification we observed — `nil` means "shell or other
         /// non-agent process is in the foreground". Transitions in or out
@@ -76,11 +84,24 @@ actor ForegroundProcessWatcher {
 
     func register(paneId: String, masterFd: Int32, shellPid: pid_t, projectId: String?) {
         entries[paneId] = Entry(
-            masterFd: masterFd,
-            shellPid: shellPid,
+            source: .pty(masterFd: masterFd, shellPid: shellPid),
             projectId: projectId,
             lastDetected: nil
         )
+    }
+
+    /// hc pane: no PTY to poll. `updatePushed` supplies what each tick sees.
+    func registerPushed(paneId: String, projectId: String?) {
+        entries[paneId] = Entry(source: .pushed(nil), projectId: projectId, lastDetected: nil)
+    }
+
+    /// Latest agent classification from an hc `foreground` event. The next
+    /// tick turns a change into the same synthetic events and Codex
+    /// reconcile a local pane gets. Ignored for unknown or local panes.
+    func updatePushed(paneId: String, agent: AgentKind?) {
+        guard var entry = entries[paneId], case .pushed = entry.source else { return }
+        entry.source = .pushed(agent)
+        entries[paneId] = entry
     }
 
     func unregister(paneId: String) {
@@ -91,18 +112,19 @@ actor ForegroundProcessWatcher {
 
     private func tick() async {
         for (paneId, entry) in entries {
-            let detected = currentForegroundAgent(masterFd: entry.masterFd, shellPid: entry.shellPid)
+            let detected = detectedAgent(entry.source)
             guard detected != entry.lastDetected else { continue }
+            let edges = ForegroundEdges.transition(from: entry.lastDetected, to: detected)
 
             // Edge: we left the previous agent (or first transition).
-            if let prior = entry.lastDetected, prior != detected {
+            if edges.end {
                 await daemon?.postSyntheticSessionEnd(
                     paneId: paneId,
                     projectId: entry.projectId
                 )
             }
             // Edge: we entered a new agent.
-            if let next = detected {
+            if let next = edges.start {
                 await daemon?.postSyntheticSessionStart(
                     paneId: paneId,
                     projectId: entry.projectId,
@@ -110,13 +132,25 @@ actor ForegroundProcessWatcher {
                 )
             }
 
-            var updated = entry
-            updated.lastDetected = detected
-            entries[paneId] = updated
+            // Re-read after the awaits: a pushed value that arrived meanwhile
+            // must survive, and an entry unregistered meanwhile stays gone.
+            if var current = entries[paneId] {
+                current.lastDetected = detected
+                entries[paneId] = current
+            }
         }
 
         for (paneId, entry) in entries where entry.lastDetected == .codex {
             await daemon?.reconcileCodexForeground(paneId: paneId)
+        }
+    }
+
+    private func detectedAgent(_ source: Entry.Source) -> AgentKind? {
+        switch source {
+        case .pty(let masterFd, let shellPid):
+            return currentForegroundAgent(masterFd: masterFd, shellPid: shellPid)
+        case .pushed(let agent):
+            return agent
         }
     }
 
@@ -325,5 +359,15 @@ actor ForegroundProcessWatcher {
         #else
         return nil
         #endif
+    }
+}
+
+/// Synthetic session edges for one change in a pane's detected foreground
+/// agent: leaving an agent ends its session, entering one starts a session.
+/// A switch from one agent straight to another does both.
+enum ForegroundEdges {
+    static func transition(from prior: AgentKind?, to detected: AgentKind?) -> (end: Bool, start: AgentKind?) {
+        guard prior != detected else { return (false, nil) }
+        return (prior != nil, detected)
     }
 }

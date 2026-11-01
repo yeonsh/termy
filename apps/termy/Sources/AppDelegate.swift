@@ -107,11 +107,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         _ = Updater.shared
     }
 
+    /// ⌘Q, Sparkle 업데이트 재시작, 로그아웃, 마지막 창 닫기 모두 여기를 지난다. 이 뒤로 정리되는 창과 pane은
+    /// hc terminal을 끝내지 않는다(다음 실행 때 다시 붙는다). 마지막 창 닫기는 창이 먼저 닫히며 이미 kill했다.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        AppLifecycle.isTerminating = true
+        return .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // A test host never restored a session or bound the socket. Flushing
         // would save its empty window list over the user's session.json, and
         // `HookDaemon.stop()` unlinks the socket path unconditionally.
         guard !TestHostDetector.isRunningUnderXCTest() else { return }
+
+        // hc: 마지막 창을 닫아 보낸 terminal.kill이 hc에 닿을 때까지 기다린다. 그러지 않으면 kill이 닿기 전에
+        // 프로세스가 끝나 agent가 살아남을 수 있다. 응답 처리가 main actor에서 끝나므로 아래 semaphore처럼 main을
+        // 막지 않고 main run loop를 돌리며 기다린다. 보류된 kill이 없으면(⌘Q, local pane만) 곧바로 지나간다.
+        let deadline = Date().addingTimeInterval(0.5)
+        AppLifecycle.waitForPendingHcKills(HcSessionManager.shared, timeout: 0.3)
 
         // Flush pending workspace autosave, then stop the hook daemon. Both
         // are async; block briefly so the process doesn't exit mid-write.
@@ -132,7 +145,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             await HookDaemon.shared.stop()
             sem.signal()
         }
-        _ = sem.wait(timeout: .now() + 0.5)
+        // 위의 hc 기다림과 합쳐 0.5초 안에서 끝낸다.
+        _ = sem.wait(timeout: .now() + max(0, deadline.timeIntervalSinceNow))
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

@@ -214,6 +214,11 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     private func onPanesChanged() {
         filterBar?.rebuild()
         let orderedIds = workspace.panes.map(\.paneId)
+        // 업데이트 재시작 gate는 hc pane을 세지 않는다. setLivePaneIds가 gate를 다시 세게 하므로 먼저 알린다.
+        missionControlModel.setHcPaneIds(
+            Set(workspace.panes.filter { $0.launch.backendKind == .hc }.map(\.paneId)),
+            forWindow: windowId
+        )
         missionControlModel.setLivePaneIds(orderedIds, forWindow: windowId)
         Notifier.shared.pruneWaitingPanes(livePaneIds: Set(orderedIds))
         if workspace.panes.isEmpty {
@@ -573,7 +578,11 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     /// Deregister from the app-wide window/dashboard registries when this
     /// window closes. `removeWindow` is idempotent, so a close triggered by
     /// the last-pane path and an explicit ⌘⇧W both land here safely.
+    ///
+    /// hc pane: 사용자가 창을 닫으면(마지막 창이라 앱이 곧 끝나도) terminal을 끝내고, 앱 종료 중(⌘Q·업데이트
+    /// 재시작)에 창이 정리되면 남긴다. `Workspace.windowWillClose`가 `AppLifecycle.isTerminating`으로 가른다.
     func windowWillClose(_ notification: Notification) {
+        workspace.windowWillClose()
         windowManager?.removeWindow(self)
     }
 }

@@ -119,6 +119,12 @@ enum SplitAxis {
     case balanced
 }
 
+/// pane을 Workspace에서 뺄 때 그 프로세스에 하는 일. hc terminal은 사용자가 pane이나 창을 닫았을 때만 끝낸다:
+/// ⌘Q·업데이트 재시작처럼 앱이 끝나며 정리될 때는 남겨 두고 다음 실행 때 다시 붙는다.
+enum TeardownAction: Equatable {
+    case terminateLocal, killHc, none
+}
+
 struct BalancedPaneLayoutRow: Equatable {
     var index: Int
     var paneCount: Int
@@ -448,15 +454,23 @@ final class Workspace: NSView, NSSplitViewDelegate {
 
     // MARK: - Add / close
 
+    /// - Parameters:
+    ///   - paneId: 복원할 pane의 id(hc terminal을 label로 다시 찾는다). nil이면 새 id.
+    ///   - launch: local PTY 셸 또는 herdr-core terminal.
+    ///   - projectId, projectKey: 원격 project처럼 cwd로 정할 수 없을 때 호출하는 쪽이 준다.
     @discardableResult
     func addPane(
         cwd: String? = nil,
         splitAxis: SplitAxis = .balanced,
-        startupInput: String? = nil
+        startupInput: String? = nil,
+        paneId: String? = nil,
+        launch: PaneLaunch = .local,
+        projectId: String? = nil,
+        projectKey: String? = nil
     ) -> Pane {
         // Project id = focused pane's project if available, else derive
         // from cwd or the current filter.
-        let projectId: String = {
+        let projectId: String = projectId ?? {
             if let cwd, !cwd.isEmpty {
                 return ProjectIdentity.derive(for: cwd)
             }
@@ -470,7 +484,10 @@ final class Workspace: NSView, NSSplitViewDelegate {
         let pane = Pane(
             projectId: projectId,
             cwd: cwd ?? focusedPane?.currentCwd,
-            startupInput: startupInput
+            startupInput: startupInput,
+            paneId: paneId ?? UUID().uuidString,
+            launch: launch,
+            projectKey: projectKey
         )
         pane.translatesAutoresizingMaskIntoConstraints = false
         pane.onPaneClicked = { [weak self, weak pane] in
@@ -624,12 +641,27 @@ final class Workspace: NSView, NSSplitViewDelegate {
         return false
     }
 
+    nonisolated static func teardownAction(kind: PaneBackendKind, isTerminating: Bool) -> TeardownAction {
+        switch kind {
+        case .local: return .terminateLocal
+        case .hc: return isTerminating ? .none : .killHc
+        }
+    }
+
     private func teardown(pane: Pane) {
         // Clear the shell-exit callback first — teardown calls terminate()
         // which fires processTerminated → onShellExited; we'd otherwise
         // recurse right back into closePane.
         pane.onShellExited = nil
-        pane.terminal.process.terminate()
+        switch Self.teardownAction(kind: pane.launch.backendKind, isTerminating: AppLifecycle.isTerminating) {
+        case .terminateLocal:
+            pane.terminal.process.terminate()
+        case .killHc:
+            pane.killHcTerminal()
+        case .none:
+            // terminal은 살려 둔다. backend는 viewer로서만 떠난다(연결·writer task를 놓는다).
+            pane.detachHcTerminal()
+        }
         pane.removeFromSuperview()
         if maximizedPane === pane { maximizedPane = nil }
         parkedPaneFrames.removeValue(forKey: ObjectIdentifier(pane))
@@ -645,6 +677,25 @@ final class Workspace: NSView, NSSplitViewDelegate {
             // Drop the dead id so a project reopened later lands at the end
             // rather than silently reclaiming its old slot.
             preferredProjectOrder.removeAll { $0 == removedProjectId }
+        }
+    }
+
+    /// 이 Workspace의 모든 hc terminal을 끝낸다(사용자가 창을 닫았다). pane은 창과 함께 사라진다.
+    func killHcPanes() {
+        for pane in panes { pane.killHcTerminal() }
+    }
+
+    /// hc terminal은 남기고 viewer만 떠난다(앱 종료 중에 창이 정리될 때).
+    func detachHcPanes() {
+        for pane in panes { pane.detachHcTerminal() }
+    }
+
+    /// 창이 닫힌다. 사용자가 닫았으면(마지막 창 닫기 포함) hc terminal을 끝내고, 앱 종료 중이면 남긴다.
+    func windowWillClose() {
+        if AppLifecycle.isTerminating {
+            detachHcPanes()
+        } else {
+            killHcPanes()
         }
     }
 

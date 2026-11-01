@@ -49,6 +49,10 @@ final class MissionControlModel {
     /// Per-window ordered pane IDs, keyed by `MainWindowController.windowId`.
     private var paneIdsByWindow: [UUID: [String]] = [:]
 
+    /// Per-window ids of panes that run in herdr-core. An update relaunch
+    /// leaves those running, so they never hold it (`midTurnPaneCount`).
+    private var hcPaneIdsByWindow: [UUID: Set<String>] = [:]
+
     /// Raw snapshot map keyed by paneId, overwritten on each DaemonUpdate.
     private var snapshotsById: [String: PaneSnapshot] = [:]
 
@@ -94,10 +98,18 @@ final class MissionControlModel {
         rebuildGlobalOrder()
     }
 
+    /// Register (or replace) which of one window's panes run in herdr-core.
+    /// Call before `setLivePaneIds` so the relaunch gate's re-count, which
+    /// that call triggers, already sees the new set.
+    func setHcPaneIds(_ ids: Set<String>, forWindow windowId: UUID) {
+        hcPaneIdsByWindow[windowId] = ids
+    }
+
     /// Drop a window's panes from the dashboard when its window closes.
     func removeWindow(_ windowId: UUID) {
         windowOrder.removeAll { $0 == windowId }
         paneIdsByWindow.removeValue(forKey: windowId)
+        hcPaneIdsByWindow.removeValue(forKey: windowId)
         rebuildGlobalOrder()
     }
 
@@ -157,11 +169,16 @@ final class MissionControlModel {
         snapshotsById[paneId]
     }
 
-    /// Live panes whose agent is mid-turn. `UpdateRelaunchGate` holds an
-    /// update relaunch until this reaches zero.
+    /// Live local panes whose agent is mid-turn. `UpdateRelaunchGate` holds
+    /// an update relaunch until this reaches zero. hc panes don't count: the
+    /// relaunch doesn't stop them.
     var midTurnPaneCount: Int {
-        snapshotsById.values.reduce(0) { count, snapshot in
-            count + (livePaneIds.contains(snapshot.paneId) && snapshot.isMidTurn ? 1 : 0)
+        let hcPaneIds = hcPaneIdsByWindow.values.reduce(into: Set<String>()) { $0.formUnion($1) }
+        return snapshotsById.values.reduce(0) { count, snapshot in
+            let counts = livePaneIds.contains(snapshot.paneId)
+                && !hcPaneIds.contains(snapshot.paneId)
+                && snapshot.isMidTurn
+            return count + (counts ? 1 : 0)
         }
     }
 

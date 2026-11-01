@@ -18,6 +18,10 @@
 // (the shell's PROMPT_COMMAND emits `printf '\e]7;file://…\a'` on each
 // prompt), so `cd ~/code/api` in the shell re-runs git-branch detection
 // and refreshes the label.
+//
+// hc pane(`launch: .hc`): 셸은 herdr-core 안에서 돌아 termy가 꺼져도 살아 있고, 이 pane은 local PTY 대신
+// `HcPaneBackend`로 그 terminal에 붙은 viewer다. foreground·cwd는 hc 이벤트로 받고, 셸 종료는 local과 같은
+// 경로(PtyExit → pane 닫기)를 탄다. 원격 pane(machine 있음)은 만들 때 받은 project로 고정이고 git을 보지 않는다.
 
 import AppKit
 import Foundation
@@ -37,6 +41,20 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     private(set) var projectId: String
     let initialCwd: String
     let terminal: TermyTerminalView
+
+    /// local PTY 셸인지, herdr-core terminal인지(원격이면 machine). pane이 닫힐 때까지 바뀌지 않는다.
+    let launch: PaneLaunch
+    /// 만들 때의 project 키(local은 worktree root의 canonical path, 원격은 `<machine>:<folder>`).
+    /// hc terminal의 `termy.project` label이 된다.
+    let projectKey: String
+    /// hc pane의 backend. local pane은 nil.
+    private(set) var hcBackend: HcPaneBackend?
+
+    /// 원격 머신의 hc pane. project는 만들 때 받은 값으로 고정이고 git·drift를 보지 않는다.
+    var isRemote: Bool {
+        if case .hc(machine: .some) = launch { return true }
+        return false
+    }
 
     /// Fires (on the main actor) when `cd` causes the pane to belong to a
     /// different project than it did a moment ago.
@@ -85,14 +103,35 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     /// relaunch. nil once typed (or when there is none).
     private var startupInputScheduler: StartupInputScheduler?
 
+    /// hc 연결 상태(연결 중·셸 재시작 중·unavailable)를 terminal 위에 보여 준다. hc pane에만 있다.
+    private var hcStatusOverlay: PaneStatusOverlay?
+    /// 마지막으로 hc에 알린 pane 포커스. relayout마다 같은 값을 다시 보내지 않는다.
+    private var hcFocusSent: Bool?
+    /// 마지막으로 display facts를 맞춘 테마. 다크/라이트가 실제로 바뀔 때만 FACTS를 보낸다.
+    private var factsThemeVariant: TermyThemeVariant?
+    /// ForegroundProcessWatcher·HookDaemon 호출의 꼬리. 보낸 순서대로 처리하게 이어 붙인다.
+    private var watcherCalls: Task<Void, Never>?
+
     init(
         projectId: String,
         cwd: String? = nil,
-        startupInput: String? = nil
+        startupInput: String? = nil,
+        paneId: String = UUID().uuidString,
+        launch: PaneLaunch = .local,
+        projectKey: String? = nil
     ) {
-        self.paneId = UUID().uuidString
+        self.paneId = paneId
         self.projectId = projectId
-        self.initialCwd = Pane.resolveCwd(cwd)
+        self.launch = launch
+        if case .hc(machine: let machine?) = launch {
+            // 원격 폴더는 이 Mac에 없으므로 resolveCwd(로컬 존재 확인)를 거치지 않는다.
+            // 원격 project를 여는 쪽은 늘 폴더를 준다.
+            self.initialCwd = cwd ?? "~"
+            self.projectKey = projectKey ?? "\(machine):\(self.initialCwd)"
+        } else {
+            self.initialCwd = Pane.resolveCwd(cwd)
+            self.projectKey = projectKey ?? ProjectIdentity.canonicalPath(for: self.initialCwd)
+        }
         self.currentCwd = self.initialCwd
         self.terminal = TermyTerminalView(frame: .zero)
         self.terminal.paneId = self.paneId
@@ -127,11 +166,19 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         applyActiveAppearance(false)
 
         refreshHeader()   // initial project / branch
-        installHeadWatcher(for: self.currentCwd)
+        if !isRemote {
+            installHeadWatcher(for: self.currentCwd)
+        }
         observeFontPreference()
-        startShell()
-        if let startupInput {
-            scheduleStartupInput(startupInput)
+        switch launch {
+        case .local:
+            startShell()
+            // 업데이트 재시작 뒤 agent resume. hc pane은 업데이트로 죽지 않으므로 resume할 것이 없다.
+            if let startupInput {
+                scheduleStartupInput(startupInput)
+            }
+        case .hc(let machine):
+            startHc(machine: machine)
         }
     }
 
@@ -151,6 +198,7 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.terminal.setTerminalFont(TerminalFontPreference.shared.resolvedFont())
+                self?.hcBackend?.sendDisplayFacts()   // 셀 크기가 바뀌었다
             }
         }
     }
@@ -302,6 +350,117 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         }
     }
 
+    /// hc pane: 셸은 herdr-core 안에서 돌고, backend가 자기 terminal을 label로 찾아 붙거나 새로 띄워 붙는다.
+    /// foreground는 PTY 대신 hc 이벤트로 받아 ForegroundProcessWatcher에 넣는다(synthetic Session 이벤트와
+    /// Codex reconcile은 local과 같은 tick이 만든다). 7501 status는 상태 머신 쪽에서 연결한다.
+    private func startHc(machine: String?) {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let backend = HcPaneBackend(
+            paneId: paneId, projectKey: projectKey, projectId: projectId,
+            launch: HcLaunch(machine: machine, cwd: initialCwd, shell: shell),
+            view: terminal
+        )
+        hcBackend = backend
+        installHcStatusOverlay()
+        backend.onExit = { [weak self] code in self?.shellExited(exitCode: code) }
+        backend.onForeground = { [weak self] foreground in self?.hcForegroundChanged(foreground) }
+        backend.onConnectionState = { [weak self] state in self?.showHcConnectionState(state) }
+        let paneId = self.paneId
+        let projectId = self.projectId
+        enqueueWatcherCall {
+            await ForegroundProcessWatcher.shared.registerPushed(paneId: paneId, projectId: projectId)
+        }
+        backend.start()
+        // 붙어 있지 않을 때(연결 중·셸 재시작 중·unavailable) 친 키는 버린다. 상태 라벨이 이유를 보여 준다.
+        let forward = terminal.remoteInput
+        terminal.remoteInput = { [weak backend] bytes in
+            guard backend?.connectionState == .attached else { return }
+            forward?(bytes)
+        }
+    }
+
+    /// 사용자가 이 hc pane이나 그 창을 닫았다: terminal을 끝낸다. kill은 onExit을 부르지 않아 셸 종료
+    /// 경로(shellExited)를 타지 않으므로 foreground 감시 항목도 여기서 뺀다. local pane은 아무것도 하지 않는다.
+    func killHcTerminal() {
+        guard let hcBackend else { return }
+        hcBackend.kill()
+        unregisterForegroundWatch()
+    }
+
+    /// 앱 종료 중에 정리된다: terminal은 남기고(다음 실행 때 다시 붙는다) viewer만 떠난다.
+    func detachHcTerminal() {
+        guard let hcBackend else { return }
+        hcBackend.detach()
+        unregisterForegroundWatch()
+    }
+
+    private func unregisterForegroundWatch() {
+        let paneId = self.paneId
+        enqueueWatcherCall {
+            await ForegroundProcessWatcher.shared.unregister(paneId: paneId)
+        }
+    }
+
+    /// hc `foreground` 이벤트(이름·argv·cwd). cwd는 OSC 7과 같은 갱신 경로를 탄다: 다시 attach한 first paint에는
+    /// OSC 7이 없을 수 있다.
+    private func hcForegroundChanged(_ foreground: HcForeground?) {
+        let agent = foreground.flatMap {
+            ForegroundProcessWatcher.classifyAgent(processName: $0.name ?? "", arguments: $0.argv ?? [])
+        }
+        let paneId = self.paneId
+        enqueueWatcherCall {
+            await ForegroundProcessWatcher.shared.updatePushed(paneId: paneId, agent: agent)
+        }
+        if let cwd = foreground?.cwd, !cwd.isEmpty {
+            applyReportedCwd(cwd)
+        }
+    }
+
+    /// ForegroundProcessWatcher·HookDaemon 호출을 보낸 순서대로 처리한다. 하나씩 Task.detached로 보내면 순서가
+    /// 보장되지 않아 hc pane의 등록보다 값이나 해제가 먼저 닿을 수 있다.
+    private func enqueueWatcherCall(_ call: @escaping @Sendable () async -> Void) {
+        let previous = watcherCalls
+        watcherCalls = Task.detached {
+            await previous?.value
+            await call()
+        }
+    }
+
+    // MARK: - hc 상태 라벨
+
+    private func installHcStatusOverlay() {
+        let overlay = PaneStatusOverlay()
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        overlay.isHidden = true
+        addSubview(overlay, positioned: .above, relativeTo: terminal)
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: terminal.topAnchor, constant: 12),
+            overlay.centerXAnchor.constraint(equalTo: terminal.centerXAnchor),
+            overlay.widthAnchor.constraint(lessThanOrEqualTo: terminal.widthAnchor, constant: -24)
+        ])
+        hcStatusOverlay = overlay
+    }
+
+    private func showHcConnectionState(_ state: HcPaneConnectionState) {
+        guard let overlay = hcStatusOverlay else { return }
+        if let text = Self.hcStatusText(state) {
+            overlay.text = text
+            overlay.isHidden = false
+        } else {
+            overlay.isHidden = true
+        }
+    }
+
+    /// 상태 라벨 문구. 붙어 있으면 nil(라벨을 숨긴다).
+    nonisolated static func hcStatusText(_ state: HcPaneConnectionState) -> String? {
+        switch state {
+        case .attached: return nil
+        case .connecting: return "Connecting to herdr-core…"
+        case .restartingShell: return "Restarting shell…"
+        case .unavailable(let reason): return "herdr-core unavailable: \(reason)"
+        }
+    }
+
     /// Type `input` into the fresh shell once it looks ready (see
     /// `StartupInputScheduler`). Used to resume an agent after an update
     /// relaunch.
@@ -321,6 +480,8 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     /// when no agent owns the PTY foreground or termy has no session id for
     /// it (see `AgentResumeCapture`).
     func agentResumeRecord(snapshot: PaneSnapshot?) -> AgentResumeRecord? {
+        // hc pane은 업데이트 재시작에 죽지 않고 다시 붙으므로 resume할 것이 없다.
+        guard launch == .local else { return nil }
         let masterFd = terminal.process.childfd
         let shellPid = terminal.process.shellPid
         guard masterFd >= 0, shellPid > 0,
@@ -366,6 +527,10 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         layer?.opacity = focusAppearance.paneOpacity
         layer?.borderWidth = focusAppearance.borderWidth
         layer?.borderColor = focusAppearance.borderColor.cgColor
+        if let hcBackend, hcFocusSent != active {
+            hcFocusSent = active
+            hcBackend.setFocused(active)
+        }
     }
 
     // MARK: - Header updates
@@ -385,6 +550,16 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     }
 
     private func refreshHeader() {
+        if isRemote {
+            // 원격 pane의 project는 고정이고 git을 볼 수 없다. 헤더와 mission control 라벨은 projectId
+            // (`app@bdpc01`) 그대로. init 중에 불리므로 local 경로처럼 한 박자 늦춰 onHeaderChanged가 연결된 뒤 알린다.
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.headerView.configure(project: self.projectId, branch: nil, appearance: self.effectiveAppearance)
+                self.onHeaderChanged?(self.projectId, nil)
+            }
+            return
+        }
         let cwd = currentCwd
         Task.detached(priority: .userInitiated) { [weak self] in
             let root = GitBranch.workTreeRoot(for: cwd) ?? cwd
@@ -450,43 +625,64 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     /// on every prompt. Any `cd` inside the pane fires this → we refresh
     /// the header to reflect the new folder + branch.
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
-        guard let newCwd = directory, !newCwd.isEmpty else { return }
-        // OSC 7 sends a file:// URL (e.g. "file:///Users/ysh/proj");
-        // convert it to a plain filesystem path before use.
-        let resolved: String
-        if let url = URL(string: newCwd), url.scheme == "file" {
-            resolved = url.path
-        } else {
-            resolved = (newCwd as NSString).expandingTildeInPath
-        }
+        guard let directory, let resolved = Pane.osc7Path(directory) else { return }
         Task { @MainActor [weak self] in
-            guard let self else { return }
-            guard resolved != self.currentCwd else { return }
-            self.currentCwd = resolved
-            self.refreshHeader()
-            // `cd` may have crossed repo boundaries — re-arm on the new
-            // HEAD so branch updates keep flowing.
-            self.installHeadWatcher(for: resolved)
+            self?.applyReportedCwd(resolved)
         }
+    }
+
+    /// OSC 7 sends a file:// URL (e.g. "file:///Users/ysh/proj"); convert it
+    /// to a plain filesystem path. Control characters go first: herdr-core's
+    /// re-attach first paint ends OSC 7 with a NUL before ST
+    /// (`file://host/path\0`). SwiftTerm's OSC parser drops C0 bytes today,
+    /// but one that got through would fail URL parsing and leave the raw
+    /// string as the pane's cwd and project path.
+    nonisolated static func osc7Path(_ directory: String) -> String? {
+        var cleaned = String.UnicodeScalarView()
+        cleaned.append(contentsOf: directory.unicodeScalars.filter { $0.properties.generalCategory != .control })
+        let value = String(cleaned)
+        guard !value.isEmpty else { return nil }
+        if let url = URL(string: value), url.scheme == "file" {
+            return url.path
+        }
+        return (value as NSString).expandingTildeInPath
+    }
+
+    /// 셸이 알려 준 cwd(OSC 7, hc foreground). local이면 header·branch·project drift를 다시 본다.
+    /// 원격 pane은 그 머신의 경로라 이 Mac에서 git을 볼 수 없고 project도 고정이므로 currentCwd만 바꾼다.
+    private func applyReportedCwd(_ path: String) {
+        guard path != currentCwd else { return }
+        currentCwd = path
+        guard !isRemote else { return }
+        refreshHeader()
+        // `cd` may have crossed repo boundaries — re-arm on the new
+        // HEAD so branch updates keep flowing.
+        installHeadWatcher(for: path)
     }
 
     nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
         let code = exitCode ?? -1
-        let paneId = self.paneId
         Task { @MainActor [weak self] in
-            guard let self else { return }
-            let projectId = self.projectId
-            Task.detached {
-                await HookDaemon.shared.postPtyExit(
-                    paneId: paneId,
-                    projectId: projectId,
-                    exitCode: code
-                )
-                await ForegroundProcessWatcher.shared.unregister(paneId: paneId)
-            }
-            self.headWatcher?.stop()
-            self.onShellExited?(code)
+            self?.shellExited(exitCode: code)
         }
+    }
+
+    /// The pane's shell ended — the local PTY's process exited, or the hc
+    /// terminal closed with `exited`/`killed`. Post PtyExit to the state
+    /// machine, then let Workspace close the pane.
+    private func shellExited(exitCode code: Int32) {
+        let paneId = self.paneId
+        let projectId = self.projectId
+        enqueueWatcherCall {
+            await HookDaemon.shared.postPtyExit(
+                paneId: paneId,
+                projectId: projectId,
+                exitCode: code
+            )
+            await ForegroundProcessWatcher.shared.unregister(paneId: paneId)
+        }
+        headWatcher?.stop()
+        onShellExited?(code)
     }
 
     private func applyTheme() {
@@ -499,11 +695,59 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         // by default, which all but vanishes on the dark selection background.
         terminal.selectedTextForegroundColor = theme.terminalForegroundColor
         terminal.installColors(theme.terminalANSIColors.map { $0.termyTerminalColor() })
+        // hc가 색 질의에 답하는 값(display facts)을 맞춘다. viewDidMoveToWindow는 relayout마다 불리므로
+        // 다크/라이트가 실제로 바뀔 때만 보낸다(attach 때는 그때의 값이 attach 인자로 간다).
+        let variant = PaneStyling.variant(for: effectiveAppearance)
+        if variant != factsThemeVariant {
+            factsThemeVariant = variant
+            hcBackend?.sendDisplayFacts()
+        }
     }
 
     private func refreshHeaderAppearance() {
         headerView.reapplyTheme(appearance: effectiveAppearance)
     }
+}
+
+// MARK: - PaneStatusOverlay
+
+/// hc pane이 terminal에 붙어 있지 않은 이유를 terminal 위에 띄우는 작은 라벨. 클릭은 아래 terminal로 넘긴다.
+final class PaneStatusOverlay: NSView {
+    private let label = NSTextField(labelWithString: "")
+
+    var text: String {
+        get { label.stringValue }
+        set { label.stringValue = newValue }
+    }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = TermyTypography.regular(size: 12)
+        label.textColor = .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.92).cgColor
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 // MARK: - PaneHeaderView
