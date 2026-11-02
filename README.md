@@ -170,6 +170,17 @@ PDFs, open there too — even when the filename has spaces or parentheses.
 - **Quit and come back.** Relaunch and every window returns — frames,
   positions, pane layouts, and project filters. A window stranded off-screen is
   clamped back onto a visible display.
+- **Agents that outlive termy.** Turn on *Settings…* → *Run local panes in
+  herdr-core* and panes run inside herdr-core instead of a PTY termy owns.
+  Quit termy or install an update and Claude Code keeps working; the next
+  launch puts each pane back on the same terminal, with the same screen and
+  process. Off by default; termy offers to install herdr-core when it is
+  missing. These panes show a small herdr mark at the right end of their
+  header.
+- **Remote projects.** <kbd>⌘</kbd><kbd>K</kbd> → *New Remote Project…* opens a
+  folder on another machine you added with `hc machine add`. Panes are titled
+  `<folder>@<machine>`, new panes and splits open on the same machine, and the
+  agents there show up in the dashboard like local ones.
 - **Real splits.** <kbd>⌘</kbd><kbd>T</kbd> new pane, <kbd>⌘</kbd><kbd>D</kbd>
   same-row split, <kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd> new-row split. Drag the
   dividers. <kbd>⌘</kbd><kbd>⏎</kbd> toggles maximize.
@@ -334,13 +345,19 @@ Antigravity ──hook───▶ termy-hook --agent antigravity ─┘        
 ```
 
 - **SwiftTerm** renders the PTY and owns the child shell lifecycle.
+- **herdr-core (optional).** A herdr-core pane has no local PTY: termy talks
+  to the terminal through `herdr-core connect`, and the terminal (with the
+  agent in it) lives in herdr-core until you close the pane. termy finds its
+  terminals again by label on launch. herdr-core's own agent status drives
+  `THINK` / `WAIT` / `IDLE` for those panes, and hooks fill in the prompt and
+  last reply.
 - **`termy-hook`** is a tiny Swift CLI that Claude Code, Codex, and
   Antigravity invoke per hook event; OpenCode's plugin spawns it too. It
   slims the payload and sends one JSON line over `/tmp/termy-$UID.sock`.
   It always exits `0` and times out writes after 100 ms, so it cannot stall
   an agent.
 - **`HookDaemon`** is an actor that receives those events. They flow through
-  **`PaneStateMachine`**, the pure reducer covered by 670+ unit tests —
+  **`PaneStateMachine`**, the pure reducer covered by 870+ unit tests —
   including Claude Code's permission, question, and MCP-tool approval events.
 - **OpenCode plugin.** A small `tui.js` watches the active session's
   permission, question, and busy flags and reports transitions; termy maps
@@ -378,7 +395,9 @@ Shipping. The core loop is working end-to-end:
   <kbd>⌘</kbd><kbd>1</kbd>–<kbd>⌘</kbd><kbd>9</kbd> filters
 - Sparkle auto-update that waits for running agents and resumes their
   conversations
-- Developer ID-signed, notarized DMG pipeline and 670+ unit tests
+- Optional herdr-core panes whose agents survive quitting termy, and remote
+  projects on other machines
+- Developer ID-signed, notarized DMG pipeline and 870+ unit tests
 
 ## Still on the list
 
@@ -393,4 +412,4 @@ per-project settings UI.
 - `TODOS.md` — scoped-out work with reasoning
 - `apps/termy/Sources/` — the app
 - `apps/termy-hook/Sources/` — the hook helper CLI
-- `apps/termy-tests/Sources/` — 670+ tests across 50+ suites
+- `apps/termy-tests/Sources/` — 870+ tests across 70+ suites
