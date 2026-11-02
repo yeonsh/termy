@@ -104,6 +104,13 @@ struct PaneRecord: Codable, Equatable {
     var launch: PaneLaunch {
         backend == .hc ? .hc(machine: machine) : .local
     }
+
+    /// `launch`로 다시 여는 pane이 이 기록의 pane id·project·hook 세부 정보를 이어 쓰는지. hc 기록을 hc로 열 때만이다.
+    /// local 기록을 지금 설정에 따라 hc로 여는 pane은 새 terminal이다: 다른 instance가 쓴 local 기록의 id를 가져오면
+    /// 그쪽 agent hook이 이 pane을 움직인다(R19).
+    func continuesHcPane(as launch: PaneLaunch) -> Bool {
+        backend == .hc && launch.backendKind == .hc
+    }
 }
 
 /// hc pane의 `PaneSnapshot` 가운데 다시 켰을 때 되살릴 hook 정보. 상태는 남기지 않는다: 켜진 뒤의 7501 status나

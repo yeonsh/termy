@@ -108,6 +108,8 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     /// Pending agent-resume command for a pane restored after an update
     /// relaunch. nil once typed (or when there is none).
     private var startupInputScheduler: StartupInputScheduler?
+    /// hc pane이 처음 붙으면 입력할 agent resume 명령.
+    private var pendingHcStartupInput: String?
 
     /// hc 연결 상태(연결 중·셸 재시작 중·unavailable)를 terminal 위에 보여 준다. hc pane에만 있다.
     private var hcStatusOverlay: PaneStatusOverlay?
@@ -182,11 +184,14 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         switch launch {
         case .local:
             startShell()
-            // 업데이트 재시작 뒤 agent resume. hc pane은 업데이트로 죽지 않으므로 resume할 것이 없다.
+            // 업데이트 재시작 뒤 agent resume.
             if let startupInput {
                 scheduleStartupInput(startupInput)
             }
         case .hc(let machine):
+            // hc pane은 업데이트로 죽지 않으므로 hc 기록에는 resume이 없다. local 기록을 지금 설정에 따라 hc로 연
+            // pane에만 온다: 새 terminal에 붙은 뒤 입력한다(붙기 전의 입력은 보낼 곳이 없어 버려진다).
+            pendingHcStartupInput = startupInput
             startHc(machine: machine)
         }
     }
@@ -373,7 +378,14 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         installHcStatusOverlay()
         backend.onExit = { [weak self] code in self?.shellExited(exitCode: code) }
         backend.onForeground = { [weak self] foreground in self?.hcForegroundChanged(foreground) }
-        backend.onConnectionState = { [weak self] state in self?.showHcConnectionState(state) }
+        backend.onConnectionState = { [weak self] state in
+            guard let self else { return }
+            self.showHcConnectionState(state)
+            if case .attached = state, let input = self.pendingHcStartupInput {
+                self.pendingHcStartupInput = nil
+                self.scheduleStartupInput(input)
+            }
+        }
         // 7501 status는 watcher 호출과 같은 순서 큐로 보낸다(working → idle이 뒤집히면 안 된다).
         backend.onStatus = { [weak self] status in
             guard let self else { return }

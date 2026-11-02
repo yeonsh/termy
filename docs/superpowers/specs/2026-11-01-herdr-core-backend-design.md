@@ -185,7 +185,7 @@ events, documents)와 `hc schema`(OpenRPC)다. 빌더는 원문을 읽는다. �
 | hook 세부 정보 보존 | pane id별로 session.json에 저장한다. termy가 꺼진 동안의 hook 이벤트는 잃는다 | 내 판단 |
 | 여러 termy instance | terminal에 `termy.instance=debug|release` label. 각 termy는 자기 instance terminal에만 붙는다 | 내 판단 |
 | hc를 쓸 수 없을 때의 hc pane | local로 바꾸지 않는다. "herdr-core unavailable" 상태로 두고 다시 연결을 시도한다 | 내 판단 |
-| pane별 backend | `PaneRecord`에 기록한다. 설정을 바꿔도 이미 열린 pane의 backend는 그대로 | 내 판단 |
+| pane별 backend | `PaneRecord`에 기록한다. 설정을 바꿔도 열려 있는 pane의 backend는 그대로다. 다시 열 때(세션 복원, ⌘K) local 기록은 새 셸이므로 지금 설정을 따르고, hc 기록은 기록 그대로 다시 붙는다 | 사용자 결정(2026-11-02) |
 | keep | termy가 만드는 terminal은 `keep: true` | 내 판단 |
 | 레이아웃 저장 위치 | 지금처럼 로컬 `session.json` / `workspaces/*.json`. hc `doc`은 쓰지 않는다 | 내 판단 |
 | 원격 pane의 git branch, project drift | 1차는 없다 | 내 판단 |
@@ -268,7 +268,10 @@ termy.app
   (`ForegroundProcessWatcher`, OSC 7, `PtyExit`, AgentResume, UpdateRelaunchGate 모두
   그대로).
 - 새 pane의 backend: 원격 project면 hc, 로컬이면 설정을 따른다. 정해진 backend는
-  `PaneRecord`에 남고, 설정을 바꿔도 이미 열린 pane은 그대로다.
+  `PaneRecord`에 남고, 설정을 바꿔도 열려 있는 pane은 그대로다. 다시 열 때(세션 복원, ⌘K)
+  local 기록은 이어 붙을 프로세스가 없는 새 셸이므로 지금 설정을 따른다(hc로 열면 기록의 pane
+  id는 잇지 않는 새 terminal이고, 업데이트 재시작의 agent resume 명령은 붙은 뒤 입력한다).
+  hc 기록은 살아 있는 terminal에 다시 붙어야 하므로 설정과 상관없이 기록 그대로다.
 
 ### 6.4 pane 생성과 attach (hc)
 
@@ -569,8 +572,8 @@ paste가 있고, framed mode가 동작하고, CREDIT을 돌려주면 `END`가 �
 - 기본 설정(로컬 hc 꺼짐)에서 hc를 지우거나 꺼도, 로컬 pane만 쓰는 동안 termy는 지금과
   똑같이 동작하고 hc 관련 안내를 띄우지 않는다.
 - 로컬 hc 설정을 켜면 그 뒤 새 로컬 pane은 `termy.pane`/`termy.instance` label을 단 hc
-  terminal이다. 입력·IME·붙여넣기·마우스·크기 조절이 local pane과 같다. 이미 열린 pane은
-  그대로다.
+  terminal이다. 입력·IME·붙여넣기·마우스·크기 조절이 local pane과 같다. 열려 있는 pane은
+  그대로이고, 다시 실행하면 local로 저장된 pane도 hc로 열린다.
 - ⌘Q 후 다시 실행: hc pane은 같은 배치, 같은 프로세스, 화면 내용 복원. 돌던 Claude turn은
   끊기지 않았고, mission control 상태가 켜자마자 맞다. prompt·마지막 응답·sessionId도
   보인다.

@@ -69,10 +69,12 @@ extension PaneLaunch {
         HcFeatureSettings.localPanesEnabled(defaults) && hcAllowsNewPanes ? .hc(machine: nil) : .local
     }
 
-    /// ⌘K로 다시 여는 project의 pane. 닫힌 창의 hc terminal은 죽었으므로 backend가 없는 local 기록은 새 셸이고
-    /// 지금 설정을 따른다(`forNewLocalPane`). 원격이나 backend가 적힌 기록은 기록 그대로다.
+    /// 저장된 pane을 다시 열 때(앱 시작 때의 세션 복원, ⌘K로 다시 여는 project)의 backend.
+    /// local 기록은 이어 붙을 프로세스가 없는 새 셸이므로 지금 설정을 따른다(`forNewLocalPane`). 설정을 켜기 전에
+    /// 열었던 pane도 다시 실행하면 hc가 되어, 그 안의 agent가 ⌘Q 뒤에도 살아남는다(2026-11-02 사용자 결정).
+    /// hc 기록(원격 포함)은 살아 있는 terminal에 다시 붙어야 하므로 기록 그대로다.
     static func forReopenedRecord(_ record: PaneRecord, defaults: UserDefaults, hcAllowsNewPanes: Bool) -> PaneLaunch {
-        if record.backend == nil, record.machine == nil {
+        if record.backend != .hc, record.machine == nil {
             return forNewLocalPane(defaults: defaults, hcAllowsNewPanes: hcAllowsNewPanes)
         }
         return record.launch

@@ -325,6 +325,8 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     /// row/column replay used by the ⌘K project switcher: the first pane of
     /// each saved row goes in with `.row` axis, the rest with `.column`.
     private func applySessionLayout(_ record: WindowRecord) {
+        // local 기록은 새 셸이므로 ⌘K로 다시 열 때처럼 지금 설정을 따른다(`PaneLaunch.forReopenedRecord`).
+        let hcAllowsNewPanes = HcSessionManager.allowsNewLocalPanes(defaults: .standard)
         for savedRow in record.rows {
             for (colIdx, paneRec) in savedRow.enumerated() {
                 let axis: SplitAxis = (colIdx == 0) ? .row : .column
@@ -335,7 +337,9 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
                     resume: paneRec.agentResume,
                     directoryExists: { FileManager.default.directoryExists(atPath: $0) }
                 )
-                addRestoredPane(paneRec, cwd: plan.cwd, splitAxis: axis, startupInput: plan.startupInput)
+                addRestoredPane(
+                    paneRec, cwd: plan.cwd, splitAxis: axis, startupInput: plan.startupInput,
+                    launch: PaneLaunch.forReopenedRecord(paneRec, defaults: .standard, hcAllowsNewPanes: hcAllowsNewPanes))
             }
         }
         // Defensive: an empty saved record would leave a paneless window.
@@ -357,8 +361,9 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         }
     }
 
-    /// 저장된 pane 하나를 다시 만든다. hc pane은 저장된 id와 backend를 그대로 쓰므로 label로 자기 terminal을 찾아
+    /// 저장된 pane 하나를 다시 만든다. hc 기록은 저장된 id와 backend를 그대로 쓰므로 label로 자기 terminal을 찾아
     /// 다시 붙고, hc를 쓸 수 없어도 local로 바뀌지 않는다(backend가 unavailable로 두고 다시 연결한다).
+    /// local 기록을 지금 설정에 따라 hc로 열면 새 terminal이다: 기록의 id·project·hook 정보를 잇지 않는다.
     /// hc pane은 저장된 project를 쓰고(원격 project는 cwd로 정할 수 없다) hook 세부 정보를 되살린다. local pane은
     /// 지금처럼 새 id이고 project를 cwd로 정한다(agent resume이 cwd를 바꿀 수 있다). local pane의 id는 다시 붙을 것이
     /// 없고, Debug와 release가 함께 쓰는 session.json에서 다른 instance의 id를 가져오면 그쪽 agent hook이 이 pane을
@@ -368,7 +373,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         _ record: PaneRecord, cwd: String, splitAxis: SplitAxis, startupInput: String?, launch launchOverride: PaneLaunch? = nil
     ) -> Pane {
         let launch = launchOverride ?? record.launch
-        let isHc = launch.backendKind == .hc
+        let isHc = record.continuesHcPane(as: launch)
         let paneId = isHc ? reusablePaneId(record.paneId) : nil
         let pane = workspace.addPane(
             cwd: cwd,

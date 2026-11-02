@@ -198,6 +198,17 @@ final class HcPaneLifecycleIntegrationTests: XCTestCase {
         XCTAssertFalse(live.contains(address))
     }
 
+    /// 업데이트 재시작 뒤 local 기록을 지금 설정에 따라 hc로 열면, 저장해 둔 agent resume 명령이 새 hc 셸에 입력된다.
+    func testStartupInputIsTypedIntoHcPaneAfterAttach() async throws {
+        _ = try installScratchManager()
+        let pane = makeWorkspace().addPane(cwd: "/tmp", startupInput: "echo resumed-$((40+2))", launch: .hc(machine: nil))
+        _ = try await attachedBackend(pane)
+        try await waitUntil(8, "the resume command ran in the hc shell") {
+            let t = pane.terminal.getTerminal()
+            return (0..<t.rows).contains { t.getLine(row: $0)?.translateToString(trimRight: true) == "resumed-42" }
+        }
+    }
+
     /// R10: hc first paint의 OSC 7 바이트 모양(ST 앞 NUL, `…/path\0` ESC \\)이 pane cwd를 깨뜨리지 않는다.
     /// live로 한 번, 같은 paneId로 다시 붙은 first paint로 한 번 본다. 초기 cwd는 `/tmp`이고 OSC 7은
     /// `/private/tmp`를 알리므로, cwd가 바뀌었는지로 OSC 7이 실제로 적용됐는지 안다.
