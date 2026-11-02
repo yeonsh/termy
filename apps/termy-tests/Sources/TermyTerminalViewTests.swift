@@ -404,6 +404,37 @@ final class TermyTerminalViewTests: XCTestCase {
         XCTAssertTrue(view.allowMouseReporting)
     }
 
+    /// A pane hidden by a project filter or maximize stays parked at its old
+    /// frame under the pane now shown there. A Cmd+click on the shown pane
+    /// must not open a link from the hidden one.
+    @MainActor
+    func test_cmdClickOnHiddenTerminal_doesNotOpenItsLink() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent("docs"),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "# x\n".write(to: dir.appendingPathComponent("docs/x.md"), atomically: true, encoding: .utf8)
+
+        let view = Self.mouseCapturingTerminal(showing: "docs/x.md")
+        var opened: [URL] = []
+        view.previewBaseDirectories = { [dir.path] }
+        view.onOpenPreviewFile = { opened.append($0) }
+        let parking = NSView(frame: view.frame)
+        parking.isHidden = true
+        parking.addSubview(view)
+
+        let mouseUp = try XCTUnwrap(Self.mouseEvent(
+            .leftMouseUp,
+            at: NSPoint(x: 2, y: view.frame.height - 2),
+            modifierFlags: .command
+        ))
+
+        XCTAssertNotNil(view.handleLinkClickMouseUp(mouseUp), "the click belongs to the shown pane")
+        XCTAssertEqual(opened, [])
+    }
+
     @MainActor
     private static func mouseCapturingTerminal(showing text: String = "hello") -> TermyTerminalView {
         let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))

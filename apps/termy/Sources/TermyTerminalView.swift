@@ -259,6 +259,10 @@ final class TermyTerminalView: LocalProcessTerminalView {
             guard let self else { return event }
             guard event.window === self.window else { return event }
             guard !event.modifierFlags.contains(.shift) else { return event }
+            // A pane hidden by a project filter or maximize is parked under
+            // a hidden view at its last on-screen frame, so the bounds check
+            // alone also matches clicks on the pane now shown there.
+            guard !self.isHiddenOrHasHiddenAncestor else { return event }
             let local = self.convert(event.locationInWindow, from: nil)
             guard self.bounds.contains(local) else { return event }
             self.handleClickInBounds(event)
@@ -312,6 +316,8 @@ final class TermyTerminalView: LocalProcessTerminalView {
     func handleLinkClickMouseUp(_ event: NSEvent) -> NSEvent? {
         guard event.modifierFlags.contains(.command) else { return event }
         guard event.window === window else { return event }
+        // Parked hidden panes sit under the shown one; see the mouse-down monitor.
+        guard !isHiddenOrHasHiddenAncestor else { return event }
         let local = convert(event.locationInWindow, from: nil)
         guard bounds.contains(local) else { return event }
         if openLinkUnderMouse(windowLocation: event.locationInWindow) {

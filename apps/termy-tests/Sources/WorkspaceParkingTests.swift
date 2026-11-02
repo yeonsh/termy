@@ -76,11 +76,70 @@ final class WorkspaceParkingTests: XCTestCase {
         XCTAssertEqual(size(of: beta).rows, alone.rows)
     }
 
+    /// A hidden pane is parked at the frame it had on screen, under the
+    /// pane now shown there. Clicking the shown pane must not reach the
+    /// hidden one: its click handler would focus it and switch the filter
+    /// to its project, so coming back to termy with a click jumped to
+    /// another project.
+    func test_clickOverHiddenPanesOldSpot_keepsTheShownProject() throws {
+        let alpha = workspace.addPane(cwd: try makeProjectDir("alpha"))
+        let beta = workspace.addPane(cwd: try makeProjectDir("beta"))
+        workspace.filter = .all
+        settle()
+        let betaSpot = beta.terminal.convert(beta.terminal.bounds, to: nil)
+        workspace.filter = .project(alpha.projectId)
+        settle()
+        let alphaRect = alpha.terminal.convert(alpha.terminal.bounds, to: nil)
+        let point = NSPoint(x: betaSpot.midX, y: betaSpot.midY)
+        XCTAssertTrue(alphaRect.contains(point), "precondition: alpha now covers beta's old spot")
+        XCTAssertTrue(beta.terminal.isHiddenOrHasHiddenAncestor, "precondition: beta is parked")
+
+        try click(at: point)
+
+        XCTAssertEqual(workspace.filter, .project(alpha.projectId))
+        XCTAssertTrue(workspace.focusedPane === alpha)
+    }
+
+    /// Maximize parks the other panes of the project the same way; a click
+    /// on the maximized pane must not restore the grid.
+    func test_clickOnMaximizedPane_overHiddenSibling_staysMaximized() throws {
+        let dir = try makeProjectDir("alpha")
+        let left = workspace.addPane(cwd: dir)
+        let right = workspace.addPane(cwd: dir, splitAxis: .column)
+        settle()
+        let rightSpot = right.terminal.convert(right.terminal.bounds, to: nil)
+        XCTAssertTrue(workspace.focusPane(byId: left.paneId))
+        workspace.toggleMaximize()
+        settle()
+        XCTAssertTrue(right.terminal.isHiddenOrHasHiddenAncestor, "precondition: right is parked")
+
+        try click(at: NSPoint(x: rightSpot.midX, y: rightSpot.midY))
+
+        XCTAssertTrue(workspace.focusedPane === left)
+        XCTAssertTrue(right.terminal.isHiddenOrHasHiddenAncestor, "maximize was undone")
+    }
+
     // MARK: - Helpers
 
     private func size(of pane: Pane) -> (cols: Int, rows: Int) {
         let terminal = pane.terminal.getTerminal()
         return (terminal.cols, terminal.rows)
+    }
+
+    /// Dispatch a left mouse-down the way AppKit does, so the terminals'
+    /// local event monitors see it.
+    private func click(at point: NSPoint) throws {
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
+            windowNumber: Self.window.windowNumber, context: nil, eventNumber: 0,
+            clickCount: 1, pressure: 1
+        ))
+        NSApp.postEvent(event, atStart: true)
+        let dequeued = try XCTUnwrap(NSApp.nextEvent(
+            matching: .leftMouseDown, until: Date().addingTimeInterval(0.2),
+            inMode: .default, dequeue: true
+        ))
+        NSApp.sendEvent(dequeued)
     }
 
     /// Run the layout passes and the async thaw that follow a relayout.
