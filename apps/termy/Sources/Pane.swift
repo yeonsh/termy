@@ -245,7 +245,17 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
 
     // MARK: - Layout
 
+    /// 헤더 오른쪽 끝 herdr 표시의 tooltip. local pane이면 nil(표시하지 않는다).
+    nonisolated static func herdrMarkToolTip(for launch: PaneLaunch) -> String? {
+        switch launch {
+        case .local: return nil
+        case .hc(let machine?): return "Running in herdr-core on \(machine)"
+        case .hc(nil): return "Running in herdr-core"
+        }
+    }
+
     private func setupHeader() {
+        headerView.setHerdrMark(toolTip: Self.herdrMarkToolTip(for: launch))
         headerView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(headerView)
         NSLayoutConstraint.activate([
@@ -797,6 +807,10 @@ final class PaneStatusOverlay: NSView {
 final class PaneHeaderView: NSView {
     private let label = NSTextField(labelWithString: "")
     let activityBar = ThinkingActivityBar()
+    /// hc pane이면 오른쪽 끝에 보이는 herdr 표시(로고 실루엣, 브랜치와 같은 색). local pane은 숨긴다.
+    let herdrMark = NSImageView()
+    private var labelTrailingToEdge: NSLayoutConstraint!
+    private var labelTrailingToMark: NSLayoutConstraint!
 
     private var project: String = ""
     private var branch: String?
@@ -835,11 +849,37 @@ final class PaneHeaderView: NSView {
         label.lineBreakMode = .byTruncatingMiddle
         label.maximumNumberOfLines = 1
         addSubview(label)
+
+        let markImage = NSImage(named: "HerdrMark")
+        markImage?.isTemplate = true
+        herdrMark.image = markImage
+        herdrMark.imageScaling = .scaleProportionallyUpOrDown
+        herdrMark.contentTintColor = .secondaryLabelColor
+        herdrMark.isHidden = true
+        herdrMark.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(herdrMark)
+        let markHeight: CGFloat = 13
+        let markAspect = markImage.map { $0.size.height > 0 ? $0.size.width / $0.size.height : 1 } ?? 1
+
+        labelTrailingToEdge = label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10)
+        labelTrailingToMark = label.trailingAnchor.constraint(lessThanOrEqualTo: herdrMark.leadingAnchor, constant: -6)
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor)
+            labelTrailingToEdge,
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            herdrMark.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            herdrMark.centerYAnchor.constraint(equalTo: centerYAnchor),
+            herdrMark.heightAnchor.constraint(equalToConstant: markHeight),
+            herdrMark.widthAnchor.constraint(equalToConstant: (markHeight * markAspect).rounded())
         ])
+    }
+
+    /// hc pane이면 `toolTip`과 함께 herdr 표시를 보이고, nil이면 숨긴다. 제목은 표시 앞에서 줄인다.
+    func setHerdrMark(toolTip: String?) {
+        herdrMark.toolTip = toolTip
+        herdrMark.isHidden = toolTip == nil
+        labelTrailingToEdge.isActive = toolTip == nil
+        labelTrailingToMark.isActive = toolTip != nil
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }

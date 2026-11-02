@@ -57,6 +57,28 @@ final class PaneLaunchTests: XCTestCase {
         XCTAssertNil(Pane.osc7Path(""))
     }
 
+    /// hc pane의 헤더 오른쪽 끝 herdr 표시. local pane에는 없다.
+    func testHerdrMarkToolTip() {
+        XCTAssertNil(Pane.herdrMarkToolTip(for: .local))
+        XCTAssertEqual(Pane.herdrMarkToolTip(for: .hc(machine: nil)), "Running in herdr-core")
+        XCTAssertEqual(Pane.herdrMarkToolTip(for: .hc(machine: "bdpc01")), "Running in herdr-core on bdpc01")
+    }
+
+    @MainActor
+    func testHeaderShowsHerdrMarkOnlyForHcPanes() throws {
+        let header = PaneHeaderView()
+        XCTAssertTrue(header.herdrMark.isHidden, "a new header has no mark")
+
+        header.setHerdrMark(toolTip: "Running in herdr-core")
+        XCTAssertFalse(header.herdrMark.isHidden)
+        XCTAssertEqual(header.herdrMark.toolTip, "Running in herdr-core")
+        let image = try XCTUnwrap(header.herdrMark.image, "the HerdrMark asset is in the app bundle")
+        XCTAssertTrue(image.isTemplate, "tinted like the header text, light and dark")
+
+        header.setHerdrMark(toolTip: nil)
+        XCTAssertTrue(header.herdrMark.isHidden)
+    }
+
     func testHcStatusText() {
         XCTAssertEqual(Pane.hcStatusText(.connecting), "Connecting to herdr-core…")
         XCTAssertEqual(Pane.hcStatusText(.restartingShell), "Restarting shell…")
