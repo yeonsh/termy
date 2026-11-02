@@ -135,6 +135,71 @@ final class HcPaneBackendIntegrationTests: XCTestCase {
         }
     }
 
+    /// core(ghostty-vt)는 DECRQM ?2048에 "지원"이라고 답한다. 그래서 이 모드를 켠 프로그램(nvim 0.10+)은
+    /// SIGWINCH를 듣지 않고 크기 알림 `CSI 48;rows;cols;h;w t`를 기다린다. 알림은 client가 보내야 한다
+    /// (core는 보내지 않는다). 보내지 않으면 창이나 글꼴 크기를 바꿔도 nvim이 예전 크기로 남는다.
+    func testInBandResizeReportReachesProgramThatEnabledIt() async throws {
+        let manager = try makeManager()
+        let (backend, view) = makeBackend(manager)
+        backend.start()
+        try await waitUntil(5, "attached") { backend.connectionState == .attached }
+        let start = (cols: view.getTerminal().cols, rows: view.getTerminal().rows)
+        view.send(txt: "perl \(try inBandResizeProbeScript())\r")
+        try await waitUntil(5, "armed") { screenHasLine(view, "ARMED") }
+        try await waitUntil(5, "a report as soon as the mode is on") {
+            screenHasLine(view, "GOT 48;\(start.rows);\(start.cols)")
+        }
+
+        view.setFrameSize(NSSize(width: 900, height: 560))
+        let grid = (cols: view.getTerminal().cols, rows: view.getTerminal().rows)
+        XCTAssertTrue(grid != start, "the grid changed")
+        try await waitUntil(5, "a report with the new grid") {
+            screenHasLine(view, "GOT 48;\(grid.rows);\(grid.cols)")
+        }
+    }
+
+    /// 다시 붙은 pane(새 view)도 프로그램이 켜 둔 mode 2048을 알아야 한다. 아니면 termy를 다시 띄운 뒤
+    /// 열려 있던 nvim이 크기 변경을 놓친다.
+    func testInBandResizeReportSurvivesReattach() async throws {
+        let manager = try makeManager()
+        let paneId = UUID().uuidString
+        let (first, view1) = makeBackend(manager, paneId: paneId)
+        first.start()
+        try await waitUntil(5, "first attached") { first.connectionState == .attached }
+        view1.send(txt: "perl \(try inBandResizeProbeScript())\r")
+        try await waitUntil(5, "armed") { screenHasLine(view1, "ARMED") }
+        first.detach()
+
+        let (second, view2) = makeBackend(manager, paneId: paneId)
+        second.start()
+        try await waitUntil(5, "second attached") { second.connectionState == .attached }
+        view2.setFrameSize(NSSize(width: 900, height: 560))
+        let grid = (cols: view2.getTerminal().cols, rows: view2.getTerminal().rows)
+        try await waitUntil(5, "a report with the new grid after reattach") {
+            screenHasLine(view2, "GOT 48;\(grid.rows);\(grid.cols)")
+        }
+    }
+
+    /// mode 2048을 켜고, 받은 크기 알림마다 `GOT 48;rows;cols`를 한 줄씩 찍는 프로그램.
+    private func inBandResizeProbeScript() throws -> String {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("termy-inband-\(UUID().uuidString).pl")
+        try #"""
+        system("stty raw -echo"); $| = 1;
+        print "\e[?2048h"; print "ARMED\r\n";
+        my $buf = ""; my $rin = ""; vec($rin, fileno(STDIN), 1) = 1; my $end = time + 20;
+        while (time < $end) {
+            next unless select(my $r = $rin, undef, undef, 0.1) > 0;
+            sysread(STDIN, my $c, 256) or last;
+            $buf .= $c;
+            while ($buf =~ s/\e\[48;(\d+);(\d+);\d+;\d+t//) { print "GOT 48;$1;$2\r\n"; }
+        }
+        print "\e[?2048l"; system("stty sane");
+        """#.write(to: url, atomically: true, encoding: .utf8)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url.path
+    }
+
     func testKillRemovesTerminal() async throws {
         let manager = try makeManager()
         let (backend, _) = makeBackend(manager)

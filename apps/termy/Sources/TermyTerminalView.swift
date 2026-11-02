@@ -91,7 +91,24 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// hc가 보낸 출력. `dataReceived`와 같은 부수 효과를 낸다.
     func receiveRemote(_ bytes: ArraySlice<UInt8>) {
         feed(byteArray: bytes)
+        if let on = inBandResizeScanner.scan(bytes) {
+            inBandResizeReports = on
+            if on { sendInBandResizeReport() }   // 켜자마자 지금 크기를 한 번 알린다(Ghostty와 같다)
+        }
         afterOutput()
+    }
+
+    /// hc pane에서 프로그램이 mode 2048을 켰는지. 켜져 있으면 grid가 바뀔 때마다 크기 알림을 입력으로 보낸다.
+    /// 왜 termy가 보내야 하는지는 `InBandResizeModeScanner` 참고.
+    private var inBandResizeScanner = InBandResizeModeScanner()
+    private var inBandResizeReports = false
+
+    private func sendInBandResizeReport() {
+        guard let remoteInput else { return }
+        remoteInput(ArraySlice(InBandResizeModeScanner.report(
+            cols: terminal.cols, rows: terminal.rows,
+            widthPixels: Int(frame.width), heightPixels: Int(frame.height)
+        )))
     }
 
     // thaw 경로는 super.setFrameSize를 직접 부르므로(self.setFrameSize 재진입 없음)
@@ -123,6 +140,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
         if let last = lastReportedGrid, last == now { return }
         lastReportedGrid = now
         onGridSizeChanged?(now.cols, now.rows)
+        if inBandResizeReports { sendInBandResizeReport() }
     }
 
     /// 글꼴 변경 후 grid 변화까지 알린다. Pane의 `terminal.font =` 대신 쓴다.
