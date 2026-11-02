@@ -6,6 +6,27 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.0 — 2026-11-02
+
+- Panes can now run in herdr-core, so the agents in them outlive termy.
+  Turn on Settings… (⌘,) → "Run local panes in herdr-core". New panes
+  then run inside herdr-core: quitting termy or an update relaunch leaves
+  Claude Code and other agents running, and termy puts each pane back on
+  the same terminal, with the same screen and process, when it starts
+  again. Panes saved before you turned it on reopen in herdr-core too.
+  It is off by default, and termy offers to install herdr-core if it is
+  missing. Panes in herdr-core show a small herdr mark at the right end
+  of their header.
+- Remote projects: ⌘K → "New Remote Project…" opens a folder on another
+  machine you have added to herdr-core (`hc machine add`). Its panes are
+  titled `<folder>@<machine>`, new panes and splits open on the same
+  machine, and Claude Code's THINK and WAIT states and notifications show
+  up in mission control like local ones.
+- Clicking termy to come back from another app no longer jumps to a
+  different project. The click also reached panes hidden behind the
+  current project and switched to theirs. The same stray click could undo
+  ⌘↵ maximize or open a link from a hidden pane on ⌘-click.
+
 ## 0.2.22 — 2026-11-01
 
 - Claude Code's status line no longer comes back cut to a few letters
