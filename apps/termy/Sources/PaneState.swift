@@ -38,6 +38,14 @@
 //   *(opencode) ──(AgentStatus failed)──────────────▶ ERRORED
 //   *(opencode) ──(AgentStatus idle)────────────────▶ IDLE (no chime)
 //
+//   *(7501)     ──(working)───────────────────────▶ THINKING
+//   *(7501)     ──(blocked)───────────────────────▶ WAITING ♪
+//   *(7501)     ──(done, turn open)───────────────▶ WAITING ♪ (→ IDLE after 30s)
+//   *(7501)     ──(idle, turn open)───────────────▶ IDLE (Esc interrupt, no chime)
+//   *(7501)     ──(error)─────────────────────────▶ ERRORED
+//   7501 comes from herdr-core events (hc panes) or the pane's own OSC
+//   handler (local panes). While it is active, hooks fill details only.
+//
 // ♪ = Notifier plays a sound and raises needsAttention.
 //
 // POSSIBLY_WAITING is rendered as THINK in the dashboard chip — invisible to
@@ -113,7 +121,7 @@ struct PaneSnapshot: Sendable, Codable {
     /// hook), closed by Stop / StopFailure / SessionEnd / PtyExit and by
     /// session resets. Feeds `isMidTurn`, which holds update relaunches.
     var turnOpen: Bool = false
-    /// True while herdr-core's 7501 program status drives this pane's state.
+    /// True while the program's OSC 7501 status (herdr-core events for hc panes, the pane's own OSC handler for local panes) drives this pane's state.
     /// Hooks then fill only the detail fields. Runtime-only (not in CodingKeys).
     var programStatusActive: Bool = false
 
@@ -195,7 +203,7 @@ enum PaneStateMachine {
         return next
     }
 
-    /// Merges herdr-core's 7501 status (nil = the terminal stopped reporting one).
+    /// Merges the program's 7501 status (nil = the program stopped reporting one).
     /// Re-sent identical statuses (attach/reconnect/missed resync) leave
     /// `state`/`enteredStateAt` untouched so they never re-alert.
     static func applyProgramStatus(_ status: HcStatus?, to previous: PaneSnapshot, now: Date) -> PaneSnapshot {
@@ -224,8 +232,13 @@ enum PaneStateMachine {
             let source: WaitSource = status.kind == "question" ? .askUserQuestion : .permission
             finish(.waiting, attention: true, reason: status.kind ?? "permission", source: source, turnOpen: true)
         case "done", "idle":
-        // done only ends a turn that is open; a re-sent done (attach/reconnect/resync) follows the idle rule.
-            if previous.turnOpen {
+            if status.state == "idle", previous.turnOpen {
+                // 열린 turn을 idle이 닫으면 사용자가 끊은 것이다(Claude는 Esc 뒤 약 70ms에 idle을 보낸다. 권한
+                // 프롬프트에서도 같다). 정상 종료는 done이다. 그 pane을 보고 있는 사용자가 한 일이므로 알리지 않는다
+                // (opencode interrupted와 같은 규칙). Esc에는 Stop hook이 없어 local pane도 이 경로로만 안다.
+                finish(.idle, attention: false, reason: nil, source: nil, turnOpen: false)
+            } else if previous.turnOpen {
+                // done only ends a turn that is open; a re-sent done (attach/reconnect/resync) follows the idle rule.
                 finish(.waiting, attention: false, reason: nil, source: .turnEnd, turnOpen: false)
             } else if previous.state == .waiting {
                 break
@@ -416,7 +429,7 @@ enum PaneStateMachine {
                 // query) and only if the user hasn't touched the pane since.
                 // It does NOT follow an Esc interrupt — the Esc keypress
                 // counts as interaction (verified live, Claude Code 2.1.296),
-                // so an interrupted turn stays open until the next prompt;
+                // so without 7501 an interrupted turn stays open until the next prompt (7501 idle closes it);
                 // UpdateRelaunchGate's menu escape and reminder cover that.
                 // A pane still THINKING here missed its Stop some other way,
                 // so surface WAIT — the Notifier chimes on entering it. Any

@@ -40,13 +40,25 @@ final class PaneProgramStatusTests: XCTestCase {
         let n = PaneStateMachine.applyProgramStatus(st("weird"), to: w, now: Date())
         XCTAssertEqual(n.state, .thinking); XCTAssertTrue(n.programStatusActive)
     }
-    func testIdleAfterWorkingEndsTurnOnce() {
-        let working = PaneStateMachine.applyProgramStatus(st("working"), to: base(), now: Date())
-        let idle1 = PaneStateMachine.applyProgramStatus(st("idle"), to: working, now: Date())
-        let idle2 = PaneStateMachine.applyProgramStatus(st("idle"), to: idle1, now: Date())
-        XCTAssertEqual(idle1.state, .waiting); XCTAssertEqual(idle2.state, .waiting)
-        XCTAssertTrue(WaitAlertRule.shouldAlert(previous: obs(working), next: obs(idle1)))
-        XCTAssertFalse(WaitAlertRule.shouldAlert(previous: obs(idle1), next: obs(idle2)))
+    func testIdleAfterWorkingIsSilentIdle() {
+        let working = PaneStateMachine.applyProgramStatus(st("working"), to: base(), now: Date(timeIntervalSince1970: 1000))
+        let idle1 = PaneStateMachine.applyProgramStatus(st("idle"), to: working, now: Date(timeIntervalSince1970: 1001))
+        let idle2 = PaneStateMachine.applyProgramStatus(st("idle"), to: idle1, now: Date(timeIntervalSince1970: 1060))
+        XCTAssertEqual(idle1.state, .idle)
+        XCTAssertFalse(idle1.turnOpen)
+        XCTAssertFalse(idle1.needsAttention)
+        XCTAssertFalse(WaitAlertRule.shouldAlert(previous: obs(working), next: obs(idle1)))
+        XCTAssertEqual(idle2.state, .idle)
+        XCTAssertEqual(idle2.enteredStateAt, idle1.enteredStateAt)
+    }
+    func testIdleWhileBlockedIsSilentIdle() {
+        let blocked = PaneStateMachine.applyProgramStatus(st("blocked", kind: "permission"), to: base(), now: Date())
+        let n = PaneStateMachine.applyProgramStatus(st("idle"), to: blocked, now: Date())
+        XCTAssertEqual(n.state, .idle)
+        XCTAssertFalse(n.needsAttention)
+        XCTAssertNil(n.notificationReason)
+        XCTAssertNil(n.waitSource)
+        XCTAssertFalse(n.turnOpen)
     }
     func testIdleWithoutTurnIsIdle() {
         let n = PaneStateMachine.applyProgramStatus(st("idle"), to: base(), now: Date())
