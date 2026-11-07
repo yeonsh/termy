@@ -178,6 +178,27 @@ final class ImagePreviewWindowControllerTests: XCTestCase {
         XCTAssertTrue(controller.scrollView.contentView is CenteringClipView)
     }
 
+    func test_transparentImageDrawsOverCheckerboard() throws {
+        let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 64, pixelsHigh: 64, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0
+        )!
+        rep.size = NSSize(width: 64, height: 64)
+        if let bytes = rep.bitmapData { memset(bytes, 0, rep.bytesPerRow * 64) }
+        let png = rep.representation(using: .png, properties: [:])!
+        let controller = openPreview(try makeShot(png))
+        defer { controller.close() }
+        XCTAssertTrue(controller.imageView is CheckerboardImageView)
+        let view = controller.imageView
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let color = try XCTUnwrap(bitmap.colorAt(x: 20, y: 20)?.usingColorSpace(.deviceRGB))
+        XCTAssertGreaterThan(color.redComponent, 0.7)
+        XCTAssertGreaterThan(color.greenComponent, 0.7)
+        XCTAssertGreaterThan(color.blueComponent, 0.7)
+    }
+
     func test_closingStoresContentSizeUnderImageKey() throws {
         let url = try makeShot(makeBitmap(width: 120, height: 80, type: .png))
         let defaults = InMemoryUserDefaults()

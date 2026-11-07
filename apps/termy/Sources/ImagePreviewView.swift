@@ -32,3 +32,26 @@ final class CenteringClipView: NSClipView {
         return rect
     }
 }
+
+/// An image view that draws a light checkerboard behind the image, so a
+/// transparent picture with dark content stays visible in dark mode. The
+/// colors are the same in light and dark appearances.
+final class CheckerboardImageView: NSImageView {
+    private static let tile: NSColor = {
+        let image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { _ in
+            NSColor.white.setFill()
+            NSRect(x: 0, y: 0, width: 16, height: 16).fill()
+            NSColor(srgbRed: 0.8, green: 0.8, blue: 0.8, alpha: 1).setFill()
+            NSRect(x: 8, y: 0, width: 8, height: 8).fill()
+            NSRect(x: 0, y: 8, width: 8, height: 8).fill()
+            return true
+        }
+        return NSColor(patternImage: image)
+    }()
+
+    override func draw(_ dirtyRect: NSRect) {
+        Self.tile.setFill()
+        bounds.fill()
+        super.draw(dirtyRect)
+    }
+}

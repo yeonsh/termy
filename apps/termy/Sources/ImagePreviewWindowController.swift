@@ -59,7 +59,7 @@ final class ImagePreviewWindowController: NSWindowController, NSWindowDelegate, 
         self.defaults = defaults
         self.settleInterval = settleInterval
 
-        let imageView = NSImageView(frame: .zero)
+        let imageView = CheckerboardImageView(frame: .zero)
         imageView.imageScaling = .scaleAxesIndependently
         imageView.animates = true
         self.imageView = imageView
