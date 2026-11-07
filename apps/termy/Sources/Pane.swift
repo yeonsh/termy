@@ -350,11 +350,14 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         // hc pane(startHc)은 core가 답하고 events로 받으므로 local 경로에서만 켠다.
         let statusPaneId = paneId
         let statusProjectId = projectId
-        terminal.enableProgramStatusReports { [weak self] status in
+        // foreground가 agent일 때만 받는다. ssh/hc attach 안의 보고는 hook/synthetic SessionEnd가 못 닫아 THINK가 남는다.
+        terminal.enableProgramStatusReports(accepts: { [weak self] in
+            self?.localForegroundAgent() != nil
+        }, onStatus: { [weak self] status in
             self?.enqueueWatcherCall {
                 await HookDaemon.shared.applyProgramStatus(paneId: statusPaneId, projectId: statusProjectId, status: status)
             }
-        }
+        })
 
         terminal.startProcess(
             executable: shell,
@@ -541,9 +544,8 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     /// Live agent session in this pane for the update-relaunch save. nil
     /// when no agent owns the PTY foreground or termy has no session id for
     /// it (see `AgentResumeCapture`).
-    func agentResumeRecord(snapshot: PaneSnapshot?) -> AgentResumeRecord? {
-        // hc pane은 업데이트 재시작에 죽지 않고 다시 붙으므로 resume할 것이 없다.
-        guard launch == .local else { return nil }
+    /// local PTY의 foreground process group leader. 동기로 조회한다.
+    private func localForegroundProcess() -> (pid: pid_t, name: String, argv: [String]?)? {
         let masterFd = terminal.process.childfd
         let shellPid = terminal.process.shellPid
         guard masterFd >= 0, shellPid > 0,
@@ -553,10 +555,24 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
               ),
               let name = ForegroundProcessWatcher.processName(pid: pid)
         else { return nil }
-        let argv = ForegroundProcessWatcher.processArguments(pid: pid)
+        return (pid, name, ForegroundProcessWatcher.processArguments(pid: pid))
+    }
+
+    /// local foreground가 분류된 agent면 그 종류, 아니면 nil.
+    private func localForegroundAgent() -> AgentKind? {
+        guard let fg = localForegroundProcess() else { return nil }
+        return ForegroundProcessWatcher.classifyAgent(processName: fg.name, arguments: fg.argv ?? [])
+    }
+
+    func agentResumeRecord(snapshot: PaneSnapshot?) -> AgentResumeRecord? {
+        // hc pane은 업데이트 재시작에 죽지 않고 다시 붙으므로 resume할 것이 없다.
+        guard launch == .local else { return nil }
+        guard let fg = localForegroundProcess() else { return nil }
+        let pid = fg.pid
+        let argv = fg.argv
         return AgentResumeCapture.record(
             foregroundAgent: ForegroundProcessWatcher.classifyAgent(
-                processName: name,
+                processName: fg.name,
                 arguments: argv ?? []
             ),
             argv: argv,

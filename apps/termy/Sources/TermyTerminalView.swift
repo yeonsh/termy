@@ -100,13 +100,15 @@ final class TermyTerminalView: LocalProcessTerminalView {
 
     /// local pane 전용. 프로그램의 OSC 7501 질의에 herdr-core처럼 답하고, 보고를 `onStatus`로 넘긴다(nil = 보고 끝).
     /// hc pane에서는 부르지 않는다: core가 이미 답하므로 termy까지 답하면 두 번째 답이 프로그램 입력으로 들어간다.
-    func enableProgramStatusReports(onStatus: @escaping (HcStatus?) -> Void) {
+    /// `accepts`는 지금 PTY foreground가 agent인지다. 아니면(ssh, hc attach 등) 질의에 답하지 않고 보고도 버린다.
+    /// 끝(nil) 보고는 항상 넘겨도 해롭지 않다.
+    func enableProgramStatusReports(accepts: @escaping () -> Bool, onStatus: @escaping (HcStatus?) -> Void) {
         terminal.registerOscHandler(code: ProgramStatusOSC.code) { [weak self] payload in
             switch ProgramStatusOSC.parse(payload) {
             case .probe:
-                self?.terminal.sendResponse(text: ProgramStatusOSC.probeReply)
+                if accepts() { self?.terminal.sendResponse(text: ProgramStatusOSC.probeReply) }
             case .status(let status):
-                onStatus(status)
+                if status == nil || accepts() { onStatus(status) }
             case .ignored:
                 break
             }
