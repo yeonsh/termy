@@ -232,7 +232,8 @@ enum PaneStateMachine {
             let source: WaitSource = status.kind == "question" ? .askUserQuestion : .permission
             finish(.waiting, attention: true, reason: status.kind ?? "permission", source: source, turnOpen: true)
         case "done", "idle":
-            if status.state == "idle", previous.turnOpen {
+            if status.state == "idle", previous.turnOpen, status.app == "claude-code" {
+                // (Claude 전용: Claude는 done으로 끝내고 interrupt에만 idle을 보낸다. 다른 agent는 working -> idle이 정상 종료다.)
                 // 열린 turn을 idle이 닫으면 사용자가 끊은 것이다(Claude는 Esc 뒤 약 70ms에 idle을 보낸다. 권한
                 // 프롬프트에서도 같다). 정상 종료는 done이다. 그 pane을 보고 있는 사용자가 한 일이므로 알리지 않는다
                 // (opencode interrupted와 같은 규칙). Esc에는 Stop hook이 없어 local pane도 이 경로로만 안다.

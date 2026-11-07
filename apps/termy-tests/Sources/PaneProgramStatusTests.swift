@@ -96,6 +96,14 @@ final class PaneProgramStatusTests: XCTestCase {
         XCTAssertFalse(WaitAlertRule.shouldAlert(previous: obs(a), next: obs(b)))
     }
 
+    func testIdleOnOpenTurnFromNonClaudeAppIsTurnEnd() {
+        let codex = { (s: String) in HcStatus(state: s, kind: nil, msg: nil, app: "codex") }
+        let w = PaneStateMachine.applyProgramStatus(codex("working"), to: base(), now: Date())
+        let n = PaneStateMachine.applyProgramStatus(codex("idle"), to: w, now: Date())
+        XCTAssertEqual(n.state, .waiting); XCTAssertEqual(n.waitSource, .turnEnd)
+        XCTAssertFalse(n.turnOpen)
+        XCTAssertTrue(WaitAlertRule.shouldAlert(previous: obs(w), next: obs(n)))
+    }
     func testWorkingThenDoneAlerts() {
         let w = PaneStateMachine.applyProgramStatus(st("working"), to: base(), now: Date())
         let d = PaneStateMachine.applyProgramStatus(st("done"), to: w, now: Date())
