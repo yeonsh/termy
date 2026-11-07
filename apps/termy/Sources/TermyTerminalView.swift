@@ -98,6 +98,21 @@ final class TermyTerminalView: LocalProcessTerminalView {
         afterOutput()
     }
 
+    /// local pane 전용. 프로그램의 OSC 7501 질의에 herdr-core처럼 답하고, 보고를 `onStatus`로 넘긴다(nil = 보고 끝).
+    /// hc pane에서는 부르지 않는다: core가 이미 답하므로 termy까지 답하면 두 번째 답이 프로그램 입력으로 들어간다.
+    func enableProgramStatusReports(onStatus: @escaping (HcStatus?) -> Void) {
+        terminal.registerOscHandler(code: ProgramStatusOSC.code) { [weak self] payload in
+            switch ProgramStatusOSC.parse(payload) {
+            case .probe:
+                self?.terminal.sendResponse(text: ProgramStatusOSC.probeReply)
+            case .status(let status):
+                onStatus(status)
+            case .ignored:
+                break
+            }
+        }
+    }
+
     /// hc pane에서 프로그램이 mode 2048을 켰는지. 켜져 있으면 grid가 바뀔 때마다 크기 알림을 입력으로 보낸다.
     /// 왜 termy가 보내야 하는지는 `InBandResizeModeScanner` 참고.
     private var inBandResizeScanner = InBandResizeModeScanner()

@@ -346,6 +346,16 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         FileManager.default.changeCurrentDirectoryPath(initialCwd)
         let envArray = env.map { "\($0.key)=\($0.value)" }
 
+        // Claude는 OSC 7501 질의에 답하는 터미널에만 상태를 보고한다. Esc 취소는 Stop hook이 없어서 이 보고로만 안다.
+        // hc pane(startHc)은 core가 답하고 events로 받으므로 local 경로에서만 켠다.
+        let statusPaneId = paneId
+        let statusProjectId = projectId
+        terminal.enableProgramStatusReports { [weak self] status in
+            self?.enqueueWatcherCall {
+                await HookDaemon.shared.applyProgramStatus(paneId: statusPaneId, projectId: statusProjectId, status: status)
+            }
+        }
+
         terminal.startProcess(
             executable: shell,
             args: ["-l"],

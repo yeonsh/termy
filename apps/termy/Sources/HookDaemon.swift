@@ -433,7 +433,7 @@ actor HookDaemon {
         }
     }
 
-    /// herdr-core 7501 status for an hc pane (nil = status gone, hooks take over again).
+    /// 프로그램의 7501 status(hc pane은 herdr-core events, local pane은 pane의 OSC handler). nil = status gone, hooks take over again.
     func applyProgramStatus(paneId: String, projectId: String?, status: HcStatus?, now: Date = Date()) async {
         let previous = panes[paneId] ?? PaneSnapshot.empty(paneId: paneId, projectId: projectId)
         let next = PaneStateMachine.applyProgramStatus(status, to: previous, now: now)

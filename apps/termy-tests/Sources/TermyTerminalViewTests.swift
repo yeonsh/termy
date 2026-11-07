@@ -786,4 +786,37 @@ final class TermyTerminalViewTests: XCTestCase {
         let minX = CGFloat(first) / scale, maxX = CGFloat(last + 1) / scale
         return (minX, maxX, maxX - minX)
     }
+
+    @MainActor
+    func testProgramStatusProbeIsAnswered() {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        var sent: [UInt8] = []
+        view.remoteInput = { sent.append(contentsOf: $0) }   // 테스트에는 process가 없어 보낸 바이트를 여기서 잡는다
+        view.enableProgramStatusReports { _ in }
+        view.feed(text: "\u{1b}]7501;?\u{07}")
+        XCTAssertEqual(String(decoding: sent, as: UTF8.self), ProgramStatusOSC.probeReply)
+    }
+
+    @MainActor
+    func testProgramStatusReportsReachCallback() {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        var got: [HcStatus?] = []
+        view.enableProgramStatusReports { got.append($0) }
+        view.feed(text: "\u{1b}]7501;state=blocked:app=claude-code:kind=permission:msg=YXBwcm92ZSBCYXNoOiB0b3VjaCAvdG1wL3Rlcm15LTc1MDEtcHJvYmUveC50eHQ=\u{07}")
+        view.feed(text: "\u{1b}]7501;state=clear\u{1b}\\")
+        XCTAssertEqual(got, [
+            HcStatus(state: "blocked", kind: "permission", msg: "approve Bash: touch /tmp/termy-7501-probe/x.txt", app: "claude-code"),
+            nil,
+        ])
+    }
+
+    @MainActor
+    func testProgramStatusProbeUnansweredWhenNotEnabled() {
+        // hc pane은 이 메서드를 부르지 않는다. 그때 SwiftTerm은 7501을 무시해야 한다(core가 이미 답했다).
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        var sent: [UInt8] = []
+        view.remoteInput = { sent.append(contentsOf: $0) }
+        view.feed(text: "\u{1b}]7501;?\u{07}")
+        XCTAssertTrue(sent.isEmpty)
+    }
 }
