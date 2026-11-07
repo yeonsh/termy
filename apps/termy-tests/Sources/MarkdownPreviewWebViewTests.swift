@@ -102,6 +102,14 @@ final class MarkdownPreviewWebViewTests: XCTestCase {
         ])
     }
 
+    func test_previewFiles_includesImages() {
+        let result = MarkdownPreviewWebView.previewFiles(
+            in: [URL(fileURLWithPath: "/proj/a.png"), URL(fileURLWithPath: "/proj/c.txt")],
+            isRegularFile: { _ in true }
+        )
+        XCTAssertEqual(result, [URL(fileURLWithPath: "/proj/a.png").resolvingSymlinksInPath()])
+    }
+
     // MARK: drop handling
 
     func test_droppingMarkdownFileOpensIt() throws {

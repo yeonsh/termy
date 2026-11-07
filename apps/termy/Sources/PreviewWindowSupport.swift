@@ -1,6 +1,6 @@
 // PreviewWindowSupport.swift
 //
-// What the markdown and PDF preview windows share around their content.
+// What the markdown, PDF and image preview windows share around their content.
 // Each kind remembers the size of its last closed window under its own
 // defaults key, so a reader who widens PDFs doesn't widen markdown too,
 // but both fall back the same way when nothing usable is stored.

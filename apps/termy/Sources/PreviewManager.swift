@@ -1,6 +1,6 @@
 // PreviewManager.swift
 //
-// One preview window per markdown or PDF file. Cmd+clicking a file that's
+// One preview window per markdown, PDF or image file. Cmd+clicking a file that's
 // already open brings its window forward instead of stacking another; files
 // are keyed by their symlink-resolved standard path, so `./docs/x.md` and an
 // absolute path to the same file share a window.
@@ -33,7 +33,7 @@ final class PreviewManager {
         return NSRect(origin: NSPoint(x: x.rounded(), y: y.rounded()), size: size)
     }
 
-    /// True when `window` belongs to a markdown or PDF preview.
+    /// True when `window` belongs to a markdown, PDF or image preview.
     static func isPreviewWindow(_ window: NSWindow?) -> Bool {
         window?.windowController is any PreviewWindowController
     }
@@ -52,6 +52,7 @@ final class PreviewManager {
         switch PreviewKind(fileURL: fileURL) {
         case .markdown: controller = MarkdownPreviewWindowController(fileURL: fileURL, defaults: defaults)
         case .pdf: controller = PDFPreviewWindowController(fileURL: fileURL, defaults: defaults)
+        case .image: controller = ImagePreviewWindowController(fileURL: fileURL, defaults: defaults)
         case nil: return nil
         }
         controller.onClose = { [weak self] in

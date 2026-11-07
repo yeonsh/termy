@@ -233,7 +233,7 @@ final class PDFPreviewWindowController: NSWindowController, NSWindowDelegate, @p
 
     // MARK: - Links
 
-    /// Web links go to the browser, markdown and PDF files to a preview
+    /// Web links go to the browser, markdown, PDF and image files to a preview
     /// window; anything else (apps, scripts, missing files) does nothing.
     nonisolated static func linkRoute(for url: URL, isRegularFile: (String) -> Bool) -> LinkRoute {
         switch url.scheme?.lowercased() {

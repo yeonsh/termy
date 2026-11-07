@@ -1,6 +1,6 @@
 // PreviewLinkResolver.swift
 //
-// Decides whether a Cmd+clicked terminal link names a markdown or PDF file
+// Decides whether a Cmd+clicked terminal link names a markdown, PDF or image file
 // termy should preview, and which file on disk that is. SwiftTerm hands over
 // the raw matched text — `docs/x.md`, `./x.pdf:12`, `file:///…/x.md`, often
 // with prose punctuation or the rest of a Korean sentence (`x.md에 저장했습니다.`)
@@ -11,21 +11,26 @@
 import Foundation
 
 enum PreviewLinkResolution: Equatable {
-    /// Not a markdown or PDF link; the caller falls back to its URL handling.
+    /// Not a markdown, PDF or image link; the caller falls back to its URL handling.
     case notPreviewable
-    /// Shaped like a markdown or PDF path, but no such file exists.
+    /// Shaped like a markdown, PDF or image path, but no such file exists.
     case missing
-    /// The markdown or PDF file to open, symlinks resolved.
+    /// The markdown, PDF or image file to open, symlinks resolved.
     case file(URL)
 }
 
 enum PreviewLinkResolver {
-    static let extensions: Set<String> = ["md", "markdown", "pdf"]
+    static let extensions: Set<String> = Set(["md", "markdown", "pdf"]).union(PreviewKind.imageExtensions)
+
+    /// Cuts a path after the first extension not followed by a file-name
+    /// character; built from `extensions` so the two never drift apart.
+    private static let cutOffPattern =
+        #"^.*?\.("# + extensions.sorted().joined(separator: "|") + #")(?![A-Za-z0-9._/-])"#
 
     private static let leadingPunctuation: Set<Character> = ["(", "[", "`", "'", "\""]
     private static let trailingPunctuation: Set<Character> = [".", ",", ";", ":", "!", "?", ")", "]", "`", "'", "\""]
 
-    /// Resolves `linkText` to a markdown or PDF file. A relative path is tried
+    /// Resolves `linkText` to a markdown, PDF or image file. A relative path is tried
     /// against `baseDirectories` in order and the first base holding the
     /// file wins, so callers list the most likely base first.
     static func resolve(
@@ -57,7 +62,7 @@ enum PreviewLinkResolver {
         return .missing
     }
 
-    /// The path in `linkText` when it names a markdown or PDF file: surrounding
+    /// The path in `linkText` when it names a markdown, PDF or image file: surrounding
     /// punctuation, `file://`, `#fragment`, `:line[:col]` and text glued
     /// after the extension removed. nil for any other extension and for
     /// web URLs.
@@ -85,10 +90,10 @@ enum PreviewLinkResolver {
         if !hasPreviewExtension(path) {
             // SwiftTerm's path regex keeps matching into Hangul particles
             // (`\w`), `**`, and trailing words ending in `.`; cut at the
-            // first .md/.markdown/.pdf that isn't followed by another file-name
+            // first previewable extension that isn't followed by another file-name
             // character. A glued `:12에서` goes with the rest.
             guard let range = path.range(
-                of: #"^.*?\.(md|markdown|pdf)(?![A-Za-z0-9._/-])"#,
+                of: cutOffPattern,
                 options: [.regularExpression, .caseInsensitive]
             ) else { return nil }
             path = String(path[range])
@@ -221,11 +226,18 @@ enum PreviewLinkResolver {
 enum PreviewKind: Equatable {
     case markdown
     case pdf
+    case image
+
+    static let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "avif", "tif", "tiff", "bmp", "svg",
+    ]
 
     init?(fileURL: URL) {
-        switch fileURL.pathExtension.lowercased() {
+        let ext = fileURL.pathExtension.lowercased()
+        switch ext {
         case "md", "markdown": self = .markdown
         case "pdf": self = .pdf
+        case _ where Self.imageExtensions.contains(ext): self = .image
         default: return nil
         }
     }

@@ -66,4 +66,13 @@ final class AppDelegatePreviewMenuTests: XCTestCase {
         let action = try XCTUnwrap(item.action)
         XCTAssertTrue(PDFPreviewWindowController.instancesRespond(to: action))
     }
+
+    func test_fileMenuShowInFinderReachesImagePreview() throws {
+        let file = try XCTUnwrap(NSApp.mainMenu?.items.first { $0.submenu?.title == "File" }?.submenu)
+        let item = try XCTUnwrap(file.items.first {
+            $0.action == #selector(MarkdownPreviewWindowController.showInFinder(_:))
+        })
+        let action = try XCTUnwrap(item.action)
+        XCTAssertTrue(ImagePreviewWindowController.instancesRespond(to: action))
+    }
 }

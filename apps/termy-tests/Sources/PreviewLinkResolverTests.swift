@@ -298,4 +298,24 @@ final class PreviewLinkResolverTests: XCTestCase {
         XCTAssertNil(resolveCutOff("https://example.com/docs/a", following: " (1).pdf", listing: listing))
         XCTAssertNil(resolveCutOff("file:///proj/docs/a", following: " (1).pdf", listing: listing))
     }
+
+    func test_imagePathsResolve() {
+        let existing: Set<String> = ["/proj/shots/a.png", "/proj/a.jpeg", "/proj/a.webp", "/proj/a.svg", "/proj/b.PNG"]
+        XCTAssertEqual(resolve("shots/a.png", existing: existing), file("/proj/shots/a.png"))
+        XCTAssertEqual(resolve("`a.jpeg`", existing: existing), file("/proj/a.jpeg"))
+        XCTAssertEqual(resolve("file:///proj/a.webp", existing: existing), file("/proj/a.webp"))
+        XCTAssertEqual(resolve("a.svg에 저장했습니다.", existing: existing), file("/proj/a.svg"))
+        XCTAssertEqual(resolve("./b.PNG:3", existing: existing), file("/proj/b.PNG"))
+        XCTAssertEqual(resolve("https://example.com/a.png", existing: existing), .notPreviewable)
+        XCTAssertEqual(resolve("a.png.bak", existing: existing), .notPreviewable)
+        XCTAssertEqual(resolve("a.pngx", existing: existing), .notPreviewable)
+        XCTAssertEqual(resolve("shots/none.gif", existing: existing), .missing)
+    }
+
+    func test_previewKindForImages() {
+        for name in ["a.png", "a.JPG", "a.jpeg", "a.gif", "a.webp", "a.heic", "a.heif", "a.avif", "a.tif", "a.tiff", "a.bmp", "a.svg"] {
+            XCTAssertEqual(PreviewKind(fileURL: URL(fileURLWithPath: "/x/" + name)), .image, name)
+        }
+        XCTAssertNil(PreviewKind(fileURL: URL(fileURLWithPath: "/x/a.txt")))
+    }
 }

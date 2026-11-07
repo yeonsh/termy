@@ -168,4 +168,25 @@ final class PreviewManagerTests: XCTestCase {
         XCTAssertNil(manager.open(try makeFile("notes.txt")))
         XCTAssertTrue(manager.controllers.isEmpty)
     }
+
+    private func makePNG(_ name: String) throws -> URL {
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 4, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        let url = dir.appendingPathComponent(name)
+        try data.write(to: url)
+        return url
+    }
+
+    func test_openingImageMakesImagePreview() throws {
+        let url = try makePNG("shot.png")
+        let first = try XCTUnwrap(manager.open(url))
+        XCTAssertTrue(first is ImagePreviewWindowController)
+        let second = try XCTUnwrap(manager.open(url))
+        XCTAssertTrue(first === second)
+        XCTAssertEqual(manager.controllers.count, 1)
+    }
 }

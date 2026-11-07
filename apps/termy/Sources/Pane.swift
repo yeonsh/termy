@@ -669,7 +669,7 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         // v1.1: propagate to tab label when informative.
     }
 
-    /// Where a relative markdown or PDF path printed in this pane most likely
+    /// Where a relative markdown, PDF or image path printed in this pane most likely
     /// points: the shell's cwd, then the agent's (hook-reported), then the
     /// shell's repo root. While an agent runs the shell cwd is where it was
     /// launched, which is what it prints paths relative to. The shell goes

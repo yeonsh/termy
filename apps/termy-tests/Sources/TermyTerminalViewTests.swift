@@ -495,6 +495,13 @@ final class TermyTerminalViewTests: XCTestCase {
         )
     }
 
+    func test_linkClickAction_existingImageOpensPreview() {
+        XCTAssertEqual(
+            clickAction("shots/a.png", existing: ["/proj/shots/a.png"]),
+            .preview(URL(fileURLWithPath: "/proj/shots/a.png").resolvingSymlinksInPath())
+        )
+    }
+
     func test_linkClickAction_missingPdfBeeps() {
         XCTAssertEqual(clickAction("out/none.pdf"), .beep)
     }
