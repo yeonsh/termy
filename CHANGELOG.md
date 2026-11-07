@@ -6,6 +6,22 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.2 — 2026-11-07
+
+- Cmd+click an image path in a pane (png, jpg, gif, webp, heic, avif,
+  tiff, bmp, svg) to open it in a termy preview window, just like
+  Markdown and PDF files. Large images shrink to fit the window, small
+  ones show at actual size; pinch to zoom, double-click to switch
+  between fit and actual size. Animated GIFs play, and a checkerboard
+  behind transparent images keeps them visible in dark mode.
+- When an agent rewrites the image, the preview swaps in the new version
+  only once the file is complete; while it is still being written, the
+  previous version stays on screen. File ▸ Show in Finder (⌥⌘R) and the
+  right-click menu reveal the file.
+- `file://` links to images, image links inside a Markdown preview, and
+  images dropped onto a Markdown preview open in a termy image preview
+  too, instead of Preview.app.
+
 ## 0.3.1 — 2026-11-07
 
 - Pressing Esc to cancel a Claude Code turn now stops the pane's THINK
