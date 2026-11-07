@@ -5,8 +5,10 @@
 // and ImageIO reports a half-written PNG or JPEG as complete: NSImage opens
 // it at full size with the rest blank. So completeness comes from per-format
 // end markers (PNG's IEND chunk, JPEG's EOI, GIF's trailer, the sizes in a
-// WebP or BMP header); the formats that open with size 0 when cut off (TIFF,
-// HEIC, AVIF) and SVG have no rule and are left to the decoder. A change
+// WebP or BMP header), and for HEIC/AVIF (ISO-BMFF) the top-level boxes
+// must cover the file exactly, since a cut-off one still opens at full size
+// and draws blank. TIFF opens with size 0 when cut off, and SVG has no
+// rule; both are left to the decoder. A change
 // only swaps in a complete version, the previous image stays up otherwise,
 // and once the file has stopped changing for `settleInterval` we look again
 // without the end-marker rule and only then show a banner if it still won't
@@ -147,6 +149,8 @@ final class ImagePreviewWindowController: NSWindowController, NSWindowDelegate, 
     /// Whether `data` ends the way a finished file of its format does; the
     /// format comes from the leading bytes, not the file name. Formats
     /// without a rule count as finished and are left to the decoder.
+    /// HEIC/AVIF can't be decoded partially, so `image(from:)` applies the
+    /// box rule in both of its modes.
     nonisolated static func hasEndMarker(_ data: Data) -> Bool {
         func byte(_ index: Int) -> UInt8 { data[data.startIndex + index] }
         func littleEndianUInt32(at offset: Int) -> Int {
@@ -169,13 +173,42 @@ final class ImagePreviewWindowController: NSWindowController, NSWindowDelegate, 
         if data.count >= 6, data.starts(with: Data("BM".utf8)) {
             return littleEndianUInt32(at: 2) <= data.count
         }
+        if isISOBMFF(data) {
+            return isoBMFFBoxesCoverData(data)
+        }
         return true
+    }
+
+    /// Walks the top-level ISO-BMFF boxes: complete when they end exactly at
+    /// the end of `data`, or a box runs to EOF (size 0).
+    nonisolated private static func isoBMFFBoxesCoverData(_ data: Data) -> Bool {
+        func bigEndian(at offset: Int, count: Int) -> UInt64 {
+            (0..<count).reduce(0) { $0 << 8 | UInt64(data[data.startIndex + offset + $1]) }
+        }
+        var offset = 0
+        let total = data.count
+        while offset < total {
+            guard total - offset >= 8 else { return false }
+            var size = bigEndian(at: offset, count: 4)
+            if size == 0 { return true }
+            if size == 1 {
+                guard total - offset >= 16 else { return false }
+                size = bigEndian(at: offset + 8, count: 8)
+            }
+            guard size >= 8, size <= UInt64(total - offset) else { return false }
+            offset += Int(size)
+        }
+        return true
+    }
+
+    nonisolated private static func isISOBMFF(_ data: Data) -> Bool {
+        data.count >= 8 && data.dropFirst(4).starts(with: Data("ftyp".utf8))
     }
 
     /// The image in `data` when it decodes to a non-empty size.
     /// `requireEndMarker` also demands a finished file (see the header).
     nonisolated static func image(from data: Data, requireEndMarker: Bool) -> NSImage? {
-        if requireEndMarker, !hasEndMarker(data) { return nil }
+        if requireEndMarker || isISOBMFF(data), !hasEndMarker(data) { return nil }
         guard let image = NSImage(data: data), image.isValid,
               image.size.width > 0, image.size.height > 0 else { return nil }
         return image

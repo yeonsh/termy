@@ -63,6 +63,47 @@ final class ImagePreviewWindowControllerTests: XCTestCase {
         XCTAssertTrue(ImagePreviewWindowController.hasEndMarker(tiff.prefix(10)), "no marker rule for TIFF")
     }
 
+    /// HEIC/AVIF data of a `width`×`height` pattern bitmap, nil when this
+    /// machine can't encode `uti`.
+    private func makeISOBMFF(uti: String, width: Int, height: Int) -> Data? {
+        let png = makeBitmap(width: width, height: height, type: .png)
+        guard let cgImage = NSBitmapImageRep(data: png)?.cgImage else { return nil }
+        let out = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(out, uti as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return out as Data
+    }
+
+    func test_isoBMFFNeedsWholeBoxes() {
+        var checked = 0
+        for uti in ["public.heic", "public.avif"] {
+            guard let full = makeISOBMFF(uti: uti, width: 400, height: 300) else { continue }
+            checked += 1
+            let cut = full.prefix(full.count * 9 / 10)
+            XCTAssertTrue(ImagePreviewWindowController.hasEndMarker(full), uti)
+            XCTAssertFalse(ImagePreviewWindowController.hasEndMarker(cut), uti)
+            XCTAssertNil(ImagePreviewWindowController.image(from: Data(cut), requireEndMarker: false), uti)
+            XCTAssertEqual(ImagePreviewWindowController.image(from: full, requireEndMarker: true)?.size, NSSize(width: 400, height: 300), uti)
+        }
+        XCTAssertGreaterThan(checked, 0, "no ISO-BMFF encoder available")
+    }
+
+    func test_isoBMFFBoxWalk() {
+        func box(_ type: String, size: UInt32, extra: [UInt8] = []) -> Data {
+            Data([UInt8(size >> 24), UInt8((size >> 16) & 255), UInt8((size >> 8) & 255), UInt8(size & 255)]) + Data(type.utf8) + Data(extra)
+        }
+        let ftyp = box("ftyp", size: 12, extra: [0, 0, 0, 0])
+        XCTAssertTrue(ImagePreviewWindowController.hasEndMarker(ftyp))
+        XCTAssertTrue(ImagePreviewWindowController.hasEndMarker(ftyp + box("mdat", size: 0, extra: [1, 2, 3])), "size 0 runs to EOF")
+        let large = Data([0, 0, 0, 1]) + Data("mdat".utf8) + Data([0, 0, 0, 0, 0, 0, 0, 20]) + Data([9, 9, 9, 9])
+        XCTAssertTrue(ImagePreviewWindowController.hasEndMarker(ftyp + large))
+        XCTAssertFalse(ImagePreviewWindowController.hasEndMarker(ftyp + large.dropLast()))
+        XCTAssertFalse(ImagePreviewWindowController.hasEndMarker(ftyp + Data([0, 0, 0, 1, 0x6D, 0x64])), "short largesize")
+        XCTAssertFalse(ImagePreviewWindowController.hasEndMarker(ftyp + box("free", size: 4)), "size below 8")
+        XCTAssertFalse(ImagePreviewWindowController.hasEndMarker(ftyp + Data([0, 0, 0])), "trailing partial header")
+    }
+
     func test_imageFromData() {
         let png = makeBitmap(width: 120, height: 80, type: .png)
         XCTAssertEqual(ImagePreviewWindowController.image(from: png, requireEndMarker: true)?.size, NSSize(width: 120, height: 80))
