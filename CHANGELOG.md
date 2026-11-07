@@ -6,6 +6,21 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.1 — 2026-11-07
+
+- Pressing Esc to cancel a Claude Code turn now stops the pane's THINK
+  bar right away. Panes that run directly in termy (not in herdr-core)
+  kept the bar bouncing until the next prompt, because Claude sends no
+  hook when you cancel. termy now answers Claude's status query the way
+  herdr-core does and follows the status Claude reports.
+- Cancelling with Esc is quiet: the pane goes straight to IDLE instead of
+  WAIT, with no chime or dock bounce. herdr-core panes used to chime on
+  Esc. A turn that finishes on its own still chimes.
+- An update relaunch is no longer held back by a Claude turn you
+  cancelled with Esc.
+- nvim in a herdr-core pane no longer garbles long lines after you
+  reattach (toggling NERDTree, opening a tab).
+
 ## 0.3.0 — 2026-11-02
 
 - Panes can now run in herdr-core, so the agents in them outlive termy.
