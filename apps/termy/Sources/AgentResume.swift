@@ -37,6 +37,10 @@ enum AgentResumeCommand {
             words = ["agy", "--conversation", id] + flags
         case .opencode:
             words = ["opencode", "--session", id] + flags
+        case .pi:
+            // pi 1.5.0 `pi --session <path|id>`. 아직 도달하지 않는다: 7501 보고에 session id가 없어
+            // AgentResumeCapture가 기록을 만들지 못한다(spec D4).
+            words = ["pi", "--session", id] + flags
         }
         return words.joined(separator: " ")
     }

@@ -52,6 +52,14 @@ final class AgentResumeCommandTests: XCTestCase {
         )
     }
 
+    // pi는 아직 재개 기록을 만들지 않는다(7501 보고에 session id가 없다). 그래도 명령은 정해 둔다.
+    func test_pi_usesSessionFlag() {
+        XCTAssertEqual(
+            AgentResumeCommand.make(record(.pi, id: "019a-uuid")),
+            "pi --session 019a-uuid"
+        )
+    }
+
     // Review Focus 3
     func test_quotesToolPatternWithSpacesAndParens() {
         let r = record(.claude, id: "s1", flags: ["--allowedTools", "Bash(git log:*)", "Edit"])

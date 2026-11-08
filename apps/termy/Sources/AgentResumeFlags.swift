@@ -69,7 +69,7 @@ enum AgentResumeFlags {
         case .claude:      table = claude
         case .codex:       table = codex
         case .antigravity: table = antigravity
-        case .opencode:    table = [:]
+        case .opencode, .pi: table = [:]
         }
         var kept: [String] = []
         var i = 0

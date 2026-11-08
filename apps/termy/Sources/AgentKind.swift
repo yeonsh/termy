@@ -6,7 +6,7 @@
 //
 // Wire format: HookEvent's existing `agent: String` field carries the raw
 // label written by termy-hook ("claude-code", "codex", "antigravity",
-// "opencode", "termy" for synthetic events). `AgentKind.from(rawAgent:)` is
+// "opencode", "pi", "termy" for synthetic events). `AgentKind.from(rawAgent:)` is
 // the central place that maps those strings to a typed enum — anything
 // unrecognized falls back to `.claude` since that's the dominant install today.
 
@@ -17,6 +17,7 @@ enum AgentKind: String, Sendable, Codable, Hashable {
     case codex
     case antigravity
     case opencode
+    case pi
 
     /// Wire-level `agent` string emitted by termy-hook and synthetic session events.
     var wireName: String {
@@ -25,6 +26,7 @@ enum AgentKind: String, Sendable, Codable, Hashable {
         case .codex:       return "codex"
         case .antigravity: return "antigravity"
         case .opencode:    return "opencode"
+        case .pi:          return "pi"
         }
     }
 
@@ -35,6 +37,7 @@ enum AgentKind: String, Sendable, Codable, Hashable {
         case .codex:       return "Codex"
         case .antigravity: return "Antigravity"
         case .opencode:    return "OpenCode"
+        case .pi:          return "Pi"
         }
     }
 
@@ -48,6 +51,7 @@ enum AgentKind: String, Sendable, Codable, Hashable {
         case "codex":                return .codex
         case "antigravity", "agy":   return .antigravity
         case "opencode":             return .opencode
+        case "pi":                   return .pi
         default:                     return nil
         }
     }

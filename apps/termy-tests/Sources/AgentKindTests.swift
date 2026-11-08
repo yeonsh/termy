@@ -24,6 +24,15 @@ final class AgentKindTests: XCTestCase {
         XCTAssertEqual(AgentKind.from(rawAgent: "agy"), .antigravity)
     }
 
+    func test_from_pi_returnsPi() {
+        XCTAssertEqual(AgentKind.from(rawAgent: "pi"), .pi)
+    }
+
+    func test_pi_wireName_and_displayName() {
+        XCTAssertEqual(AgentKind.pi.wireName, "pi")
+        XCTAssertEqual(AgentKind.pi.displayName, "Pi")
+    }
+
     func test_wireName_and_displayName() {
         XCTAssertEqual(AgentKind.claude.wireName, "claude-code")
         XCTAssertEqual(AgentKind.claude.displayName, "Claude")
