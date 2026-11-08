@@ -48,7 +48,12 @@ pi는 이 저장소의 작업을 실제로 돌리는 agent 중 하나다(이 세
 | `state=idle` | 시작 직후, 사용자가 취소(Esc) | `msg` 없음 |
 
 - 모든 보고에 `app=pi`가 붙는다(`APP_NAME`).
-- 종결 보고 뒤 `state=clear`는 보내지 않는다(프로세스 종료는 `PtyExit`가 닫는다).
+- 지원 질의는 **ST 종결**(`ESC ] 7501 ; ? ST`)이고 termy의 `ProgramStatusOSC.probeReply`는 **BEL 종결**이다. pi의
+  `isProgramStatusReply` 정규식이 둘 다 받으므로 termy 답으로 보고가 시작된다(2026-11-08 소스 확인).
+- 프로세스가 정상 종료할 때 `ProcessTerminal.stop()`이 `state=clear`를 보낸다(지원된 경우). **2026-11-08 정정:**
+  처음 이 문서를 쓸 때 "clear를 보내지 않는다"고 적었으나 소스 확인 결과 틀렸다. termy는 `clear`를
+  `applyProgramStatus(nil)`로 받아 `programStatusActive`만 끄고 상태는 `SessionEnd`/`PtyExit`가 닫는다 — 동작
+  문제는 없다.
 - 터미널이 지원 질의에 답한 뒤에만 보고한다(`PI_PROGRAM_STATUS=0`으로 끄거나 `1`로 강제 가능).
   termy의 `ProgramStatusOSC.probeReply`가 광고하는 `states` · `kinds` 어휘가 pi가 쓰는 값과 정확히 같다.
 
@@ -56,8 +61,10 @@ pi는 이 저장소의 작업을 실제로 돌리는 agent 중 하나다(이 세
 
 1. `Pane.startShell`이 7501 handler를 켜지만 `accepts()`가 `localForegroundAgent() != nil`을 요구한다
    (`Pane.swift:354`). 이 값은 `ForegroundProcessWatcher.classifyAgent`의 결과다.
-2. `pi`는 shebang 스크립트(`#!/usr/bin/env node`)라 `proc_name`이 **`node`**, argv[0]이 **`pi`**로 온다(실측:
-   pid 23766 · 68829 → `proc_name` = `node`, `KERN_PROCARGS2` argv[0] = `pi`). `classifyAgent`는 `pi`를 모르므로
+2. `pi`는 shebang 스크립트(`#!/usr/bin/env node`)라 libproc `proc_name`이 **`node`**, argv[0]이 **`pi`**로 온다(실측:
+   pid 23766 · 68829 → `proc_name()` = `node`, `KERN_PROCARGS2` argv[0] = `pi`). 참고: 같은 프로세스도 `ps -o comm`은
+   `pi`로 보여 준다(ps가 argv[0]에서 이름을 만든다) — termy는 `proc_name`을 쓰므로 전자다. 두 모양 모두 분류기가
+   처리한다(4.2). `classifyAgent`는 `pi`를 모르므로
    `nil`이다.
 3. 그래서 pi의 7501 보고가 **버려지고**(`status == nil || accepts()`), synthetic SessionStart도 없다.
    칩 · 알림 · 타이틀 애니메이션이 모두 꺼진 상태다.
