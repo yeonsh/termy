@@ -43,6 +43,7 @@
 //   *(7501)     ──(done, turn open)───────────────▶ WAITING ♪ (→ IDLE after 30s)
 //   *(7501)     ──(idle, turn open)───────────────▶ IDLE (Esc interrupt, no chime)
 //   *(7501)     ──(error)─────────────────────────▶ ERRORED
+//   *(7501, app=pi) shares the lines above — pi reports idle only on cancel too.
 //   7501 comes from herdr-core events (hc panes) or the pane's own OSC
 //   handler (local panes). While it is active, hooks fill details only.
 //
@@ -180,6 +181,10 @@ enum PaneStateMachine {
     /// informational-notification overwrite and the idle_prompt stale clear.
     private static let blockingReasons: Set<String> = ["permission", "mcp_elicit", "ask_user_question"]
 
+    /// 7501 `idle`이 열린 turn을 닫는 것을 "사용자 취소"로 해석하는 앱.
+    /// 둘 다 정상 종료는 `done`으로 보낸다(Claude Code 2.1.319 · pi 1.5.0 실측).
+    private static let idleMeansCancelApps: Set<String> = ["claude-code", "pi"]
+
     /// Matches interactive user-question tools across agents:
     /// Claude Code / Codex (`AskUserQuestion`) and Antigravity (`ask_question`).
     private static func isAskUserQuestionTool(_ toolName: String?) -> Bool {
@@ -232,8 +237,10 @@ enum PaneStateMachine {
             let source: WaitSource = status.kind == "question" ? .askUserQuestion : .permission
             finish(.waiting, attention: true, reason: status.kind ?? "permission", source: source, turnOpen: true)
         case "done", "idle":
-            if status.state == "idle", previous.turnOpen, status.app == "claude-code" {
-                // (Claude 전용: Claude는 done으로 끝내고 interrupt에만 idle을 보낸다. 다른 agent는 working -> idle이 정상 종료다.)
+            if status.state == "idle", previous.turnOpen, let app = status.app,
+               Self.idleMeansCancelApps.contains(app) {
+                // (Claude Code와 pi 전용: 둘 다 done으로 끝내고 interrupt에만 idle을 보낸다(pi 1.5.0도 정상 종료는
+                // done, 취소에서만 idle). 다른 agent는 working -> idle이 정상 종료다.)
                 // 열린 turn을 idle이 닫으면 사용자가 끊은 것이다(Claude는 Esc 뒤 약 70ms에 idle을 보낸다. 권한
                 // 프롬프트에서도 같다). 정상 종료는 done이다. 그 pane을 보고 있는 사용자가 한 일이므로 알리지 않는다
                 // (opencode interrupted와 같은 규칙). Esc에는 Stop hook이 없어 local pane도 이 경로로만 안다.

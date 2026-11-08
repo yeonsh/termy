@@ -4,6 +4,7 @@ import XCTest
 final class PaneProgramStatusTests: XCTestCase {
     private func base() -> PaneSnapshot { .empty(paneId: "P", projectId: "app", agentKind: .claude) }
     private func st(_ s: String, kind: String? = nil) -> HcStatus { HcStatus(state: s, kind: kind, msg: nil, app: "claude-code") }
+    private func pi(_ s: String, kind: String? = nil) -> HcStatus { HcStatus(state: s, kind: kind, msg: nil, app: "pi") }
     private func obs(_ s: PaneSnapshot) -> WaitAlertRule.Observation { .init(state: s.state, sessionId: nil) }
     private func hook(_ kind: HookEventKind, _ edit: (inout HookEvent.Meta) -> Void = { _ in }) -> HookEvent {
         var m = HookEvent.Meta(); edit(&m)
@@ -104,6 +105,51 @@ final class PaneProgramStatusTests: XCTestCase {
         XCTAssertFalse(n.turnOpen)
         XCTAssertTrue(WaitAlertRule.shouldAlert(previous: obs(w), next: obs(n)))
     }
+
+    func testPiIdleOnOpenTurnIsSilentIdle() {
+        let w = PaneStateMachine.applyProgramStatus(pi("working"), to: base(), now: Date())
+        let n = PaneStateMachine.applyProgramStatus(pi("idle"), to: w, now: Date())
+        XCTAssertEqual(n.state, .idle)
+        XCTAssertFalse(n.turnOpen)
+        XCTAssertFalse(n.needsAttention)
+        XCTAssertNil(n.notificationReason)
+        XCTAssertFalse(WaitAlertRule.shouldAlert(previous: obs(w), next: obs(n)))
+    }
+
+    func testPiWorkingThenDoneAlerts() {
+        let w = PaneStateMachine.applyProgramStatus(pi("working"), to: base(), now: Date())
+        let d = PaneStateMachine.applyProgramStatus(pi("done"), to: w, now: Date())
+        XCTAssertEqual(d.state, .waiting)
+        XCTAssertEqual(d.waitSource, .turnEnd)
+        XCTAssertTrue(WaitAlertRule.shouldAlert(previous: obs(w), next: obs(d)))
+    }
+
+    func testPiBlockedQuestionWaitsForAnswer() {
+        let n = PaneStateMachine.applyProgramStatus(pi("blocked", kind: "question"), to: base(), now: Date())
+        XCTAssertEqual(n.state, .waiting)
+        XCTAssertEqual(n.waitSource, .askUserQuestion)
+        XCTAssertTrue(n.needsAttention)
+    }
+
+    func testPiBlockedAuthKeepsReason() {
+        let n = PaneStateMachine.applyProgramStatus(pi("blocked", kind: "auth"), to: base(), now: Date())
+        XCTAssertEqual(n.waitSource, .permission)
+        XCTAssertEqual(n.notificationReason, "auth")
+    }
+
+    func testPiSessionStartAfterWorkingKeepsThinking() {
+        // foreground watcher의 synthetic SessionStart는 7501 working보다 최대 1초 늦다.
+        // pi는 Claude 그룹이라 hard reset 하지 않는다 (spec 4.3).
+        let w = PaneStateMachine.applyProgramStatus(pi("working"), to: base(), now: Date())
+        let start = HookEvent(
+            event: .sessionStart, paneId: "P", projectId: "app", ts: 2,
+            agent: "pi", meta: HookEvent.Meta()
+        )
+        let n = PaneStateMachine.apply(start, to: w)
+        XCTAssertEqual(n.state, .thinking)
+        XCTAssertEqual(n.agentKind, .pi)
+    }
+
     func testWorkingThenDoneAlerts() {
         let w = PaneStateMachine.applyProgramStatus(st("working"), to: base(), now: Date())
         let d = PaneStateMachine.applyProgramStatus(st("done"), to: w, now: Date())
