@@ -337,7 +337,7 @@ Claude Code ──hook───▶ termy-hook --agent claude-code ─┐
 Codex CLI   ──hook───▶ termy-hook --agent codex       ─┤
 OpenCode    ──plugin─▶ termy-hook --agent opencode    ─┼─ unix socket ─▶ HookDaemon (in-app actor)
 Antigravity ──hook───▶ termy-hook --agent antigravity ─┘                        │
-pi          ──OSC 7501─▶ pane terminal (accepts only while fg is an agent) ─┐
+pi          ──OSC 7501─▶ pane terminal (in-process, fg must be an agent) ───────┤
                                                                                 ▼
                                                                        ┌─────────────────┐
                                                                        ▼                 ▼
