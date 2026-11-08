@@ -86,6 +86,60 @@ final class ForegroundProcessWatcherTests: XCTestCase {
         )
     }
 
+    func test_classifyAgent_pi() {
+        XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "pi"), .pi)
+        XCTAssertEqual(ForegroundProcessWatcher.classifyAgent(by: "PI"), .pi)
+    }
+
+    func test_classifyAgent_piExactNameOnly() {
+        // `pi`는 짧은 이름이라 접두사 매칭을 쓰지 않는다 (spec 4.2).
+        for name in ["piano", "pi-web", "pip", "spipe"] {
+            XCTAssertNil(ForegroundProcessWatcher.classifyAgent(by: name), "name: \(name)")
+        }
+    }
+
+    func test_classifyAgent_nodeBackedPiEntrypoint() {
+        // 실측: pi는 shebang 스크립트라 proc_name = node, argv[0] = "pi" (spec 3.2).
+        XCTAssertEqual(
+            ForegroundProcessWatcher.classifyAgent(processName: "node", arguments: ["pi"]),
+            .pi
+        )
+    }
+
+    func test_classifyAgent_nodeBackedPiPackage() {
+        XCTAssertEqual(
+            ForegroundProcessWatcher.classifyAgent(
+                processName: "bun",
+                arguments: [
+                    "/Users/me/.bun/bin/bun",
+                    "/Users/me/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+                ]
+            ),
+            .pi
+        )
+    }
+
+    func test_classifyAgent_piAsLaterArgumentIsNotAgent() {
+        // Review Focus 2: `node server.js pi`의 `pi`는 entrypoint가 아니다.
+        XCTAssertNil(
+            ForegroundProcessWatcher.classifyAgent(
+                processName: "node",
+                arguments: ["/usr/bin/node", "server.js", "pi"]
+            )
+        )
+    }
+
+    func test_agentEntrypoint_piAtArgv0() {
+        XCTAssertEqual(
+            ForegroundProcessWatcher.agentEntrypoint(in: ["pi", "--model", "anthropic/claude"])?.index,
+            0
+        )
+        XCTAssertEqual(
+            ForegroundProcessWatcher.agentEntrypoint(in: ["pi", "--model", "x"])?.kind,
+            .pi
+        )
+    }
+
     func test_classifyAgent_nodeBackedClaudePackage() {
         XCTAssertEqual(
             ForegroundProcessWatcher.classifyAgent(

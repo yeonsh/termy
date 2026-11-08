@@ -2,7 +2,7 @@
 //
 // Per-pane poller that watches which binary owns the foreground process
 // group of each pane's PTY, and synthesizes SessionStart / SessionEnd
-// events when known agent CLIs (`claude`, `codex`, `agy`, `opencode`) enter
+// events when known agent CLIs (`claude`, `codex`, `agy`, `opencode`, `pi`) enter
 // or leave that foreground PG.
 //
 // Why we need this:
@@ -227,6 +227,7 @@ actor ForegroundProcessWatcher {
         if normalized == "opencode" || normalized.hasPrefix("opencode-") {
             return .opencode
         }
+        if normalized == "pi" { return .pi }
         if normalized == "claude" || normalized.hasPrefix("claude-") {
             return .claude
         }
@@ -262,6 +263,11 @@ actor ForegroundProcessWatcher {
             }
             if basename == "opencode" || basename.hasPrefix("opencode-") {
                 return (index, .opencode)
+            }
+            // `pi`는 짧은 이름이라 argv[0]에서만 받는다. 그 밖의 위치는 npm 패키지 경로일 때만 인정한다.
+            if (basename == "pi" && index == 0)
+                || normalized.contains("@earendil-works/pi-coding-agent") {
+                return (index, .pi)
             }
             if basename == "claude"
                 || basename.hasPrefix("claude-")
