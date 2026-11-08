@@ -4,7 +4,7 @@
 
 <h1 align="center">termy</h1>
 
-<p align="center"><strong>Mission control for Claude Code, Codex, OpenCode &amp; Antigravity.</strong></p>
+<p align="center"><strong>Mission control for Claude Code, Codex, OpenCode, Antigravity &amp; pi.</strong></p>
 
 <p align="center">
   A native macOS terminal for running coding agents side by side —<br/>
@@ -29,11 +29,11 @@
 
 ## Why termy
 
-Running N coding agents — Claude Code, Codex CLI, OpenCode, Antigravity CLI, or
-any mix — in a stock terminal turns into tab roulette: which session is blocked
-on a permission prompt, which is mid-tool, which already finished? You end up
-Cmd-Tabbing through windows, scanning panes, and missing the one that was
-waiting on you five minutes ago.
+Running N coding agents — Claude Code, Codex CLI, OpenCode, Antigravity CLI,
+pi, or any mix — in a stock terminal turns into tab roulette: which session is
+blocked on a permission prompt, which is mid-tool, which already finished? You
+end up Cmd-Tabbing through windows, scanning panes, and missing the one that
+was waiting on you five minutes ago.
 
 **termy pulls that state out of the panes and into a glanceable dashboard.**
 Every running agent gets a chip at the bottom of the window with its live
@@ -80,9 +80,9 @@ folder itself is never touched.
 ## A dashboard for every agent
 
 The strip along the bottom of the window is one chip per running agent —
-Claude Code, Codex CLI, OpenCode, or Antigravity CLI, mixed freely. Each chip
-shows **project / branch** and a live state. While an agent works, a bar in the
-project's color slides along that pane's header.
+Claude Code, Codex CLI, OpenCode, Antigravity CLI, or pi, mixed freely. Each
+chip shows **project / branch** and a live state. While an agent works, a bar in
+the project's color slides along that pane's header.
 
 <p align="center">
   <img src="docs/screenshots/dashboard-0.png" width="760" alt="Dashboard row showing WAIT, WAIT, THINK, and IDLE states" />
@@ -153,9 +153,10 @@ PDFs, open there too — even when the filename has spaces or parentheses.
 
 ## What else you get
 
-- **Four agents, one dashboard.** Claude Code, Codex CLI, OpenCode, and
-  Antigravity CLI — mixed freely in the same window. Each integration installs
-  from the termy menu and reports live state through hooks or a plugin. A
+- **Five agents, one dashboard.** Claude Code, Codex CLI, OpenCode, Antigravity
+  CLI, and pi — mixed freely in the same window. Every integration except pi
+  installs from the termy menu and reports live state through hooks or a
+  plugin. pi needs no install — it reports its own state over OSC 7501. A
   `WAIT` flip pings macOS even when termy is in the background.
 - **Workspace that survives.** Splits, project grouping, and cwd are all
   persisted per project. Pick a project in <kbd>⌘</kbd><kbd>K</kbd> and termy
@@ -163,8 +164,9 @@ PDFs, open there too — even when the filename has spaces or parentheses.
 - **Updates that wait for you.** *Install and Relaunch* waits while an agent is
   mid-turn, then restarts once every agent has finished. Claude Code, Codex,
   and Antigravity conversations reopen in place (`claude --resume`,
-  `codex resume`, `agy --conversation`), flags included. In a hurry, choose
-  <kbd>termy</kbd> ▸ *Restart Now to Install Update*.
+  `codex resume`, `agy --conversation`), flags included. pi conversations are
+  not resumed yet. In a hurry, choose <kbd>termy</kbd> ▸ *Restart Now to Install
+  Update*.
 - **One window per monitor.** <kbd>⌘</kbd><kbd>N</kbd> opens an independent
   window — its own pane grid, project filter, and split behaviour.
 - **Quit and come back.** Relaunch and every window returns — frames,
@@ -335,6 +337,7 @@ Claude Code ──hook───▶ termy-hook --agent claude-code ─┐
 Codex CLI   ──hook───▶ termy-hook --agent codex       ─┤
 OpenCode    ──plugin─▶ termy-hook --agent opencode    ─┼─ unix socket ─▶ HookDaemon (in-app actor)
 Antigravity ──hook───▶ termy-hook --agent antigravity ─┘                        │
+pi          ──OSC 7501─▶ pane terminal (accepts only while fg is an agent) ─┐
                                                                                 ▼
                                                                        ┌─────────────────┐
                                                                        ▼                 ▼
@@ -355,7 +358,7 @@ Antigravity ──hook───▶ termy-hook --agent antigravity ─┘        
   Antigravity invoke per hook event; OpenCode's plugin spawns it too. It
   slims the payload and sends one JSON line over `/tmp/termy-$UID.sock`.
   It always exits `0` and times out writes after 100 ms, so it cannot stall
-  an agent.
+  an agent. pi does not use it — pi reports its own state over OSC 7501.
 - **`HookDaemon`** is an actor that receives those events. They flow through
   **`PaneStateMachine`**, the pure reducer covered by 870+ unit tests —
   including Claude Code's permission, question, and MCP-tool approval events.
@@ -371,7 +374,7 @@ Antigravity ──hook───▶ termy-hook --agent antigravity ─┘        
 - **Synthetic `PtyExit`** fills the gap hooks can't — hard crashes (Ctrl+C
   mid-response, SIGKILL) fire no hook, so termy emits a synthetic event on
   PTY EOF. A 1 Hz foreground-process watcher does the same when `claude`,
-  `codex`, `opencode`, or `agy` leaves a pane.
+  `codex`, `opencode`, `agy`, or `pi` leaves a pane.
 - **Codex hook coverage caveat.** Claude Code emits a `Notification` hook the
   moment it stops for input; Codex doesn't. `PermissionRequest` only fires
   for explicit asks, not the general "I'm waiting on you" pauses reasoning
@@ -383,13 +386,15 @@ Antigravity ──hook───▶ termy-hook --agent antigravity ─┘        
 
 Shipping. The core loop is working end-to-end:
 
-- Four agents end-to-end — Claude Code, Codex CLI, OpenCode, and Antigravity CLI
+- Five agents end-to-end — Claude Code, Codex CLI, OpenCode, Antigravity CLI,
+  and pi (OSC 7501, no install)
 - Live dashboard with `THINK` / `WAIT` / `IDLE` / `ERR`, notifications, and
   <kbd>⌘</kbd><kbd>G</kbd> navigation
 - SwiftTerm panes with OSC 7 cwd tracking, splits, mouse-aware TUIs, and
   <kbd>⌘</kbd>-click URLs
 - Markdown and PDF previews with live updates, drag-to-open, and Show in Finder
-- Hook daemon + `termy-hook` + non-destructive installers for every integration
+- Hook daemon + `termy-hook` + non-destructive installers for every hook-based
+  integration
 - Workspace autosave, multi-window dashboard, and full session restore
 - Project chips you can reorder and prune, per-project accents, and
   <kbd>⌘</kbd><kbd>1</kbd>–<kbd>⌘</kbd><kbd>9</kbd> filters
