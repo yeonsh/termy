@@ -6,6 +6,19 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.3 — 2026-11-09
+
+- Panes running **pi** (`@earendil-works/pi-coding-agent` 1.5.0+) now get the
+  same live state as the other agents: the status chip, the bouncing THINK
+  bar, and macOS notifications follow the state pi reports about itself over
+  OSC 7501. There is nothing to install — pi reports to the terminal, and
+  termy answers that query. termy now recognizes the `pi` process (including
+  the `node` + `pi` argv shape it launches as) as an agent, so the foreground
+  watcher also closes the pane when pi exits.
+- Esc in a pi pane cancels quietly to IDLE, the same as Claude Code; a turn
+  that finishes on its own goes to WAIT and chimes.
+- pi conversations are not reopened after an update relaunch yet.
+
 ## 0.3.2 — 2026-11-07
 
 - Cmd+click an image path in a pane (png, jpg, gif, webp, heic, avif,
