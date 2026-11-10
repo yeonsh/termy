@@ -109,6 +109,9 @@ final class WindowManager {
     /// nothing written during shutdown replaces it. The next launch reopens
     /// those conversations (`MainWindowController.applySessionLayout`).
     func prepareForUpdateRelaunch() {
+        // ⌘Q 확인은 이 경로에서 묻지 않는다. Sparkle은 진작 재시작을 진행 중이고,
+        // 붙잡을 일이 있으면 게이트(UpdateRelaunchGate)가 따로 묻는다.
+        AppLifecycle.isRelaunchingForUpdate = true
         guard let sessionPersistence else { return }
         let records = controllers.compactMap { $0.sessionWindowRecord(includeAgentResume: true) }
         do {

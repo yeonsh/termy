@@ -43,6 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSApp.setActivationPolicy(.regular)
         AppAppearancePreference.applyStoredPreference()
         installMenuBar()
+        // 로그아웃/시스템 종료로 앱이 끝나는 길에는 확인 창을 띄우지 않는다
+        // (모달이 로그아웃을 붙잡는다). XCTest 토스트에서는 플래그를 쓸 일이 없지만
+        // 관찰 등록 자체는 부작용이 없다.
+        QuitConfirmation.observePowerOff(center: NSWorkspace.shared.notificationCenter)
 
         // Everything below touches state the user's real termy owns, so it is
         // skipped when termy.app is merely the XCTest host — the real app is
@@ -115,7 +119,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// ⌘Q, Sparkle 업데이트 재시작, 로그아웃, 마지막 창 닫기 모두 여기를 지난다. 이 뒤로 정리되는 창과 pane은
     /// hc terminal을 끝내지 않는다(다음 실행 때 다시 붙는다). 마지막 창 닫기는 창이 먼저 닫히며 이미 kill했다.
+    /// 확인 창은 사용자의 ⌘Q에서만 뜬다 — 그 판단은 `QuitConfirmation.shouldAsk`가 한다.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let context = QuitConfirmation.context(windowManager: windowManager)
+        guard QuitConfirmation.shouldAsk(context) else {
+            AppLifecycle.isTerminating = true
+            return .terminateNow
+        }
+        // 확인을 받기 전에는 isTerminating을 켜지 않는다. 켜 두면 모달에서 Cancel을 눌렀을 때
+        // 앱은 살아 있는데 hc 정리 동작이 "종료 중"으로 갈라진다.
+        guard QuitConfirmation.presentAlert() else { return .terminateCancel }
         AppLifecycle.isTerminating = true
         return .terminateNow
     }

@@ -1,6 +1,7 @@
 import XCTest
 @testable import termy
 
+@MainActor
 final class QuitConfirmationTests: XCTestCase {
     private func context(
         xctest: Bool = false,
@@ -57,5 +58,36 @@ final class QuitConfirmationTests: XCTestCase {
         XCTAssertFalse(QuitSettings.askBeforeQuit(defaults))
         QuitSettings.setAskBeforeQuit(true, defaults)
         XCTAssertTrue(QuitSettings.askBeforeQuit(defaults))
+    }
+
+    // protects=Cancel/Esc/창 닫기; fails_when=두 번째 버튼이 아닌 응답이 종료로 처리된다
+    func test_onlySecondButtonQuits() {
+        XCTAssertTrue(QuitConfirmation.responseQuits(.alertSecondButtonReturn))
+        XCTAssertFalse(QuitConfirmation.responseQuits(.alertFirstButtonReturn))
+        XCTAssertFalse(QuitConfirmation.responseQuits(.abort))
+        XCTAssertFalse(QuitConfirmation.responseQuits(.stop))
+    }
+
+    // protects=로그아웃/시스템 종료; fails_when=willPowerOff 알림이 플래그를 켜지 않는다
+    func test_powerOffNotification_setsFlag() {
+        AppLifecycle.isPoweringOff = false
+        let center = NotificationCenter()
+        QuitConfirmation.observePowerOff(center: center)
+        center.post(name: NSWorkspace.willPowerOffNotification, object: nil)
+        XCTAssertTrue(AppLifecycle.isPoweringOff)
+        AppLifecycle.isPoweringOff = false
+    }
+
+    // protects=업데이트 재시작; fails_when=prepareForUpdateRelaunch가 플래그를 켜지 않는다
+    func test_prepareForUpdateRelaunch_setsFlag() {
+        AppLifecycle.isRelaunchingForUpdate = false
+        let manager = WindowManager(
+            sessionPersistence: nil,
+            workspacePersistence: { nil },
+            defaults: InMemoryUserDefaults()
+        )
+        manager.prepareForUpdateRelaunch()
+        XCTAssertTrue(AppLifecycle.isRelaunchingForUpdate)
+        AppLifecycle.isRelaunchingForUpdate = false
     }
 }

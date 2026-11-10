@@ -10,6 +10,13 @@ import Foundation
 enum AppLifecycle {
     @MainActor static var isTerminating = false
 
+    /// Sparkle이 업데이트를 설치하려 앱을 다시 띄우는 중. ⌘Q 확인을 건너뛴다.
+    @MainActor static var isRelaunchingForUpdate = false
+
+    /// 사용자가 로그아웃/시스템 종료를 요청했다(`willPowerOffNotification`).
+    /// 그 뒤에 오는 종료 요청에 모달을 띄우면 로그아웃이 붙잡힌다.
+    @MainActor static var isPoweringOff = false
+
     /// `work`가 끝나거나 `timeout`이 지날 때까지 main run loop를 돌린다. 끝났으면 true.
     /// main queue의 block 안(GCD callout)에서 부르면 run loop가 main queue를 비우지 않으므로 그때는 timeout까지 기다린다.
     @MainActor @discardableResult
