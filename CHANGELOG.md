@@ -6,6 +6,10 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+- Settings… (⌘,) can now mute termy's alert sound. The dock badge, dock
+  bounce, and notification banner still land; only the chime and the
+  banner's sound are silenced.
+
 ## 0.3.3 — 2026-11-09
 
 - Panes running **pi** (`@earendil-works/pi-coding-agent` 1.5.0+) now get the

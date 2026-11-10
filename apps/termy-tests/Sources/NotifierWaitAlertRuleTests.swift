@@ -39,3 +39,22 @@ final class NotifierWaitAlertRuleTests: XCTestCase {
         XCTAssertTrue(WaitAlertRule.shouldAlert(previous: obs(.thinking, "s1"), next: obs(.waiting, nil)))
     }
 }
+
+// The Settings panel writes this flag; Notifier reads it on the next WAIT.
+// Defaults on, and "off" must survive a fresh read so pressing ⌘, again shows
+// the checkmark the user left.
+final class AlertSoundSettingTests: XCTestCase {
+    func test_soundIsOnByDefault() {
+        XCTAssertTrue(AlertSettings.soundEnabled(InMemoryUserDefaults()))
+    }
+
+    func test_mutingPersists() {
+        let d = InMemoryUserDefaults()
+        AlertSettings.setSoundEnabled(false, d)
+        XCTAssertFalse(AlertSettings.soundEnabled(d))
+        XCTAssertEqual(d.object(forKey: AlertSettings.soundEnabledKey) as? Bool, false)
+
+        AlertSettings.setSoundEnabled(true, d)
+        XCTAssertTrue(AlertSettings.soundEnabled(d))
+    }
+}

@@ -1,6 +1,7 @@
 // FontSettingsPanel.swift
 //
-// ⌘, panel for picking the terminal font. Two pickers and a size stepper:
+// ⌘, panel for the terminal font, alert sound, and herdr-core. Two pickers
+// and a size stepper:
 //
 //   ┌────────────────────────────────────────┐
 //   │  Terminal font                         │
@@ -30,14 +31,16 @@ final class FontSettingsPanel: NSPanel {
     private var previewLabel: NSTextField!
     private var hcCheckbox: NSButton!
     private var hcStatusLabel: NSTextField!
+    private var soundCheckbox: NSButton!
     private let hcDefaults = UserDefaults.standard
+    private let alertDefaults = UserDefaults.standard
     private var hcStatusGeneration = 0
 
     private static let sizeChoices: [CGFloat] = [10, 11, 12, 13, 14, 15, 16, 18, 20, 24]
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 360),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 432),
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -180,6 +183,22 @@ final class FontSettingsPanel: NSPanel {
         ])
         // Theme-aware colors set in applyTheme().
 
+        let alertsHeader = NSTextField(labelWithString: "Alerts")
+        alertsHeader.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        alertsHeader.textColor = .labelColor
+        alertsHeader.translatesAutoresizingMaskIntoConstraints = false
+        soundCheckbox = NSButton(
+            checkboxWithTitle: "Play a sound when an agent needs you",
+            target: self,
+            action: #selector(soundCheckboxChanged(_:))
+        )
+        soundCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        let alertsStack = NSStackView(views: [alertsHeader, soundCheckbox])
+        alertsStack.orientation = .vertical
+        alertsStack.alignment = .leading
+        alertsStack.spacing = 8
+        alertsStack.translatesAutoresizingMaskIntoConstraints = false
+
         hcCheckbox = NSButton(checkboxWithTitle: "Run local panes in herdr-core", target: self, action: #selector(hcCheckboxChanged(_:)))
         hcCheckbox.translatesAutoresizingMaskIntoConstraints = false
         hcStatusLabel = NSTextField(labelWithString: "")
@@ -212,6 +231,7 @@ final class FontSettingsPanel: NSPanel {
         content.addSubview(separator)
         content.addSubview(grid)
         content.addSubview(previewBox)
+        content.addSubview(alertsStack)
         content.addSubview(hcStack)
         content.addSubview(buttonRow)
 
@@ -236,7 +256,11 @@ final class FontSettingsPanel: NSPanel {
             previewBox.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             previewBox.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
 
-            hcStack.topAnchor.constraint(equalTo: previewBox.bottomAnchor, constant: 18),
+            alertsStack.topAnchor.constraint(equalTo: previewBox.bottomAnchor, constant: 18),
+            alertsStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            alertsStack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
+
+            hcStack.topAnchor.constraint(equalTo: alertsStack.bottomAnchor, constant: 16),
             hcStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             hcStack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
 
@@ -292,6 +316,7 @@ final class FontSettingsPanel: NSPanel {
         }
 
         refreshPreview()
+        soundCheckbox.state = AlertSettings.soundEnabled(alertDefaults) ? .on : .off
         hcCheckbox.state = HcFeatureSettings.localPanesEnabled(hcDefaults) ? .on : .off
     }
 
@@ -340,6 +365,10 @@ final class FontSettingsPanel: NSPanel {
             cjkFallbackName: name
         )
         refreshPreview()
+    }
+
+    @objc private func soundCheckboxChanged(_ sender: NSButton) {
+        AlertSettings.setSoundEnabled(sender.state == .on, alertDefaults)
     }
 
     /// 켤 때 herdr-core가 없으면 설치를 권하고, 설치하지 않으면 체크를 되돌린다. 이미 열린 pane은 그대로다.

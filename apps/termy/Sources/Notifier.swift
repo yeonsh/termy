@@ -9,11 +9,12 @@
 //   1. Dock badge — shows the count of WAITING panes. TCC-free, persists
 //      until the badge count drops to zero.
 //   2. Sound — `NSSound(named: "Glass")` on every fresh WAIT transition.
-//      TCC-free; the user can mute system alerts if they want it silent.
+//      TCC-free; the user can turn it off in Settings… (⌘,).
 //   3. Dock bounce — `requestUserAttention` pings the dock icon when termy
 //      is not the frontmost app. No-op when active.
-//   4. Banner — `UNUserNotification` with default sound. Requires the user
-//      to have granted notification permission. Fails gracefully if not.
+//   4. Banner — `UNUserNotification`, with sound unless alerts are muted.
+//      Requires the user to have granted notification permission. Fails
+//      gracefully if not.
 //
 // Driven by MissionControlModel.onSnapshotUpdate (single subscriber — see
 // the note there about AsyncStream's single-consumer invariant). Previously
@@ -23,6 +24,21 @@
 import AppKit
 import Foundation
 import UserNotifications
+
+/// Sound preference for WAIT alerts, shared by the Settings panel and
+/// Notifier. Defaults-backed so the panel needs no reference to the notifier.
+enum AlertSettings {
+    static let soundEnabledKey = "termy.alerts.soundEnabled"
+
+    /// Default on — the chime is the signal the app is built around.
+    static func soundEnabled(_ defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: soundEnabledKey) as? Bool ?? true
+    }
+
+    static func setSoundEnabled(_ enabled: Bool, _ defaults: UserDefaults) {
+        defaults.set(enabled, forKey: soundEnabledKey)
+    }
+}
 
 /// Decides whether a pane entering WAITING should play the sound, bounce the
 /// dock, and post a banner.
@@ -104,11 +120,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // waiting (a user tab switch) isn't.
         guard WaitAlertRule.shouldAlert(previous: prev, next: current) else { return }
 
-        // Sound fires unconditionally — a short audible cue works even when
-        // termy is active (user may be in another window/pane) and doesn't
-        // need TCC approval. `.criticalSoundRequest`-style Glass is a
-        // familiar "look here" chime on macOS.
-        NSSound(named: "Glass")?.play()
+        // Sound fires on every fresh WAIT unless alerts are muted — a short
+        // audible cue works even when termy is active (user may be in another
+        // window/pane) and doesn't need TCC approval. `.criticalSoundRequest`-
+        // style Glass is a familiar "look here" chime on macOS.
+        if AlertSettings.soundEnabled(.standard) {
+            NSSound(named: "Glass")?.play()
+        }
 
         // Dock bounce: documented no-op when the app is active. Fires the
         // icon bounce when the user is in another app, which is exactly the
@@ -150,7 +168,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         content.title = notificationTitle(for: snap)
         content.body = notificationBody(for: snap)
-        content.sound = .default
+        // Muting covers the banner too; the badge and banner still land.
+        content.sound = AlertSettings.soundEnabled(.standard) ? .default : nil
         content.userInfo = ["paneId": snap.paneId]
 
         // Stable per-pane id: replacing an older banner for the same pane
@@ -213,7 +232,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // Present even when termy is active — handle() already suppresses the
         // add() in that case, so reaching this method means the banner should
         // appear.
-        completionHandler([.banner, .sound])
+        completionHandler(AlertSettings.soundEnabled(.standard) ? [.banner, .sound] : [.banner])
     }
 
     nonisolated func userNotificationCenter(
