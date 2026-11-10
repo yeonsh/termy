@@ -6,6 +6,10 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+- ⌘Q now asks before it quits, since programs running in panes are stopped
+  and not restored. Settings… (⌘,) has a new **Quitting** section with
+  "Ask before quitting" (on by default) for turning the prompt off.
+
 ## 0.3.4 — 2026-11-10
 
 - Settings… (⌘,) can now mute termy's alert sound. The dock badge, dock

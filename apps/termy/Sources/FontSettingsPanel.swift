@@ -32,6 +32,7 @@ final class FontSettingsPanel: NSPanel {
     private var hcCheckbox: NSButton!
     private var hcStatusLabel: NSTextField!
     private var soundCheckbox: NSButton!
+    private var quitCheckbox: NSButton!
     private let hcDefaults = UserDefaults.standard
     private let alertDefaults = UserDefaults.standard
     private var hcStatusGeneration = 0
@@ -40,7 +41,7 @@ final class FontSettingsPanel: NSPanel {
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 432),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 488),
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -199,6 +200,22 @@ final class FontSettingsPanel: NSPanel {
         alertsStack.spacing = 8
         alertsStack.translatesAutoresizingMaskIntoConstraints = false
 
+        let quittingHeader = NSTextField(labelWithString: "Quitting")
+        quittingHeader.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        quittingHeader.textColor = .labelColor
+        quittingHeader.translatesAutoresizingMaskIntoConstraints = false
+        quitCheckbox = NSButton(
+            checkboxWithTitle: "Ask before quitting",
+            target: self,
+            action: #selector(quitCheckboxChanged(_:))
+        )
+        quitCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        let quittingStack = NSStackView(views: [quittingHeader, quitCheckbox])
+        quittingStack.orientation = .vertical
+        quittingStack.alignment = .leading
+        quittingStack.spacing = 8
+        quittingStack.translatesAutoresizingMaskIntoConstraints = false
+
         hcCheckbox = NSButton(checkboxWithTitle: "Run local panes in herdr-core", target: self, action: #selector(hcCheckboxChanged(_:)))
         hcCheckbox.translatesAutoresizingMaskIntoConstraints = false
         hcStatusLabel = NSTextField(labelWithString: "")
@@ -232,6 +249,7 @@ final class FontSettingsPanel: NSPanel {
         content.addSubview(grid)
         content.addSubview(previewBox)
         content.addSubview(alertsStack)
+        content.addSubview(quittingStack)
         content.addSubview(hcStack)
         content.addSubview(buttonRow)
 
@@ -260,7 +278,11 @@ final class FontSettingsPanel: NSPanel {
             alertsStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             alertsStack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
 
-            hcStack.topAnchor.constraint(equalTo: alertsStack.bottomAnchor, constant: 16),
+            quittingStack.topAnchor.constraint(equalTo: alertsStack.bottomAnchor, constant: 16),
+            quittingStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            quittingStack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
+
+            hcStack.topAnchor.constraint(equalTo: quittingStack.bottomAnchor, constant: 16),
             hcStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             hcStack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
 
@@ -317,6 +339,7 @@ final class FontSettingsPanel: NSPanel {
 
         refreshPreview()
         soundCheckbox.state = AlertSettings.soundEnabled(alertDefaults) ? .on : .off
+        quitCheckbox.state = QuitSettings.askBeforeQuit(.standard) ? .on : .off
         hcCheckbox.state = HcFeatureSettings.localPanesEnabled(hcDefaults) ? .on : .off
     }
 
@@ -369,6 +392,10 @@ final class FontSettingsPanel: NSPanel {
 
     @objc private func soundCheckboxChanged(_ sender: NSButton) {
         AlertSettings.setSoundEnabled(sender.state == .on, alertDefaults)
+    }
+
+    @objc private func quitCheckboxChanged(_ sender: NSButton) {
+        QuitSettings.setAskBeforeQuit(sender.state == .on, .standard)
     }
 
     /// 켤 때 herdr-core가 없으면 설치를 권하고, 설치하지 않으면 체크를 되돌린다. 이미 열린 pane은 그대로다.

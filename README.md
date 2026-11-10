@@ -326,7 +326,7 @@ termy reopen the same conversation with `agy --conversation` after an update.
 | <kbd>⌘</kbd><kbd>⇧</kbd><kbd>W</kbd> | Close window |
 | <kbd>⌘</kbd><kbd>⇧</kbd><kbd>T</kbd> | Cycle theme — System → Light → Dark |
 | <kbd>⌘</kbd><kbd>+</kbd> / <kbd>⌘</kbd><kbd>−</kbd> | Increase / decrease terminal font size |
-| <kbd>⌘</kbd><kbd>,</kbd> | Terminal font settings |
+| <kbd>⌘</kbd><kbd>,</kbd> | Settings — font, alerts, quitting |
 | <kbd>⌥</kbd><kbd>⌘</kbd><kbd>R</kbd> | Show the previewed file in Finder |
 | <kbd>⌘</kbd><kbd>/</kbd> | Full shortcut overlay |
 
