@@ -59,23 +59,32 @@ enum QuitConfirmation {
         var isRunningUnderXCTest: Bool
         var isRelaunchingForUpdate: Bool
         var isPoweringOff: Bool
-        var hasVisibleMainWindow: Bool
+        var hasMainWindow: Bool
         var askBeforeQuit: Bool
     }
     static func shouldAsk(_ context: Context) -> Bool
+    static func isPoweringOff(_ requestedAt: Date?, now: Date) -> Bool
 }
 ```
 
-`shouldAsk`는 위 조건 중 하나라도 해당하면 false. 테스트가 붙는 곳이 이 함수다.
+`shouldAsk`는 위 조건 중 하나라도 해당하면 false. `Context`의 `hasMainWindow`는 "창이 보이는가"가 아니라
+"창이 남아 있는가"다. 테스트가 붙는 곳이 이 함수와 `isPoweringOff(_:now:)`다.
 
 ### 5.2 종료 훅
 
 `AppDelegate.applicationShouldTerminate`:
 
 ```swift
+let context = QuitConfirmation.context(windowManager: windowManager)
+guard QuitConfirmation.shouldAsk(context) else {
+    AppLifecycle.isTerminating = true
+    return .terminateNow
+}
+// 확인을 받기 전에는 isTerminating을 켜지 않는다 — Cancel로 살아남았을 때 hc 정리 동작이
+// "종료 중"으로 갈라지면 안 된다.
+guard QuitConfirmation.presentAlert() else { return .terminateCancel }
 AppLifecycle.isTerminating = true
-guard QuitConfirmation.shouldAsk(...) else { return .terminateNow }
-return QuitConfirmation.presentAlert() ? .terminateNow : .terminateCancel
+return .terminateNow
 ```
 
 `presentAlert()`는 `NSAlert` + `runModal`:
@@ -89,19 +98,22 @@ return QuitConfirmation.presentAlert() ? .terminateNow : .terminateCancel
 └─────────────────────────────────────────┘
 ```
 
-Cancel이 첫 버튼(Return)이고 Esc도 Cancel(`keyEquivalent = "\x1b"`). Quit은 `alertSecondButtonReturn`일 때만.
-`isTerminating`은 확인을 받기 전에 이미 켜 두는데, 확인 중에는 teardown이 없으므로 무해하고, 취소하면
-끝나지 않으므로 값이 남아도 다음 종료 시도에서 다시 켜진다. (취소 시 되돌리는 편이 더 깔끔하니 되돌린다.)
+Cancel이 첫 버튼이고 `keyEquivalent = "\r"`(Return). Esc는 NSAlert가 스스로 매기지 않으므로 모달이 도는
+동안만 로컬 `NSEvent` 모니터로 받아 `.alertFirstButtonReturn`으로 `stopModal`한다. Quit은
+`alertSecondButtonReturn`일 때만 참이다. 모달 전에 `NSApp.unhide`/`activate`로 창을 앞으로 가져온다
+(비활성 상태에서 스크립트·Dock으로 온 요청이 가려진 모달로 멈춘 것처럼 보이지 않게).
 
 ### 5.3 걸러 내는 플래그
 
 - **업데이트 재시작**: `AppLifecycle.isRelaunchingForUpdate` — `WindowManager.prepareForUpdateRelaunch()`에서
   켠다. Sparkle 경로와 DEBUG의 `simulateUpdateRelaunch`가 모두 이 메서드를 지난다.
-- **로그아웃/시스템 종료**: `AppLifecycle.isPoweringOff` — `AppDelegate.applicationDidFinishLaunching`에서
-  `NSWorkspace.shared.notificationCenter`의 `NSWorkspace.willPowerOffNotification`을 관찰해 켠다.
-  AppKit이 종료 요청보다 먼저 보내는 알림이라, 모달이 로그아웃을 붙잡는 일이 없다.
-- **마지막 창 닫기**: `windowManager.controllers` 중 `window.isVisible`인 것이 없으면 묻지 않는다.
-  이 시점엔 pane이 이미 정리돼서 잃을 것이 없고, 닫힌 창 뒤에 모달이 뜨는 그림도 이상하다.
+- **로그아웃/시스템 종료**: `AppLifecycle.powerOffRequestedAt` — `AppDelegate.applicationDidFinishLaunching`에서
+  `NSWorkspace.shared.notificationCenter`의 `NSWorkspace.willPowerOffNotification`을 관찰해 기록한다.
+  AppKit이 종료 요청보다 먼저 보내는 알림이라, 모달이 로그아웃을 붙잡는 일이 없다. 30초가 지난 기록은
+  무시한다: 로그아웃이 취소된 뒤의 ⌘Q는 다시 물어야 한다.
+- **마지막 창 닫기**: `windowManager.controllers`가 비어 있으면 묻지 않는다. 창 닫기는 그 전에
+  `WindowManager.removeWindow`가 목록을 비우므로, 숨김(⌘H)과 구별된다 — 숨긴 창의 pane은 살아 있으니
+  묻는다. 그리고 pane이 이미 정리된 뒤라 잃을 것이 없고, 닫힌 창 뒤에 모달이 뜨는 그림도 이상하다.
 - **테스트 호스트**: `TestHostDetector.isRunningUnderXCTest()`.
 - **설정 꺼짐**: `QuitSettings.askBeforeQuit`.
 

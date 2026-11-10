@@ -7,14 +7,14 @@ final class QuitConfirmationTests: XCTestCase {
         xctest: Bool = false,
         relaunch: Bool = false,
         powerOff: Bool = false,
-        visibleWindow: Bool = true,
+        hasMainWindow: Bool = true,
         ask: Bool = true
     ) -> QuitConfirmation.Context {
         QuitConfirmation.Context(
             isRunningUnderXCTest: xctest,
             isRelaunchingForUpdate: relaunch,
             isPoweringOff: powerOff,
-            hasVisibleMainWindow: visibleWindow,
+            hasMainWindow: hasMainWindow,
             askBeforeQuit: ask
         )
     }
@@ -39,8 +39,35 @@ final class QuitConfirmationTests: XCTestCase {
     }
 
     // protects=마지막 창을 닫은 직후; fails_when=창이 없는데 묻는다
-    func test_noVisibleWindow_doesNotAsk() {
-        XCTAssertFalse(QuitConfirmation.shouldAsk(context(visibleWindow: false)))
+    func test_noMainWindow_doesNotAsk() {
+        XCTAssertFalse(QuitConfirmation.shouldAsk(context(hasMainWindow: false)))
+    }
+
+    // protects=⌘H로 숨긴 뒤 Dock Quit; fails_when=창은 살아 있고 pane도 도는데 묻지 않고 끝난다
+    func test_hiddenButOpenWindows_stillAsk() {
+        let manager = WindowManager(
+            sessionPersistence: nil,
+            workspacePersistence: { nil },
+            defaults: InMemoryUserDefaults()
+        )
+        let defaults = InMemoryUserDefaults()
+        // 창을 열 수는 없으니 "창이 하나도 없으면 false"쪽만 고정한다.
+        XCTAssertFalse(QuitConfirmation.context(windowManager: manager, defaults: defaults).hasMainWindow)
+    }
+
+    // protects=Esc/Return; fails_when=확인 창의 두 버튼이 취소/종료로 배선되지 않는다
+    func test_alertButtons() {
+        let alert = QuitConfirmation.makeAlert()
+        XCTAssertEqual(alert.buttons.map(\.title), ["Cancel", "Quit"])
+        XCTAssertEqual(alert.buttons[0].keyEquivalent, "\r", "Return은 취소로 간다")
+    }
+
+    // protects=취소된 로그아웃 뒤의 ⌘Q; fails_when=한 번 켜진 종료 요청 플래그가 세션 내내 남는다
+    func test_powerOffFlag_expires() {
+        let now = Date()
+        XCTAssertTrue(QuitConfirmation.isPoweringOff(now.addingTimeInterval(-1), now: now))
+        XCTAssertFalse(QuitConfirmation.isPoweringOff(now.addingTimeInterval(-120), now: now))
+        XCTAssertFalse(QuitConfirmation.isPoweringOff(nil, now: now))
     }
 
     func test_xctestHost_doesNotAsk() {
@@ -70,12 +97,12 @@ final class QuitConfirmationTests: XCTestCase {
 
     // protects=로그아웃/시스템 종료; fails_when=willPowerOff 알림이 플래그를 켜지 않는다
     func test_powerOffNotification_setsFlag() {
-        AppLifecycle.isPoweringOff = false
+        AppLifecycle.powerOffRequestedAt = nil
         let center = NotificationCenter()
         QuitConfirmation.observePowerOff(center: center)
         center.post(name: NSWorkspace.willPowerOffNotification, object: nil)
-        XCTAssertTrue(AppLifecycle.isPoweringOff)
-        AppLifecycle.isPoweringOff = false
+        XCTAssertNotNil(AppLifecycle.powerOffRequestedAt)
+        AppLifecycle.powerOffRequestedAt = nil
     }
 
     // protects=업데이트 재시작; fails_when=prepareForUpdateRelaunch가 플래그를 켜지 않는다
