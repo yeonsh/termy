@@ -45,3 +45,17 @@ enum AppLifecycle {
 
     @MainActor private final class Flag { var value = false }
 }
+
+/// ⌘Q 확인 대화상자를 띄울지. 기본은 켜짐 — pane에서 돌던 작업은 종료와 함께 사라지고
+/// 복원되지 않는다. ⌘, 설정 패널과 `QuitConfirmation`이 함께 읽는다.
+enum QuitSettings {
+    static let askBeforeQuitKey = "termy.quit.askBeforeQuit"
+
+    static func askBeforeQuit(_ defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: askBeforeQuitKey) as? Bool ?? true
+    }
+
+    static func setAskBeforeQuit(_ enabled: Bool, _ defaults: UserDefaults) {
+        defaults.set(enabled, forKey: askBeforeQuitKey)
+    }
+}
