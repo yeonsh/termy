@@ -6,6 +6,8 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.5 — 2026-11-10
+
 - ⌘Q now asks before it quits, since programs running in panes are stopped
   and not restored. Settings… (⌘,) has a new **Quitting** section with
   "Ask before quitting" (on by default) for turning the prompt off.
