@@ -21,7 +21,7 @@
 - **중단 키:** 입력 덩어리 하나가 정확히 다음 중 하나일 때만. legacy `0x1b`, `0x03`. kitty CSI-u `ESC [ 27 u`(Esc), `ESC [ 99 ; 5 u`(Ctrl-C). lock 비트(caps 64, num 128)는 무시하고, event type은 press(생략 또는 `:1`)만 받는다.
 - **중단 키를 적용하는 pane:** agent가 `.claude` / `.codex` / `.antigravity`이고, `programStatusActive == false`, `turnOpen == true`, 상태가 THINK로 보이는 것(`.thinking`, `.possiblyWaiting`) 또는 `.waiting(.promotedFromPossible)`. opencode(plugin이 interrupted를 보냄)와 pi(7501)는 제외한다.
 - **중단 결과:** `.idle`, attention·reason·waitSource 초기화, `turnOpen = false`, `interruptedByKey = true`. 소리 없음(IDLE은 알림 대상이 아님).
-- **잘못 감지했을 때 복구:** `interruptedByKey`인 IDLE pane에 Pre/PostToolUse가 오면 조용히 THINKING으로 돌린다. 그 상태에서 Stop이 오면(Codex가 중단에도 Stop을 보내는 경우 포함) IDLE을 유지하고 소리 내지 않는다. 다른 hook 이벤트는 `interruptedByKey`를 지운다.
+- **잘못 감지했을 때 복구:** `interruptedByKey`인 IDLE pane에 PreToolUse가 오면 조용히 THINKING으로 돌린다. PostToolUse·PostToolUseFailure는 끊긴 도구가 뒤늦게 끝난 결과라 IDLE과 플래그를 유지한다(실기: Codex 0.160.1에서 Ctrl-C로 끊은 `sleep 30`이 백그라운드로 남아 30초 뒤 PostToolUse를 보냄). 그 상태에서 Stop이 오면(Codex가 중단에도 Stop을 보내는 경우 포함) IDLE을 유지하고 소리 내지 않는다. 다른 hook 이벤트는 `interruptedByKey`를 지운다.
 - **범위 밖:** 백그라운드 작업 표시(hook은 시작만 주고 끝을 주지 않음), permission WAIT 중 Esc(동작 미확인), README 외 문서 개편.
 
 ## Global Constraints

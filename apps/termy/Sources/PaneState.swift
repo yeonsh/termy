@@ -9,6 +9,8 @@
 //   THINKING         ──(Stop)───────────────────────▶ WAITING(.turnEnd)
 //   THINKING         ──(SessionEnd)─────────────────▶ INIT
 //   THINKING         ──(Esc/Ctrl-C key, no 7501)────▶ IDLE (silent)
+//   IDLE(key)        ──(PreToolUse)──────────────────▶ THINKING (silent; key was not an interrupt)
+//   IDLE(key)        ──(PostToolUse[Failure] | Stop)─▶ IDLE (late result of the interrupted turn)
 //   THINKING         ──(PtyExit, exit != 0)─────────▶ ERRORED
 //   THINKING         ──(reconciler 8s silence)──────▶ POSSIBLY_WAITING (silent)
 //   POSSIBLY_WAITING ──(Pre/PostToolUse)─────────────▶ THINKING       (silent recovery)
@@ -202,6 +204,15 @@ enum PaneStateMachine {
     /// Claude Code / Codex (`AskUserQuestion`) and Antigravity (`ask_question`).
     private static func isAskUserQuestionTool(_ toolName: String?) -> Bool {
         toolName == "AskUserQuestion" || toolName == "ask_question"
+    }
+
+    /// A Post/PostToolUseFailure on a pane the user closed with Esc/Ctrl-C. Codex keeps an
+    /// interrupted command running as a background terminal and reports its result when it
+    /// ends (seen live: Ctrl-C during `sleep 30`, PostToolUse 30 s later), so this is the old
+    /// tool finishing, not new work. The pane stays IDLE with the flag kept; only a new
+    /// PreToolUse proves the key was not an interrupt.
+    private static func isLateToolResultAfterInterruptKey(_ previous: PaneSnapshot) -> Bool {
+        previous.interruptedByKey && previous.state == .idle
     }
 
     static func apply(_ event: HookEvent, to previous: PaneSnapshot) -> PaneSnapshot {
@@ -424,6 +435,11 @@ enum PaneStateMachine {
             // failure makes the dashboard lie ("ERR" on a pane that's still
             // THINKING). Keep the state unchanged — except that an approved
             // Claude tool that then fails proves the dialog was answered.
+            if Self.isLateToolResultAfterInterruptKey(previous) {
+                next.interruptedByKey = true
+                next.turnOpen = false
+                break
+            }
             next.turnOpen = true
             if (event.agentKind ?? previous.agentKind) == .claude,
                previous.state == .waiting,
@@ -555,6 +571,11 @@ enum PaneStateMachine {
             }
 
         case .postToolUse:
+            if Self.isLateToolResultAfterInterruptKey(previous) {
+                next.interruptedByKey = true
+                next.turnOpen = false
+                break
+            }
             next.turnOpen = true
             if Self.isAskUserQuestionTool(event.meta.toolName),
                previous.state == .waiting,
@@ -599,9 +620,6 @@ enum PaneStateMachine {
                 next.state = .thinking
                 next.needsAttention = false
                 next.waitSource = nil
-                next.enteredStateAt = next.updatedAt
-            } else if previous.interruptedByKey && previous.state == .idle {
-                next.state = .thinking
                 next.enteredStateAt = next.updatedAt
             }
 

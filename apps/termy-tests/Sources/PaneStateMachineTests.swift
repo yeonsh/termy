@@ -741,12 +741,25 @@ final class PaneStateMachineTests: XCTestCase {
         return s
     }
 
-    func test_toolEventAfterInterruptKey_returnsToThinking() {
-        for kind in [HookEventKind.preToolUse, .postToolUse] {
-            let after = PaneStateMachine.apply(codexEvent(kind), to: interruptedIdle())
-            XCTAssertEqual(after.state, .thinking)
-            XCTAssertFalse(after.needsAttention)
-            XCTAssertFalse(after.interruptedByKey)
+    func test_newToolCallAfterInterruptKey_returnsToThinking() {
+        let after = PaneStateMachine.apply(codexEvent(.preToolUse), to: interruptedIdle())
+        XCTAssertEqual(after.state, .thinking)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertFalse(after.interruptedByKey)
+    }
+
+    /// Live (Codex 0.160.1): Ctrl-C during `sleep 30` left the command running as a
+    /// background terminal, and its PostToolUse arrived 30 s later. That result is
+    /// the interrupted tool finishing, not new work, so the pane must stay IDLE.
+    func test_lateToolResultAfterInterruptKey_keepsIdle() {
+        for kind in [HookEventKind.postToolUse, .postToolUseFailure] {
+            let prev = interruptedIdle()
+            let after = PaneStateMachine.apply(codexEvent(kind), to: prev)
+            XCTAssertEqual(after.state, .idle, "\(kind)")
+            XCTAssertTrue(after.interruptedByKey, "\(kind)")
+            XCTAssertFalse(after.turnOpen, "\(kind)")
+            XCTAssertTrue(after.isMidTurn, "\(kind)")
+            XCTAssertEqual(after.enteredStateAt, prev.enteredStateAt, "\(kind)")
         }
     }
 
