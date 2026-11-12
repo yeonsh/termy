@@ -84,4 +84,19 @@ final class HookDaemonInterruptKeyTests: XCTestCase {
             state: .waiting)
         await assertUnchanged(await make(state: .thinking, turnOpen: false), state: .thinking)
     }
+
+    func test_interruptKey_keepsPaneMidTurn_untilPlainStop() async {
+        let daemon = await make()
+        await daemon.recordInterruptKey(paneId: "p1")
+        let closed = await daemon.snapshot(paneId: "p1")!
+        XCTAssertTrue(closed.isMidTurn)
+
+        func event(_ kind: HookEventKind) -> HookEvent {
+            HookEvent(event: kind, paneId: "p1", projectId: nil, ts: 1.0, agent: "codex", meta: HookEvent.Meta())
+        }
+        var s = PaneStateMachine.apply(event(.userPromptSubmit), to: closed)
+        XCTAssertTrue(s.isMidTurn)
+        s = PaneStateMachine.apply(event(.stop), to: s)
+        XCTAssertFalse(s.isMidTurn)
+    }
 }

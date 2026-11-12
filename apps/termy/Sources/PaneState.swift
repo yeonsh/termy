@@ -175,9 +175,12 @@ extension PaneSnapshot {
     /// question waits count — they happen mid-turn. A Codex pane promoted
     /// to WAIT by the silence heuristic doesn't: termy already treats it as
     /// waiting for input, and a missed Codex Stop would otherwise hold an
-    /// update forever.
+    /// update forever. A turn closed by an Esc/Ctrl-C keypress still counts:
+    /// the key may have been misdetected (Ctrl-C clearing a draft, Esc closing
+    /// a popup) while the agent keeps working. Holding the update is safe — the
+    /// 600 s reminder and Restart Now remain.
     var isMidTurn: Bool {
-        turnOpen
+        (turnOpen || interruptedByKey)
             && state != .initializing
             && !(state == .waiting && waitSource == .promotedFromPossible)
     }
