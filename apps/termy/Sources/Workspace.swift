@@ -5,17 +5,19 @@
 // which panes are visible. Same project → same color (via PaneStyling) now
 // does double duty as both visual identity AND filter key.
 //
-// Layout: nested NSSplitView — outer vertical (rows), each row is a
-// horizontal NSSplitView of panes. Row assignment is explicit: column split
-// (⌘D) appends to the focused pane's row, row split (⇧⌘D) inserts a new row
-// right after it. Rebuilt on every visibility change. Moving an NSView
-// between superviews preserves its state, so the pty and SwiftTerm renderer
-// keep running across filter switches.
+// Layout: one split tree per project (`ProjectPaneLayout`, leaves = pane
+// ids, each split child carries a weight). A project view — or ALL with a
+// single project — draws that project's tree as nested NSSplitViews; ALL
+// with several projects draws an equal grid instead. ⌘D / ⇧⌘D split only
+// the focused pane (right / down); other new panes go where
+// `PanePlacement.balanced` picks. Rebuilt on every visibility change. Moving
+// an NSView between superviews preserves its state, so the pty and SwiftTerm
+// renderer keep running across filter switches.
 //
 //   Workspace (NSView)
-//     └── rootSplit (NSSplitView, vertical)
-//           ├── rowSplit₁ (horizontal) — [pane, pane, pane]
-//           ├── rowSplit₂ (horizontal) — [pane, pane]
+//     └── rootSplit (NSSplitView) — the project tree's root split
+//           ├── pane
+//           ├── split (other axis) — [pane, split, …]
 //           └── ...
 
 import AppKit
@@ -113,6 +115,10 @@ enum ProjectOrder {
     }
 }
 
+/// Where `addPane` puts a new pane. `.row` (⌘D) splits the focused pane and
+/// puts the new one on its right, `.column` (⌘⇧D) below it; `.balanced` (and
+/// either split when the focused pane is in another project) lets
+/// `PanePlacement.balanced` pick a spot in the new pane's project tree.
 enum SplitAxis {
     case column
     case row
@@ -282,10 +288,12 @@ struct FilterNavigationHistory {
 }
 
 final class Workspace: NSView, NSSplitViewDelegate {
-    /// Source of truth for pane layout: ordered rows of ordered panes. A
-    /// column split appends to the focused pane's row; a row split inserts a
-    /// fresh row immediately after it.
-    private(set) var rows: [[Pane]] = []
+    /// 배치의 출처: project마다 분할 tree 하나(잎 = pane id). 모든 pane은 자기 `projectId`의 layout에 보이는 잎으로
+    /// 정확히 한 번 있다. 다른 project로 `cd`한 pane의 잎은 옛 project layout에 "떠난" 잎으로만 남는다.
+    private var layouts: [String: ProjectPaneLayout] = [:]
+    /// 임시 호환용(저장 형식이 아직 열 목록이다): project마다 보이는 tree를 열로 근사해 `knownProjectIds` 순서로 잇는다.
+    /// 펼친 순서는 잎 읽는 순서와 같다.
+    var rows: [[Pane]] { layoutSnapshot().flatMap { $0.tree.approximateColumns() } }
     private var paneCreationOrder: [Pane] = []
     /// Project ids the user arranged by dragging the titlebar chips. Layered
     /// over the discovery order by `knownProjectIds`; see `ProjectOrder`.
@@ -334,10 +342,12 @@ final class Workspace: NSView, NSSplitViewDelegate {
     private var maximizedPane: Pane?
     private let hiddenPaneParkingView = NSView(frame: .zero)
     private var parkedPaneFrames: [ObjectIdentifier: CGRect] = [:]
-    private var needsPostRelayoutEqualize = false
-    private var isEqualizingSplits = false
+    /// 그린 split마다 자식 비율(그리기 때 등록). `applySplitWeights`가 divider 위치로 옮긴다. 없으면 균등.
+    private var splitWeights: [ObjectIdentifier: [Double]] = [:]
+    private var needsPostRelayoutSplitWeights = false
+    private var isApplyingSplitWeights = false
     /// Each `installRootSplit` that wraps panes in a freeze adds one token.
-    /// Tokens are drained either when the deferred equalize pass runs in
+    /// Tokens are drained either when the deferred split-weights pass runs in
     /// `layout()` or by an async fallback — whichever fires first.
     private var pendingTerminalThaws = 0
 
@@ -350,14 +360,14 @@ final class Workspace: NSView, NSSplitViewDelegate {
 
     override func layout() {
         super.layout()
-        guard needsPostRelayoutEqualize, !isEqualizingSplits else { return }
+        guard needsPostRelayoutSplitWeights, !isApplyingSplitWeights else { return }
         guard let rootSplit, rootSplit.bounds.width > 1, rootSplit.bounds.height > 1 else {
-            needsPostRelayoutEqualize = true
+            needsPostRelayoutSplitWeights = true
             return
         }
-        needsPostRelayoutEqualize = false
+        needsPostRelayoutSplitWeights = false
         withoutRelayoutAnimation {
-            equalizeSplits()
+            applySplitWeights()
         }
         flushPendingTerminalThaws()
     }
@@ -450,11 +460,74 @@ final class Workspace: NSView, NSSplitViewDelegate {
     /// Visible panes as laid out on screen — what ⌘[ / ⌘] walk. Ignores
     /// maximize: cycling to another pane exits it (see `focus(pane:)`).
     private var visiblePanesInLayoutOrder: [Pane] {
-        PaneGridOrder.readingOrder(
-            columns: rows.map { $0.filter(isVisible) },
-            projectOrder: knownProjectIds,
+        panesInReadingOrder(where: isVisible)
+    }
+
+    /// 읽는 순서: 칩 순서대로 project, project 안에서는 보이는 tree의 잎 순서. ⌘[ / ⌘]와 여러 project ALL 그리드가 쓴다.
+    private func panesInReadingOrder(where include: (Pane) -> Bool) -> [Pane] {
+        let byId = paneLookup
+        let projectIds = knownProjectIds
+        return PaneGridOrder.readingOrder(
+            columns: projectIds.map { (paneTree(forProject: $0, byId: byId)?.leaves ?? []).filter(include) },
+            projectOrder: projectIds,
             projectId: \.projectId
         )
+    }
+
+    // MARK: - Layout trees
+
+    /// tree를 그리는 project: 프로젝트 필터, 또는 project가 하나뿐인 ALL. 여러 project ALL(균등 그리드)이면 nil.
+    var displayedProjectId: String? {
+        switch filter {
+        case .project(let id):
+            return id
+        case .all:
+            let ids = knownProjectIds
+            return ids.count == 1 ? ids[0] : nil
+        }
+    }
+
+    /// 그 project의 보이는 tree(떠난 잎 제외). 잎은 pane id.
+    func layoutTree(forProject projectId: String) -> PaneLayoutNode<String>? {
+        layouts[projectId]?.visibleTree
+    }
+
+    /// project마다 보이는 tree. `knownProjectIds` 순서.
+    func layoutSnapshot() -> [(projectId: String, tree: PaneLayoutNode<Pane>)] {
+        let byId = paneLookup
+        return knownProjectIds.compactMap { id in
+            paneTree(forProject: id, byId: byId).map { (projectId: id, tree: $0) }
+        }
+    }
+
+    /// 저장된 배치를 세운다. 잎들의 실제 `projectId`마다 그 project의 잎만 남긴 tree를 만들고, 그 project에 지금 보이는
+    /// pane 집합이 그 잎 집합과 같을 때만 그 project의 layout으로 바꾼다. 다르면(같은 project에 이미 다른 pane이 있음 등)
+    /// 자동 배치를 그대로 둔다 — 어느 쪽이든 모든 pane이 자기 project layout에 한 번씩 있다.
+    func applyRestoredLayout(_ tree: PaneLayoutNode<Pane>) {
+        var projectIds: [String] = []
+        for pane in tree.leaves where !projectIds.contains(pane.projectId) {
+            projectIds.append(pane.projectId)
+        }
+        for projectId in projectIds {
+            guard let restored = tree.removing(where: { $0.projectId != projectId })?.map({ $0.paneId }),
+                  var layout = layouts[projectId] else { continue }
+            let restoredIds = restored.leaves
+            let placedIds = Set(layout.visibleTree?.leaves ?? [])
+            guard Set(restoredIds) == placedIds, restoredIds.count == placedIds.count else { continue }
+            layout.replaceVisibleTree(restored)
+            layouts[projectId] = layout
+        }
+        relayout()
+    }
+
+    private var paneLookup: [String: Pane] {
+        Dictionary(panes.map { ($0.paneId, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// 그 project의 보이는 tree를 pane으로 바꾼 것. 열린 pane이 아닌 잎은 뺀다.
+    private func paneTree(forProject projectId: String, byId: [String: Pane]) -> PaneLayoutNode<Pane>? {
+        guard let tree = layouts[projectId]?.visibleTree?.removing(where: { byId[$0] == nil }) else { return nil }
+        return tree.map { byId[$0]! }
     }
 
     // MARK: - Add / close
@@ -570,55 +643,26 @@ final class Workspace: NSView, NSSplitViewDelegate {
         return pane
     }
 
+    /// 새 pane을 자기 project의 tree에 넣는다. ⌘D(`.row`)·⌘⇧D(`.column`)는 같은 project의 포커스된 pane만 오른쪽·
+    /// 아래로 나눈다. 그 밖(`.balanced`, 포커스 없음, 포커스가 다른 project)은 `PanePlacement.balanced`가 자리를 고른다.
+    /// 어느 쪽이든 보이는 tree에 적용하므로 그 project의 떠난 잎은 사라진다.
     private func place(_ pane: Pane, splitAxis: SplitAxis) {
-        // Place the new pane relative to the focused pane per the requested
-        // split axis. With no focused pane (first pane or after closing the
-        // last one) start a fresh row.
-        guard let focused = focusedPane, let (r, _) = locate(focused) else {
-            rows.append([pane])
-            return
-        }
-
+        let projectId = pane.projectId
+        var layout = layouts[projectId] ?? ProjectPaneLayout()
+        let visible = layout.visibleTree
+        let edge: PaneEdge?
         switch splitAxis {
-        case .column:
-            rows[r].append(pane)
-        case .row:
-            rows.insert([pane], at: r + 1)
-        case .balanced:
-            placeBalanced(pane, preferredRow: r)
+        case .row: edge = .right
+        case .column: edge = .bottom
+        case .balanced: edge = nil
         }
-    }
-
-    private func placeBalanced(_ pane: Pane, preferredRow: Int?) {
-        let visibleRows = rows.enumerated().compactMap { index, row -> BalancedPaneLayoutRow? in
-            let count = row.filter(isVisible).count
-            guard count > 0 else { return nil }
-            return BalancedPaneLayoutRow(index: index, paneCount: count)
+        if let edge, let visible, let focused = focusedPane,
+           focused.projectId == projectId, visible.contains(focused.paneId) {
+            layout.replaceVisibleTree(visible.splitting(focused.paneId, edge: edge, with: pane.paneId))
+        } else {
+            layout.replaceVisibleTree(PanePlacement.balanced(pane.paneId, into: visible, workspaceSize: bounds.size))
         }
-        guard let placement = BalancedPanePlacementPlanner.placement(
-            rows: visibleRows,
-            workspaceSize: bounds.size,
-            preferredRow: preferredRow
-        ) else {
-            rows.append([pane])
-            return
-        }
-
-        switch placement {
-        case .append(toRow: let rowIndex):
-            rows[rowIndex].append(pane)
-        case .insertRow(after: let rowIndex):
-            rows.insert([pane], at: rowIndex + 1)
-        }
-    }
-
-    private func locate(_ pane: Pane) -> (row: Int, col: Int)? {
-        for (r, row) in rows.enumerated() {
-            if let c = row.firstIndex(where: { $0 === pane }) {
-                return (r, c)
-            }
-        }
-        return nil
+        layouts[projectId] = layout
     }
 
     /// Closes the focused pane. Returns true if the workspace is now empty
@@ -635,7 +679,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
     /// been torn down (e.g. closeFocusedPane already fired teardown and the
     /// resulting processTerminated is calling us back), this is a no-op.
     func closePane(_ pane: Pane) {
-        guard locate(pane) != nil else { return }
+        guard paneCreationOrder.contains(where: { $0 === pane }) else { return }
         _ = closePaneInternal(pane, wasFocused: focusedPane === pane)
     }
 
@@ -710,10 +754,17 @@ final class Workspace: NSView, NSSplitViewDelegate {
         focusHistory.remove(pane.paneId)
         let removedProjectId = pane.projectId
         paneCreationOrder.removeAll { $0 === pane }
-        for r in 0..<rows.count {
-            rows[r].removeAll { $0 === pane }
+        // 보이는 잎이 있는 layout(자기 project)에서는 빼고 형제가 그 몫을 나눈다. 다른 layout에 남은 떠난 잎도 지운다.
+        let paneId = pane.paneId
+        for projectId in Array(layouts.keys) {
+            guard var layout = layouts[projectId] else { continue }
+            if layout.visibleTree?.contains(paneId) == true {
+                layout.removePane(paneId)
+            } else {
+                layout.forgetAway(paneId)
+            }
+            layouts[projectId] = layout.isEmpty ? nil : layout
         }
-        rows.removeAll { $0.isEmpty }
         if !paneCreationOrder.contains(where: { $0.projectId == removedProjectId }) {
             filterHistory.remove(.project(removedProjectId))
             // Drop the dead id so a project reopened later lands at the end
@@ -750,6 +801,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
     ///     "pane died" rather than a filter change. Following keeps the
     ///     pane visible; user can swap filters back manually if desired.
     private func handlePaneProjectChanged(_ pane: Pane) {
+        let oldProjectId = moveLayoutLeaf(of: pane)
         if case .project(let id) = filter {
             let filterWouldBeEmpty = !panes.contains(where: { $0.projectId == id })
             let focusedPaneDriftedOut = (pane === focusedPane) && pane.projectId != id
@@ -758,13 +810,39 @@ final class Workspace: NSView, NSSplitViewDelegate {
                 return
             }
         }
-        // Filter still valid. If the drifted pane no longer matches the
-        // active filter, relayout so it moves out of view; otherwise just
-        // rebuild the toolbar segments.
-        if !isVisible(pane) {
+        // Filter still valid. Redraw when the drifted pane left or joined the
+        // project on screen (ALL: the grid's order or the single-project tree
+        // changed); otherwise just rebuild the toolbar segments.
+        let shownLayoutChanged: Bool
+        switch filter {
+        case .all: shownLayoutChanged = true
+        case .project(let id): shownLayoutChanged = id == oldProjectId || id == pane.projectId
+        }
+        if shownLayoutChanged {
             relayout()
         }
         onPanesChanged?()
+    }
+
+    /// `cd`로 project가 바뀐 pane의 잎을 옮긴다: 옛 project layout에는 "떠난" 잎으로 남기고, 새 project에 그 pane의
+    /// 떠난 잎이 있으면 그 자리·크기로 되살리고, 없으면 `PanePlacement.balanced`로 넣는다. 옛 project id를 돌려준다.
+    private func moveLayoutLeaf(of pane: Pane) -> String? {
+        let paneId = pane.paneId
+        let newProjectId = pane.projectId
+        let oldProjectId = layouts.first { entry in
+            entry.key != newProjectId && entry.value.visibleTree?.contains(paneId) == true
+        }?.key
+        if let oldProjectId {
+            layouts[oldProjectId]?.markAway(paneId)
+        }
+        var layout = layouts[newProjectId] ?? ProjectPaneLayout()
+        if !layout.returnFromAway(paneId), layout.visibleTree?.contains(paneId) != true {
+            layout.replaceVisibleTree(
+                PanePlacement.balanced(paneId, into: layout.visibleTree, workspaceSize: bounds.size)
+            )
+        }
+        layouts[newProjectId] = layout
+        return oldProjectId
     }
 
     // MARK: - Focus
@@ -900,21 +978,44 @@ final class Workspace: NSView, NSSplitViewDelegate {
 
     // MARK: - Layout
 
-    /// Rebuild the grid from the current row structure. Moves existing Pane
+    /// What one relayout puts on screen.
+    private enum LayoutDrawing {
+        /// A project tree (or the maximized pane as a lone leaf).
+        case tree(PaneLayoutNode<Pane>)
+        /// ALL with several projects: an equal grid filled in reading order.
+        case grid([Pane])
+
+        var panes: [Pane] {
+            switch self {
+            case .tree(let tree): return tree.leaves
+            case .grid(let panes): return panes
+            }
+        }
+    }
+
+    private func currentDrawing() -> LayoutDrawing? {
+        if let m = maximizedPane, isVisible(m) { return .tree(.leaf(m)) }
+        if let projectId = displayedProjectId {
+            return paneTree(forProject: projectId, byId: paneLookup).map { .tree($0) }
+        }
+        let ordered = panesInReadingOrder(where: isVisible)
+        return ordered.isEmpty ? nil : .grid(ordered)
+    }
+
+    /// Rebuild the split views from the layout trees. Moves existing Pane
     /// NSViews between superviews — their pty/terminal state persists.
     private func relayout() {
-        let visibleRows: [[Pane]] = {
-            if let m = maximizedPane, isVisible(m) { return [[m]] }
-            return rows.map { $0.filter(isVisible) }.filter { !$0.isEmpty }
-        }()
-        guard !visibleRows.isEmpty else {
+        // Weights belong to the splits about to be replaced; drop them so a
+        // recycled ObjectIdentifier can't pick up a stale entry.
+        splitWeights = [:]
+        guard let drawing = currentDrawing() else {
             installRootSplit(nil)
             return
         }
 
         // Re-focus the pane that was last active inside this filter. If this
         // filter has never had focus, fall back to the first visible pane.
-        let visiblePaneList = visibleRows.flatMap { $0 }
+        let visiblePaneList = drawing.panes
         let visiblePaneIds = visiblePaneList.map(\.paneId)
         let nextFocusedPaneId = focusHistory.focusAfterVisibilityChange(
             currentPaneId: focusedPane?.paneId,
@@ -929,7 +1030,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
 
         let outer = makeSplit(vertical: true)
         installRootSplit(outer, visiblePanes: visiblePaneList) {
-            self.populate(outer: outer, visibleRows: visibleRows)
+            self.populate(outer: outer, drawing: drawing)
         }
 
         updateActivePaneAppearance()
@@ -952,64 +1053,83 @@ final class Workspace: NSView, NSSplitViewDelegate {
         ])
     }
 
-    private func populate(outer: NSSplitView, visibleRows: [[Pane]]) {
-        let outerFrame = bounds.insetBy(dx: 4, dy: 4)
+    private func populate(outer: NSSplitView, drawing: LayoutDrawing) {
+        let outerFrame = bounds.insetBy(dx: PaneDropPlanner.inset, dy: PaneDropPlanner.inset)
         outer.frame = outerFrame
 
-        let projectIds = Set(visibleRows.flatMap { $0.map(\.projectId) })
-        if filter.isAll && projectIds.count > 1 {
-            populateEqualGrid(outer: outer, frame: outerFrame, visibleRows: visibleRows)
-        } else {
-            populateColumns(outer: outer, frame: outerFrame, visibleRows: visibleRows)
+        switch drawing {
+        case .tree(let tree):
+            populateTree(tree, in: outer, size: outerFrame.size)
+        case .grid(let ordered):
+            populateEqualGrid(outer: outer, frame: outerFrame, ordered: ordered)
         }
     }
 
-    private func populateColumns(outer: NSSplitView, frame: CGRect, visibleRows: [[Pane]]) {
-        outer.isVertical = true
-        let columnCount = max(visibleRows.count, 1)
-        let columnWidth = frame.width / CGFloat(columnCount)
-        for (rowIndex, rowPanes) in visibleRows.enumerated() {
-            let row = makeSplit(vertical: false)
-            row.frame = CGRect(
-                x: CGFloat(rowIndex) * columnWidth,
-                y: 0,
-                width: columnWidth,
-                height: frame.height
+    /// project tree를 중첩 split으로 그린다(잎이 root면 자식 하나인 split). 비율은 `splitWeights`에 등록해
+    /// `applySplitWeights`가 divider로 옮기고, 초기 frame은 `frames(in:gap:)`로 미리 넣어 첫 배치가 흔들리지 않게 한다.
+    private func populateTree(_ tree: PaneLayoutNode<Pane>, in outer: NSSplitView, size: CGSize) {
+        let rect = CGRect(origin: .zero, size: size)
+        switch tree {
+        case .leaf(let pane):
+            outer.isVertical = true
+            splitWeights[ObjectIdentifier(outer)] = [1]
+            pane.frame = rect
+            arrange(pane, in: outer)
+        case .split(let axis, let branches):
+            let frames = tree.frames(in: rect, gap: PaneDropPlanner.gap)
+            let childFrames = Dictionary(
+                frames.splits.map { ($0.path, $0.childFrames) },
+                uniquingKeysWith: { first, _ in first }
             )
-            outer.addArrangedSubview(row)
+            populateSplit(outer, axis: axis, branches: branches, rect: rect, path: [], childFrames: childFrames)
+        }
+    }
 
-            let paneCount = max(rowPanes.count, 1)
-            let paneHeight = frame.height / CGFloat(paneCount)
-            for (paneIndex, pane) in rowPanes.enumerated() {
-                pane.frame = CGRect(
-                    x: 0,
-                    y: frame.height - CGFloat(paneIndex + 1) * paneHeight,
-                    width: columnWidth,
-                    height: paneHeight
-                )
-                arrange(pane, in: row)
+    private func populateSplit(
+        _ split: NSSplitView,
+        axis: PaneLayoutAxis,
+        branches: [PaneLayoutBranch<Pane>],
+        rect: CGRect,
+        path: [Int],
+        childFrames: [[Int]: [CGRect]]
+    ) {
+        split.isVertical = axis == .leftToRight
+        splitWeights[ObjectIdentifier(split)] = branches.map(\.weight)
+        let frames = childFrames[path] ?? []
+        for (index, branch) in branches.enumerated() {
+            let childRect = frames.indices.contains(index) ? frames[index] : rect
+            let local = frameInSplit(childRect, splitRect: rect, split: split)
+            switch branch.node {
+            case .leaf(let pane):
+                pane.frame = local
+                arrange(pane, in: split)
+            case .split(let childAxis, let grandchildren):
+                let child = makeSplit(vertical: childAxis == .leftToRight)
+                child.frame = local
+                split.addArrangedSubview(child)
+                populateSplit(child, axis: childAxis, branches: grandchildren,
+                              rect: childRect, path: path + [index], childFrames: childFrames)
             }
         }
     }
 
+    /// 순수 배치 좌표(y-아래, root 기준)의 `rect`를 `split` 안의 frame으로. flipped가 아닌 split이면 y를 뒤집는다.
+    private func frameInSplit(_ rect: CGRect, splitRect: CGRect, split: NSSplitView) -> CGRect {
+        let y = split.isFlipped ? rect.minY - splitRect.minY : splitRect.maxY - rect.maxY
+        return CGRect(x: rect.minX - splitRect.minX, y: y, width: rect.width, height: rect.height)
+    }
+
     /// ALL 뷰에서 프로젝트가 둘 이상일 때, 프로젝트별로 칸을 나누지 않고
     /// 모든 pane을 하나의 균등 그리드(`PaneGridOrder.equalRowSizes`)에 놓아
-    /// pane마다 같은 면적을 준다. 채우는 순서는 `PaneGridOrder.readingOrder`
-    /// (칩 순서 → 프로젝트 안 열 순서)라서 같은 프로젝트 pane은 붙어 있고
-    /// ⌘[ / ⌘] 순서와도 맞는다. `rows`는 건드리지 않으므로 프로젝트 뷰에서는
-    /// 사용자가 만든 열 배치가 그대로 보인다. split은 2단계다:
+    /// pane마다 같은 면적을 준다. 채우는 순서(`ordered`)는 읽는 순서
+    /// (칩 순서 → 프로젝트 안 tree 잎 순서)라서 같은 프로젝트 pane은 붙어 있고
+    /// ⌘[ / ⌘] 순서와도 맞는다. 프로젝트 tree는 건드리지 않으므로 프로젝트
+    /// 뷰에서는 사용자가 만든 배치가 그대로 보인다. split은 2단계이고 비율을
+    /// 등록하지 않아 균등이다:
     ///   outer(grid-rows) → grid-row(panes)
-    private func populateEqualGrid(outer: NSSplitView, frame: CGRect, visibleRows: [[Pane]]) {
-        let ordered = PaneGridOrder.readingOrder(
-            columns: visibleRows,
-            projectOrder: knownProjectIds,
-            projectId: \.projectId
-        )
+    private func populateEqualGrid(outer: NSSplitView, frame: CGRect, ordered: [Pane]) {
         let rowSizes = PaneGridOrder.equalRowSizes(paneCount: ordered.count)
-        guard !rowSizes.isEmpty else {
-            populateColumns(outer: outer, frame: frame, visibleRows: visibleRows)
-            return
-        }
+        guard !rowSizes.isEmpty else { return }
 
         outer.isVertical = false
         let rowHeight = frame.height / CGFloat(rowSizes.count)
@@ -1050,8 +1170,8 @@ final class Workspace: NSView, NSSplitViewDelegate {
         // Freeze size propagation across every pane (not just visible — parked
         // panes also get touched by the AppKit layout pass and we don't want
         // their PTYs to see the parking-view geometry either). Each freeze is
-        // matched by a thaw drained in `layout()` after the deferred equalize
-        // settles, plus an async fallback in case that pass never fires.
+        // matched by a thaw drained in `layout()` after the deferred split
+        // weights settle, plus an async fallback in case that pass never fires.
         let needsFreeze = outer != nil
         if needsFreeze {
             for pane in panes { pane.terminal.freezeSizePropagation() }
@@ -1081,12 +1201,12 @@ final class Workspace: NSView, NSSplitViewDelegate {
                 rootSplit = outer
                 configure?()
                 layoutSubtreeIfNeeded()
-                equalizeSplits()
-                needsPostRelayoutEqualize = true
+                applySplitWeights()
+                needsPostRelayoutSplitWeights = true
                 needsLayout = true
             } else {
                 rootSplit = nil
-                needsPostRelayoutEqualize = false
+                needsPostRelayoutSplitWeights = false
             }
             oldRoot?.removeFromSuperview()
         }
@@ -1161,31 +1281,41 @@ final class Workspace: NSView, NSSplitViewDelegate {
         }
     }
 
-    private func equalizeSplits() {
+    /// Put every split's dividers where its registered weights say (equal
+    /// when none are registered, e.g. the ALL grid).
+    private func applySplitWeights() {
         guard let outer = rootSplit else { return }
-        guard !isEqualizingSplits else { return }
-        isEqualizingSplits = true
-        defer { isEqualizingSplits = false }
-        equalizeRecursively(outer)
+        guard !isApplyingSplitWeights else { return }
+        isApplyingSplitWeights = true
+        defer { isApplyingSplitWeights = false }
+        applySplitWeightsRecursively(outer)
     }
 
-    private func equalizeRecursively(_ split: NSSplitView) {
-        equalize(split)
+    private func applySplitWeightsRecursively(_ split: NSSplitView) {
+        applySplitWeights(to: split)
         for sub in split.arrangedSubviews.compactMap({ $0 as? NSSplitView }) {
-            equalizeRecursively(sub)
+            applySplitWeightsRecursively(sub)
         }
     }
 
-    private func equalize(_ split: NSSplitView) {
+    /// divider i = start + Σ(total·w₀…wᵢ) + i·gap, total = 길이 − gap·(n−1) — `frames(in:gap:)`와 같은 식이라
+    /// 그린 frame이 순수 계산(미리보기)과 맞는다.
+    private func applySplitWeights(to split: NSSplitView) {
         split.adjustSubviews()
         split.layoutSubtreeIfNeeded()
         let n = split.arrangedSubviews.count
         guard n > 1 else { return }
-        let total = split.isVertical ? split.bounds.width : split.bounds.height
+        let gap = split.dividerThickness
+        let length = split.isVertical ? split.bounds.width : split.bounds.height
+        let total = length - gap * CGFloat(n - 1)
         guard total > 1 else { return }
+        let registered = splitWeights[ObjectIdentifier(split)] ?? []
+        let weights = registered.count == n ? registered : Array(repeating: 1 / Double(n), count: n)
+        let start = split.isVertical ? split.bounds.minX : split.bounds.minY
+        var sum: CGFloat = 0
         for i in 0..<(n - 1) {
-            let pos = total * CGFloat(i + 1) / CGFloat(n)
-            split.setPosition(pos, ofDividerAt: i)
+            sum += total * CGFloat(weights[i])
+            split.setPosition(start + sum + CGFloat(i) * gap, ofDividerAt: i)
         }
     }
 
@@ -1207,7 +1337,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
     /// than a hairline divider. Panes keep their rounded corners clean
     /// because each sits 4pt away from its neighbor.
     private final class GapSplitView: NSSplitView {
-        override var dividerThickness: CGFloat { 8 }
+        override var dividerThickness: CGFloat { PaneDropPlanner.gap }
         override func drawDivider(in rect: NSRect) { /* transparent */ }
     }
 

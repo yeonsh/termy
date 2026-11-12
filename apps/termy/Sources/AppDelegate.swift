@@ -592,7 +592,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         newPane.keyEquivalentModifierMask = [.command]
 
         let splitRow = menu.addItem(
-            withTitle: "Split Row",
+            withTitle: "Split Right",
             action: #selector(AppDelegate.splitRow(_:)),
             keyEquivalent: "d"
         )
@@ -600,7 +600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         splitRow.keyEquivalentModifierMask = [.command]
 
         let splitCol = menu.addItem(
-            withTitle: "Split Column",
+            withTitle: "Split Down",
             action: #selector(AppDelegate.splitColumn(_:)),
             keyEquivalent: "D"
         )

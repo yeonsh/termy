@@ -32,8 +32,8 @@ final class KeyboardShortcutsPanel: NSPanel {
     static let sections: [Section] = [
         Section(title: "Panes", entries: [
             Shortcut(combos: [["⌘", "T"]], description: "New pane"),
-            Shortcut(combos: [["⌘", "D"]], description: "Split horizontally (add to same row)"),
-            Shortcut(combos: [["⌘", "⇧", "D"]], description: "Split vertically (new row)"),
+            Shortcut(combos: [["⌘", "D"]], description: "Split pane right"),
+            Shortcut(combos: [["⌘", "⇧", "D"]], description: "Split pane down"),
             Shortcut(combos: [["⌘", "W"]], description: "Close focused pane"),
             Shortcut(combos: [["⌘", "↵"]], description: "Toggle maximize / restore")
         ]),
