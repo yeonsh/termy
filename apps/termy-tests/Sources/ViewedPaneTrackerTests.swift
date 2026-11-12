@@ -61,6 +61,64 @@ final class ViewedPaneTrackerTests: XCTestCase {
         wait(for: [silent], timeout: 0.3)
     }
 
+    // MARK: - Debounced refresh
+
+    private func makeTracker(
+        scheduler: ManualScheduler, resolved: Box, sent: SentLog
+    ) -> ViewedPaneTracker {
+        ViewedPaneTracker(
+            schedule: scheduler.schedule,
+            resolver: { resolved.value },
+            sender: { sent.values.append($0) }
+        )
+    }
+
+    func test_scheduleRefresh_collapsesTransientValuesIntoSettledOne() {
+        let scheduler = ManualScheduler()
+        let resolved = Box(value: "X")
+        let sent = SentLog()
+        let tracker = makeTracker(scheduler: scheduler, resolved: resolved, sent: sent)
+
+        tracker.scheduleRefresh()
+        scheduler.advance(by: 0.1)
+        resolved.value = "T"
+        tracker.scheduleRefresh()
+        scheduler.advance(by: 0.2)
+        XCTAssertTrue(sent.values.isEmpty)
+        scheduler.advance(by: 0.2)
+        XCTAssertEqual(sent.values, ["T"])
+    }
+
+    func test_scheduleRefresh_sameValueAgain_sendsNothing() {
+        let scheduler = ManualScheduler()
+        let resolved = Box(value: "T")
+        let sent = SentLog()
+        let tracker = makeTracker(scheduler: scheduler, resolved: resolved, sent: sent)
+
+        tracker.scheduleRefresh()
+        scheduler.advance(by: 1)
+        tracker.scheduleRefresh()
+        scheduler.advance(by: 1)
+        XCTAssertEqual(sent.values, ["T"])
+    }
+
+    func test_scheduleRefresh_changeToNil_sendsNil() {
+        let scheduler = ManualScheduler()
+        let resolved = Box(value: "T")
+        let sent = SentLog()
+        let tracker = makeTracker(scheduler: scheduler, resolved: resolved, sent: sent)
+
+        tracker.scheduleRefresh()
+        scheduler.advance(by: 1)
+        resolved.value = nil
+        tracker.scheduleRefresh()
+        scheduler.advance(by: 1)
+        XCTAssertEqual(sent.values, ["T", nil])
+    }
+
+    private final class Box { var value: String?; init(value: String?) { self.value = value } }
+    private final class SentLog { var values: [String?] = [] }
+
     private func makeDir(_ name: String) throws -> String {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("termy-viewed-\(UUID().uuidString)")
