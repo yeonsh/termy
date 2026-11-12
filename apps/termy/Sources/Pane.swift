@@ -87,6 +87,13 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
     /// that never ran.
     var onPaneClicked: (() -> Void)?
 
+    /// header에서 왼쪽 버튼을 눌렀다. Workspace가 포커스를 주고, 끌면 pane을 옮긴다(`handleHeaderMouseDown`).
+    /// header만의 경로라 터미널 안의 클릭·선택(`onPaneClicked`)과 섞이지 않는다.
+    var onHeaderMouseDown: ((NSEvent) -> Void)?
+
+    /// header 라벨과 같은 글자(`project  /  branch`). 끄는 동안 커서 옆 칩에 쓴다.
+    var headerTitle: String { headerView.title }
+
     private let headerView: PaneHeaderView
     private let headerHeight: CGFloat = 26
     private var isShowingActiveAppearance = false
@@ -256,6 +263,9 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
 
     private func setupHeader() {
         headerView.setHerdrMark(toolTip: Self.herdrMarkToolTip(for: launch))
+        headerView.onMouseDown = { [weak self] event in
+            self?.onHeaderMouseDown?(event)
+        }
         headerView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(headerView)
         NSLayoutConstraint.activate([
@@ -841,6 +851,15 @@ final class PaneHeaderView: NSView {
     private var project: String = ""
     private var branch: String?
 
+    /// 왼쪽 버튼을 눌렀다(라벨·활동 막대 위 포함). Pane이 `onHeaderMouseDown`으로 넘긴다.
+    var onMouseDown: ((NSEvent) -> Void)?
+
+    /// 라벨과 같은 글자: `project  /  branch`, branch가 없으면 project.
+    var title: String {
+        guard let branch, !branch.isEmpty else { return project }
+        return "\(project)  /  \(branch)"
+    }
+
     init() {
         super.init(frame: .zero)
         wantsLayer = true
@@ -909,6 +928,12 @@ final class PaneHeaderView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    /// super를 부르지 않는다: header의 클릭·끌기는 `onMouseDown`이 맡는다. 라벨(NSTextField)과 활동 막대 위의
+    /// 클릭도 responder chain으로 여기에 온다.
+    override func mouseDown(with event: NSEvent) {
+        onMouseDown?(event)
+    }
 
     func configure(project: String, branch: String?, appearance: NSAppearance?) {
         self.project = project

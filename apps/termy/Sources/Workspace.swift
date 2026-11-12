@@ -290,7 +290,12 @@ struct FilterNavigationHistory {
 final class Workspace: NSView, NSSplitViewDelegate {
     /// 배치의 출처: project마다 분할 tree 하나(잎 = pane id). 모든 pane은 자기 `projectId`의 layout에 보이는 잎으로
     /// 정확히 한 번 있다. 다른 project로 `cd`한 pane의 잎은 옛 project layout에 "떠난" 잎으로만 남는다.
-    private var layouts: [String: ProjectPaneLayout] = [:]
+    private var layouts: [String: ProjectPaneLayout] = [:] {
+        didSet { layoutGeneration &+= 1 }
+    }
+    /// 배치가 바뀔 때마다 늘어난다: relayout, `layouts` 변경, Workspace 크기 변경. 끌기는 시작할 때 값을 잡아 두고,
+    /// 놓을 때 달라졌으면(끄는 도중 pane이 닫힘·새 pane·필터 전환·창 크기 변경) 그때 계산한 계획을 버린다.
+    private(set) var layoutGeneration = 0
     private var paneCreationOrder: [Pane] = []
     /// Project ids the user arranged by dragging the titlebar chips. Layered
     /// over the discovery order by `knownProjectIds`; see `ProjectOrder`.
@@ -359,6 +364,12 @@ final class Workspace: NSView, NSSplitViewDelegate {
         setupHiddenPaneParking()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize != frame.size
+        super.setFrameSize(newSize)
+        if changed { layoutGeneration &+= 1 }
+    }
 
     override func layout() {
         super.layout()
@@ -610,6 +621,10 @@ final class Workspace: NSView, NSSplitViewDelegate {
         pane.onPaneClicked = { [weak self, weak pane] in
             guard let self, let pane else { return }
             self.focus(pane: pane)
+        }
+        pane.onHeaderMouseDown = { [weak self, weak pane] event in
+            guard let self, let pane else { return }
+            self.handleHeaderMouseDown(on: pane, event: event)
         }
         pane.onProjectChanged = { [weak self, weak pane] in
             guard let self, let pane else { return }
@@ -980,6 +995,128 @@ final class Workspace: NSView, NSSplitViewDelegate {
         }
     }
 
+    // MARK: - Drag to rearrange
+
+    private static let paneDragThreshold: CGFloat = 4
+    private static let escapeKeyCode: UInt16 = 53
+
+    /// 지금 그리는 project tree(보이는 잎만). 여러 project ALL 그리드면 nil.
+    private var displayedTree: PaneLayoutNode<String>? {
+        displayedProjectId.flatMap { layoutTree(forProject: $0) }
+    }
+
+    /// header를 끌어 옮길 수 있는가: 최대화 중이 아니고, project tree를 그리고 있고(여러 project ALL 그리드가 아님),
+    /// 그 tree에 이 pane과 다른 pane이 함께 있다.
+    func canBeginPaneDrag(_ pane: Pane) -> Bool {
+        guard maximizedPane == nil, let leaves = displayedTree?.leaves else { return false }
+        return leaves.count >= 2 && leaves.contains(pane.paneId)
+    }
+
+    /// `point`(Workspace 기준 y-아래)에 `pane`을 놓으면 생길 배치. nil = 작업 영역 밖이거나 제자리.
+    func dragPlan(moving pane: Pane, toFlippedPoint point: CGPoint) -> PaneDropPlan? {
+        guard let tree = displayedTree, tree.contains(pane.paneId) else { return nil }
+        return PaneDropPlanner.plan(moving: pane.paneId, to: point, bounds: bounds.size, layout: tree)
+    }
+
+    /// 끌기를 놓았다. `plan`을 계산한 뒤 배치가 바뀌었으면(`generation`이 지금과 다름) 아무것도 하지 않고 false.
+    /// 아니면 보이는 tree를 결과로 바꿔 한 번 relayout하고(PTY 크기도 이때 한 번만 바뀐다), 끌린 pane에 포커스를
+    /// 주고 저장을 요청한다.
+    @discardableResult
+    func applyDrop(_ plan: PaneDropPlan, generation: Int) -> Bool {
+        guard generation == layoutGeneration, maximizedPane == nil,
+              let projectId = displayedProjectId, var layout = layouts[projectId],
+              let visible = layout.visibleTree,
+              visible.leaves.sorted() == plan.result.leaves.sorted() else { return false }
+        // 끌린 pane = 결과 배치에서 미리보기 frame을 차지하는 잎. 같은 bounds에 같은 식으로 계산하므로 정확히 같다.
+        let draggedId = plan.result
+            .frames(in: PaneDropPlanner.contentRect(for: bounds.size), gap: PaneDropPlanner.gap)
+            .leaves.first { $0.frame == plan.previewFrame }?.leaf
+        layout.replaceVisibleTree(plan.result)
+        layouts[projectId] = layout
+        relayout()
+        if let draggedId, let dragged = paneLookup[draggedId] {
+            focus(pane: dragged)
+        }
+        onLayoutChanged?()
+        return true
+    }
+
+    /// header를 눌렀다. 먼저 포커스를 주고(클릭), 끌 수 있는 화면이면 마우스를 놓을 때까지 따라간다
+    /// (`ProjectFilterBar.handleMouseDown`과 같은 모양). 4pt 넘게 움직이면 끌기가 시작된다: 원래 pane을 흐리게 하고
+    /// 맨 위 overlay에 놓일 자리(그림자 상자)와 header 글자 칩을 그린다. 끄는 동안에는 배치를 건드리지 않고
+    /// (relayout·SIGWINCH 없음), 놓을 때 마지막으로 보여 준 계획을 한 번 적용한다. Esc, 작업 영역 밖에서 놓기,
+    /// 끄는 도중 배치가 바뀜(세대가 다름)은 취소다. 어느 쪽으로 끝나든 overlay·흐림·커서를 한 번씩 되돌린다.
+    private func handleHeaderMouseDown(on pane: Pane, event: NSEvent) {
+        focus(pane: pane)
+        guard canBeginPaneDrag(pane), let window else { return }
+        let generation = layoutGeneration
+        let start = event.locationInWindow
+        var overlay: PaneDragOverlayView?
+        var shownPlan: PaneDropPlan?
+        var drop: PaneDropPlan?
+
+        window.trackEvents(
+            matching: [.leftMouseDragged, .leftMouseUp, .keyDown],
+            timeout: .infinity,
+            mode: .eventTracking
+        ) { tracked, stop in
+            guard let tracked else { return }
+            // 셸 종료로 pane이 닫힘, 새 pane, 필터 전환, 창 크기 변경: 계획이 가리키던 배치가 이제 없다.
+            guard generation == self.layoutGeneration else {
+                stop.pointee = true
+                return
+            }
+            switch tracked.type {
+            case .keyDown:
+                if tracked.keyCode == Self.escapeKeyCode { stop.pointee = true }
+            case .leftMouseUp:
+                stop.pointee = true
+                let released = self.convert(tracked.locationInWindow, from: nil)
+                if overlay != nil, self.bounds.contains(released) { drop = shownPlan }
+            default:
+                if overlay == nil {
+                    let travel = hypot(tracked.locationInWindow.x - start.x, tracked.locationInWindow.y - start.y)
+                    guard travel > Self.paneDragThreshold else { return }
+                    overlay = self.beginPaneDrag(pane)
+                }
+                let point = self.flippedPoint(fromWindow: tracked.locationInWindow)
+                shownPlan = self.dragPlan(moving: pane, toFlippedPoint: point)
+                overlay?.showPreview(shownPlan?.previewFrame)
+                overlay?.showChip(title: pane.headerTitle, at: point)
+            }
+        }
+
+        if let overlay {
+            endPaneDrag(pane, overlay: overlay)
+        }
+        if let drop {
+            applyDrop(drop, generation: generation)
+        }
+    }
+
+    private func beginPaneDrag(_ pane: Pane) -> PaneDragOverlayView {
+        pane.alphaValue = 0.35
+        let overlay = PaneDragOverlayView(frame: bounds)
+        overlay.autoresizingMask = [.width, .height]
+        addSubview(overlay, positioned: .above, relativeTo: nil)
+        NSCursor.closedHand.push()
+        return overlay
+    }
+
+    private func endPaneDrag(_ pane: Pane, overlay: PaneDragOverlayView) {
+        overlay.removeFromSuperview()
+        pane.alphaValue = 1
+        // 끄는 도중 포커스가 다른 pane으로 갔으면(새 pane 등) 흐리지 않은 비활성 모양으로 되돌린다.
+        pane.applyActiveAppearance(pane === focusedPane)
+        NSCursor.pop()
+    }
+
+    /// 창 좌표 → Workspace 기준 y-아래 좌표(`PaneDropPlanner`·overlay가 쓰는 좌표).
+    private func flippedPoint(fromWindow point: NSPoint) -> CGPoint {
+        let local = convert(point, from: nil)
+        return CGPoint(x: local.x, y: bounds.height - local.y)
+    }
+
     // MARK: - Layout
 
     /// What one relayout puts on screen.
@@ -1009,6 +1146,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
     /// Rebuild the split views from the layout trees. Moves existing Pane
     /// NSViews between superviews — their pty/terminal state persists.
     private func relayout() {
+        layoutGeneration &+= 1
         // Weights belong to the splits about to be replaced; drop them so a
         // recycled ObjectIdentifier can't pick up a stale entry.
         splitWeights = [:]
