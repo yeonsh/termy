@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>termy — pane 끌어 옮기기 프로토타입</title>
+<style>
+  :root { --bg:#141417; --ws:#1c1c21; --pane:#0f0f12; --fg:#dcdce2; --dim:#8a8a96; --accent:#5aa2ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:13px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif; }
+  .wrap { padding:18px 24px 24px; }
+  h1 { font-size:16px; margin:0 0 4px; font-weight:600; }
+  .sub { color:var(--dim); margin:0 0 12px; line-height:1.55; }
+  .bar { display:flex; gap:14px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  button { background:#2a2a31; color:var(--fg); border:1px solid #3a3a44; border-radius:6px;
+           padding:5px 10px; cursor:pointer; font:inherit; }
+  button:hover { background:#33333b; }
+  label { color:var(--dim); cursor:pointer; user-select:none; display:flex; gap:6px; align-items:center; }
+  #ws { position:relative; background:var(--ws); border-radius:10px; overflow:hidden; user-select:none; }
+  .pane { position:absolute; border-radius:8px; overflow:hidden; background:var(--pane);
+          border:1px solid #2c2c34; transition:left .18s, top .18s, width .18s, height .18s, opacity .12s; }
+  .pane .hdr { height:26px; display:flex; align-items:center; gap:8px; padding:0 10px; font-size:12px;
+               cursor:grab; border-bottom:1px solid; white-space:nowrap; overflow:hidden; }
+  .pane .hdr b { font-weight:700; }
+  .pane .body { padding:8px 10px; font:12px ui-monospace, Menlo, monospace; color:#9aa3ad;
+                white-space:pre; line-height:1.55; overflow:hidden; }
+  .pane.dragging { opacity:.35; }
+  body.is-dragging, body.is-dragging .hdr { cursor:grabbing; }
+  #shadow { position:absolute; border-radius:8px; border:2px solid rgba(90,162,255,.95);
+            background:rgba(90,162,255,.16); pointer-events:none; display:none; z-index:20;
+            box-shadow:0 10px 28px rgba(0,0,0,.45);
+            transition:left .09s, top .09s, width .09s, height .09s; }
+  #chip { position:fixed; pointer-events:none; display:none; z-index:30; padding:4px 9px; border-radius:6px;
+          font-size:12px; background:#2b2b33; border:1px solid #474752; box-shadow:0 4px 14px rgba(0,0,0,.4); }
+  #zones { position:absolute; left:0; top:0; pointer-events:none; z-index:15; }
+  #status { margin-top:10px; min-height:22px; font-size:14px; }
+  #status .k { color:var(--accent); font-weight:600; }
+  .legend { margin-top:14px; color:var(--dim); line-height:1.7; }
+  .legend b { color:var(--fg); font-weight:600; }
+  .sw { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>pane 끌어 옮기기 — 손으로 만져 보는 프로토타입</h1>
+  <p class="sub">pane 윗부분(색이 든 header)을 잡고 끌어 보세요. 파란 상자가 <b>놓았을 때 그 pane이 차지할 정확한 위치와 크기</b>입니다.
+    놓으면 실제로 배치가 바뀝니다. 끄는 중에 Esc를 누르면 취소됩니다.</p>
+
+  <div class="bar">
+    <button id="preset1">기본 배치 (A | B/C | D)</button>
+    <button id="preset2">복잡한 배치</button>
+    <button id="add">+ pane</button>
+    <label><input type="checkbox" id="swap"> 가운데에 놓으면 자리 바꾸기</label>
+    <label><input type="checkbox" id="showZones"> 끄는 동안 드롭 영역 보기</label>
+  </div>
+
+  <div id="ws">
+    <svg id="zones"></svg>
+    <div id="shadow"></div>
+  </div>
+  <div id="status">&nbsp;</div>
+
+  <div class="legend">
+    <div><span class="sw" style="background:rgba(90,162,255,.5)"></span><b>pane 가장자리 쪽</b> (pane을 대각선으로 나눈 네 삼각형) — <b>그 pane만</b> 둘로 나눕니다. 그 pane의 자리를 반씩 씁니다.</div>
+    <div><span class="sw" style="background:rgba(80,200,170,.6)"></span><b>두 pane 사이 틈</b> (틈 양옆 14px) — 그 <b>사이에 끼웁니다</b>. 같은 줄에 있는 pane들과 같은 몫을 받습니다.</div>
+    <div><span class="sw" style="background:rgba(230,150,60,.6)"></span><b>작업 영역 맨 바깥 테두리</b> (16px) — 전체 높이(또는 전체 너비)의 새 열(행)을 만듭니다.</div>
+    <div><span class="sw" style="background:rgba(200,120,220,.6)"></span><b>가운데</b> (위 체크를 켰을 때) — 두 pane의 자리를 바꿉니다.</div>
+    <div style="margin-top:6px">놓아도 배치가 그대로인 곳(제자리, 바로 옆 틈 등)에서는 상자가 나오지 않습니다.</div>
+  </div>
+</div>
+<div id="chip"></div>
+
+<script>
+(() => {
+const GAP = 8, INSET = 4, OUTER = 16, GAPZONE = 14, CENTER = 0.3;
+const COLORS = ['#e0a458','#5aa2ff','#7bc47f','#c678dd','#e06c75','#56b6c2','#d19a66','#98c379'];
+const PROJECTS = [['api','main'],['web','feat/login'],['infra','main'],['docs','draft'],['cli','fix/tty'],['ml','exp-3'],['ops','main'],['app','release']];
+let seq = 0, letter = 0;
+
+const ws = document.getElementById('ws');
+const shadow = document.getElementById('shadow');
+const chip = document.getElementById('chip');
+const zonesSvg = document.getElementById('zones');
+const statusEl = document.getElementById('status');
+const swapBox = document.getElementById('swap');
+const zonesBox = document.getElementById('showZones');
+
+function mkPane() {
+  const i = letter++;
+  const [proj, br] = PROJECTS[i % PROJECTS.length];
+  return { type:'pane', id:'p' + (seq++), letter:String.fromCharCode(65 + i), proj, br, color:COLORS[i % COLORS.length] };
+}
+function mkSplit(axis, children, weights) {
+  return { type:'split', id:'s' + (seq++), axis, children, weights: weights || children.map(() => 1 / children.length) };
+}
+function preset1() {
+  letter = 0;
+  const A = mkPane(), B = mkPane(), C = mkPane(), D = mkPane();
+  return mkSplit('row', [A, mkSplit('col', [B, C]), D]);
+}
+function preset2() {
+  letter = 0;
+  const A = mkPane(), B = mkPane(), C = mkPane(), D = mkPane(), E = mkPane(), F = mkPane();
+  return mkSplit('row', [
+    mkSplit('col', [A, mkSplit('row', [B, C])], [0.5, 0.5]),
+    D,
+    mkSplit('col', [E, F], [0.6, 0.4]),
+  ], [0.4, 0.25, 0.35]);
+}
+let tree = preset1();
+
+// ---------- tree helpers ----------
+const clone = t => JSON.parse(JSON.stringify(t));
+function find(root, id, parent = null) {
+  if (root.id === id) return { node: root, parent };
+  if (root.type === 'split') for (const c of root.children) { const f = find(c, id, root); if (f) return f; }
+  return null;
+}
+function replace(root, id, node) {
+  const f = find(root, id);
+  if (!f.parent) return node;
+  f.parent.children[f.parent.children.indexOf(f.node)] = node;
+  return root;
+}
+function normalize(node) {
+  if (node.type !== 'split') return node;
+  node.children = node.children.map(normalize);
+  const kids = [], ws_ = [];
+  node.children.forEach((c, i) => {
+    const w = node.weights[i];
+    if (c.type === 'split' && c.axis === node.axis) c.children.forEach((cc, j) => { kids.push(cc); ws_.push(w * c.weights[j]); });
+    else { kids.push(c); ws_.push(w); }
+  });
+  node.children = kids; node.weights = ws_;
+  return node.children.length === 1 ? node.children[0] : node;
+}
+function remove(root, id) {
+  const f = find(root, id);
+  const p = f.parent, i = p.children.indexOf(f.node), w = p.weights[i];
+  p.children.splice(i, 1); p.weights.splice(i, 1);
+  p.weights = p.weights.map(x => x / (1 - w));
+  return normalize(root);
+}
+function insertAt(container, index, node) {
+  const n = container.children.length;
+  container.weights = container.weights.map(w => w * n / (n + 1));
+  container.children.splice(index, 0, node);
+  container.weights.splice(index, 0, 1 / (n + 1));
+}
+const axisOf = side => (side === 'left' || side === 'right') ? 'row' : 'col';
+const before = side => side === 'left' || side === 'top';
+function shape(n) { return n.type === 'pane' ? n.id : n.axis + '(' + n.children.map(shape).join(',') + ')'; }
+function paneCount(n) { return n.type === 'pane' ? 1 : n.children.reduce((s, c) => s + paneCount(c), 0); }
+
+// Insert a placeholder at the target first (all references still valid), then remove the source.
+function applyDrop(t0, srcId, target) {
+  let t = clone(t0);
+  if (target.kind === 'swap') {
+    const a = find(t, srcId).node, b = find(t, target.paneId).node;
+    for (const k of ['id','letter','proj','br','color']) [a[k], b[k]] = [b[k], a[k]];
+    return t;
+  }
+  const src = find(t, srcId).node;
+  const ph = { ...src, id:'__new' };
+  if (target.kind === 'split') {
+    const tgt = find(t, target.paneId).node;
+    const s = mkSplit(axisOf(target.side), before(target.side) ? [ph, tgt] : [tgt, ph], [0.5, 0.5]);
+    t = replace(t, target.paneId, s);
+  } else if (target.kind === 'between') {
+    insertAt(find(t, target.containerId).node, target.index, ph);
+  } else if (target.kind === 'edge') {
+    const axis = axisOf(target.side);
+    if (t.type === 'split' && t.axis === axis) insertAt(t, before(target.side) ? 0 : t.children.length, ph);
+    else t = mkSplit(axis, before(target.side) ? [ph, t] : [t, ph], [0.5, 0.5]);
+  }
+  t = remove(t, srcId);
+  ph.id = srcId;
+  return t;
+}
+
+// ---------- layout ----------
+function layout(node, r, out, containers, depth = 0) {
+  if (node.type === 'pane') { out[node.id] = r; return; }
+  const n = node.children.length, h = node.axis === 'row';
+  const total = (h ? r.w : r.h) - GAP * (n - 1);
+  let pos = h ? r.x : r.y;
+  const rects = [];
+  node.children.forEach((c, i) => {
+    const size = total * node.weights[i];
+    const cr = h ? { x:pos, y:r.y, w:size, h:r.h } : { x:r.x, y:pos, w:r.w, h:size };
+    rects.push(cr);
+    layout(c, cr, out, containers, depth + 1);
+    pos += size + GAP;
+  });
+  containers.push({ node, rect:r, rects, depth });
+}
+let W = 0, H = 0, cur = { rects:{}, containers:[] };
+function compute(t) {
+  const rects = {}, containers = [];
+  layout(t, { x:INSET, y:INSET, w:W - 2 * INSET, h:H - 2 * INSET }, rects, containers);
+  return { rects, containers };
+}
+
+// ---------- render ----------
+const els = {};
+function paneEl(p) {
+  let el = els[p.id];
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'pane';
+    el.innerHTML = '<div class="hdr"></div><div class="body"></div>';
+    el.querySelector('.hdr').addEventListener('mousedown', e => onDown(e, p.id));
+    ws.appendChild(el);
+    els[p.id] = el;
+  }
+  const hdr = el.querySelector('.hdr');
+  hdr.innerHTML = `<b>${p.letter}</b><span>${p.proj}</span><span style="opacity:.6">/ ${p.br}</span>`;
+  hdr.style.background = p.color + '2e';
+  hdr.style.borderBottomColor = p.color + '80';
+  hdr.style.color = p.color;
+  el.querySelector('.body').textContent = `~/proj/${p.proj} (${p.br}) $ claude\n● Thinking…\n`;
+  return el;
+}
+function panesOf(n, acc = []) { if (n.type === 'pane') acc.push(n); else n.children.forEach(c => panesOf(c, acc)); return acc; }
+function render() {
+  W = Math.min(1200, window.innerWidth - 48);
+  H = Math.max(420, Math.min(620, window.innerHeight - 260));
+  ws.style.width = W + 'px'; ws.style.height = H + 'px';
+  zonesSvg.setAttribute('width', W); zonesSvg.setAttribute('height', H);
+  cur = compute(tree);
+  const live = new Set();
+  for (const p of panesOf(tree)) {
+    live.add(p.id);
+    const el = paneEl(p), r = cur.rects[p.id];
+    Object.assign(el.style, { left:r.x + 'px', top:r.y + 'px', width:r.w + 'px', height:r.h + 'px' });
+  }
+  for (const id of Object.keys(els)) if (!live.has(id)) { els[id].remove(); delete els[id]; }
+}
+
+// ---------- hit testing ----------
+const inside = (p, r) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+function hitTest(p) {
+  const d = { left:p.x, right:W - p.x, top:p.y, bottom:H - p.y };
+  const m = Math.min(d.left, d.right, d.top, d.bottom);
+  if (m < 0) return null;
+  if (m <= OUTER) {
+    const side = Object.keys(d).find(k => d[k] === m);
+    return { kind:'edge', side };
+  }
+  let best = null;
+  for (const c of cur.containers) {
+    const h = c.node.axis === 'row';
+    for (let i = 1; i < c.rects.length; i++) {
+      const a = c.rects[i - 1], b = c.rects[i];
+      const line = h ? (a.x + a.w + b.x) / 2 : (a.y + a.h + b.y) / 2;
+      const dist = Math.abs((h ? p.x : p.y) - line);
+      const along = h ? (p.y >= c.rect.y && p.y <= c.rect.y + c.rect.h) : (p.x >= c.rect.x && p.x <= c.rect.x + c.rect.w);
+      if (dist <= GAPZONE && along && (!best || dist < best.dist || (dist === best.dist && c.depth > best.depth)))
+        best = { kind:'between', containerId:c.node.id, index:i, dist, depth:c.depth, axis:c.node.axis,
+                 prev:c.node.children[i - 1], next:c.node.children[i] };
+    }
+  }
+  if (best) return best;
+  for (const [id, r] of Object.entries(cur.rects)) {
+    if (!inside(p, r)) continue;
+    if (swapBox.checked) {
+      const ix = r.w * CENTER, iy = r.h * CENTER;
+      if (p.x > r.x + ix && p.x < r.x + r.w - ix && p.y > r.y + iy && p.y < r.y + r.h - iy) return { kind:'swap', paneId:id };
+    }
+    const dx = (p.x - (r.x + r.w / 2)) / (r.w / 2), dy = (p.y - (r.y + r.h / 2)) / (r.h / 2);
+    const side = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'top' : 'bottom');
+    return { kind:'split', paneId:id, side };
+  }
+  return null;
+}
+
+// ---------- descriptions ----------
+const SIDE = { left:'왼쪽', right:'오른쪽', top:'위쪽', bottom:'아래쪽' };
+const L = id => { const f = find(tree, id); return f ? f.node.letter : '?'; };
+function label(n) { return n.type === 'pane' ? n.letter : '[' + panesOf(n).map(x => x.letter).join('') + ']'; }
+function describe(t, src) {
+  const s = '<span class="k">' + L(src) + '</span>';
+  if (t.kind === 'edge') return `작업 영역 ${SIDE[t.side]} 끝 → ${s}가 전체 ${axisOf(t.side) === 'row' ? '높이의 새 열' : '너비의 새 행'}이 됨`;
+  if (t.kind === 'between') return `${label(t.prev)}와 ${label(t.next)} 사이 틈 → ${s}를 그 사이에 끼움 (같은 줄 pane들과 같은 몫)`;
+  if (t.kind === 'swap') return `${L(t.paneId)}의 가운데 → ${s}와 ${L(t.paneId)}의 자리를 바꿈`;
+  const dir = axisOf(t.side) === 'row' ? '좌우' : '위아래';
+  return `${L(t.paneId)}의 ${SIDE[t.side]} → ${L(t.paneId)}를 ${dir}로 나누고 ${s}가 ${SIDE[t.side]} 절반을 씀`;
+}
+
+// ---------- zones overlay ----------
+function drawZones(target, srcId) {
+  if (!zonesBox.checked) { zonesSvg.innerHTML = ''; return; }
+  let s = '';
+  const rect = (x, y, w, h, fill) => s += `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`;
+  rect(0, 0, W, OUTER, 'rgba(230,150,60,.14)'); rect(0, H - OUTER, W, OUTER, 'rgba(230,150,60,.14)');
+  rect(0, OUTER, OUTER, H - 2 * OUTER, 'rgba(230,150,60,.14)'); rect(W - OUTER, OUTER, OUTER, H - 2 * OUTER, 'rgba(230,150,60,.14)');
+  for (const c of cur.containers) {
+    const h = c.node.axis === 'row';
+    for (let i = 1; i < c.rects.length; i++) {
+      const a = c.rects[i - 1], b = c.rects[i];
+      const on = target && target.kind === 'between' && target.containerId === c.node.id && target.index === i;
+      const fill = on ? 'rgba(80,200,170,.35)' : 'rgba(80,200,170,.12)';
+      if (h) { const x = (a.x + a.w + b.x) / 2; rect(x - GAPZONE, c.rect.y, GAPZONE * 2, c.rect.h, fill); }
+      else { const y = (a.y + a.h + b.y) / 2; rect(c.rect.x, y - GAPZONE, c.rect.w, GAPZONE * 2, fill); }
+    }
+  }
+  if (target && (target.kind === 'split' || target.kind === 'swap')) {
+    const r = cur.rects[target.paneId];
+    s += `<line x1="${r.x}" y1="${r.y}" x2="${r.x + r.w}" y2="${r.y + r.h}" stroke="rgba(90,162,255,.5)" stroke-dasharray="4 4"/>`;
+    s += `<line x1="${r.x + r.w}" y1="${r.y}" x2="${r.x}" y2="${r.y + r.h}" stroke="rgba(90,162,255,.5)" stroke-dasharray="4 4"/>`;
+    if (swapBox.checked) {
+      const ix = r.w * CENTER, iy = r.h * CENTER;
+      s += `<rect x="${r.x + ix}" y="${r.y + iy}" width="${r.w - 2 * ix}" height="${r.h - 2 * iy}" fill="rgba(200,120,220,${target.kind === 'swap' ? .3 : .1})" stroke="rgba(200,120,220,.6)"/>`;
+    }
+  }
+  zonesSvg.innerHTML = s;
+}
+
+// ---------- drag ----------
+let drag = null;
+function onDown(e, id) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  drag = { id, x0:e.clientX, y0:e.clientY, active:false, result:null };
+}
+function wsPoint(e) { const b = ws.getBoundingClientRect(); return { x:e.clientX - b.left, y:e.clientY - b.top }; }
+function setStatus(html) { statusEl.innerHTML = html || '&nbsp;'; }
+function hidePreview() { shadow.style.display = 'none'; }
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  if (!drag.active) {
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 4) return;
+    if (paneCount(tree) < 2) { drag = null; return; }
+    drag.active = true;
+    els[drag.id].classList.add('dragging');
+    document.body.classList.add('is-dragging');
+    const p = find(tree, drag.id).node;
+    chip.innerHTML = `<b style="color:${p.color}">${p.letter}</b> ${p.proj} / ${p.br}`;
+    chip.style.display = 'block';
+  }
+  chip.style.left = (e.clientX + 14) + 'px'; chip.style.top = (e.clientY + 12) + 'px';
+  const pt = wsPoint(e);
+  const target = hitTest(pt);
+  drawZones(target, drag.id);
+  drag.result = null;
+  if (!target) { hidePreview(); setStatus('작업 영역 밖 — 놓으면 취소'); return; }
+  if ((target.kind === 'split' || target.kind === 'swap') && target.paneId === drag.id) {
+    hidePreview(); setStatus('제자리 — 놓아도 바뀌지 않음'); return;
+  }
+  const result = applyDrop(tree, drag.id, target);
+  if (target.kind !== 'swap' && shape(result) === shape(tree)) {
+    hidePreview(); setStatus('제자리 — 놓아도 바뀌지 않음'); return;
+  }
+  const r = compute(result).rects[drag.id];
+  Object.assign(shadow.style, { display:'block', left:r.x + 'px', top:r.y + 'px', width:r.w + 'px', height:r.h + 'px' });
+  drag.result = result;
+  setStatus(describe(target, drag.id));
+});
+function endDrag(commit) {
+  if (!drag) return;
+  if (drag.active) {
+    els[drag.id] && els[drag.id].classList.remove('dragging');
+    document.body.classList.remove('is-dragging');
+    chip.style.display = 'none';
+    hidePreview();
+    zonesSvg.innerHTML = '';
+    if (commit && drag.result) { tree = drag.result; render(); setStatus('놓았습니다'); }
+    else setStatus('취소됨');
+  }
+  drag = null;
+}
+window.addEventListener('mouseup', () => endDrag(true));
+window.addEventListener('keydown', e => { if (e.key === 'Escape') endDrag(false); });
+window.addEventListener('resize', render);
+
+document.getElementById('preset1').onclick = () => { tree = preset1(); render(); setStatus(''); };
+document.getElementById('preset2').onclick = () => { tree = preset2(); render(); setStatus(''); };
+document.getElementById('add').onclick = () => {
+  const p = mkPane();
+  if (tree.type === 'split' && tree.axis === 'row') insertAt(tree, tree.children.length, p);
+  else tree = mkSplit('row', [tree, p], [0.5, 0.5]);
+  render();
+};
+render();
+})();
+</script>
+</body>
+</html>
