@@ -226,18 +226,20 @@ final class RemoteProjectTests: XCTestCase {
 
     // MARK: - ⌘K 기록 저장(R17)
 
+    private typealias Info = WorkspaceAutosaver.PaneInfo
+
     func testAutosaveGroupsLocalPanesByWorktreeAsBefore() {
-        let records = WorkspaceAutosaver.records(rows: [[
+        let records = WorkspaceAutosaver.records(layouts: [PaneLayoutNode<Info>.fromColumns([[
             .init(cwd: "/p/api", key: "/p/api", label: "api", machine: nil),
             .init(cwd: "/p/api/docs", key: "/p/api", label: "api", machine: nil),
             .init(cwd: "/p/web", key: "/p/web", label: "web", machine: nil),
-        ]], now: Date(timeIntervalSince1970: 5))
+        ]])!], now: Date(timeIntervalSince1970: 5))
         let byKey = Dictionary(uniqueKeysWithValues: records.map { ($0.canonicalPath, $0) })
         XCTAssertEqual(Set(byKey.keys), ["/p/api", "/p/web"])
+        let api = [PaneRecord(cwd: "/p/api"), PaneRecord(cwd: "/p/api/docs")]
         XCTAssertEqual(byKey["/p/api"], WorkspaceRecord(
             canonicalPath: "/p/api", displayLabel: "api", updatedAt: Date(timeIntervalSince1970: 5),
-            panes: [PaneRecord(cwd: "/p/api"), PaneRecord(cwd: "/p/api/docs")],
-            rows: [[PaneRecord(cwd: "/p/api"), PaneRecord(cwd: "/p/api/docs")]]))
+            panes: api, rows: [api], layout: PaneLayoutNode.fromColumns([api])))
         XCTAssertNil(byKey["/p/web"]?.machine)
     }
 
@@ -245,11 +247,11 @@ final class RemoteProjectTests: XCTestCase {
     /// project 키로 묶어 원격 기록으로 남긴다.
     func testAutosaveSavesRemotePanesAsARemoteRecord() {
         let remote = { (cwd: String) in
-            WorkspaceAutosaver.PaneInfo(cwd: cwd, key: "bdpc01:/srv/app", label: "app@bdpc01", machine: "bdpc01")
+            Info(cwd: cwd, key: "bdpc01:/srv/app", label: "app@bdpc01", machine: "bdpc01")
         }
-        let records = WorkspaceAutosaver.records(rows: [
-            [remote("/srv/app"), .init(cwd: "/p/api", key: "/p/api", label: "api", machine: nil)],
-            [remote("/srv/app/sub")],
+        let records = WorkspaceAutosaver.records(layouts: [
+            PaneLayoutNode<Info>.fromColumns([[remote("/srv/app")], [remote("/srv/app/sub")]])!,
+            PaneLayoutNode<Info>.fromColumns([[.init(cwd: "/p/api", key: "/p/api", label: "api", machine: nil)]])!,
         ], now: Date(timeIntervalSince1970: 5))
         let byKey = Dictionary(uniqueKeysWithValues: records.map { ($0.canonicalPath, $0) })
         XCTAssertEqual(Set(byKey.keys), ["bdpc01:/srv/app", "/p/api"], "no local /srv/app record")
@@ -261,11 +263,26 @@ final class RemoteProjectTests: XCTestCase {
             PaneRecord(cwd: cwd, backend: .hc, machine: "bdpc01", projectId: "app@bdpc01", projectKey: "bdpc01:/srv/app")
         }
         XCTAssertEqual(record?.rows, [[pane("/srv/app")], [pane("/srv/app/sub")]])
+        XCTAssertEqual(record?.layout, PaneLayoutNode.fromColumns([[pane("/srv/app")], [pane("/srv/app/sub")]]))
         XCTAssertEqual(record?.panes, [pane("/srv/app"), pane("/srv/app/sub")])
         XCTAssertNil(record?.panes.first?.paneId, "⌘K records don't keep pane ids (R15)")
 
         XCTAssertEqual(byKey["/p/api"]?.panes, [PaneRecord(cwd: "/p/api")])
         XCTAssertNil(byKey["/p/api"]?.machine)
+    }
+
+    /// 한 키의 pane이 project tree 여럿에 있으면(드문 경우) 그 tree들을 좌우로 균등하게 묶는다.
+    func testAutosaveJoinsOneKeyFromSeveralProjectTrees() {
+        let api = { (cwd: String) in Info(cwd: cwd, key: "/p/api", label: "api", machine: nil) }
+        let records = WorkspaceAutosaver.records(layouts: [
+            PaneLayoutNode<Info>.fromColumns([[api("/p/api"), api("/p/api/docs")]])!,
+            .leaf(api("/p/api/src")),
+        ], now: Date(timeIntervalSince1970: 5))
+        XCTAssertEqual(records.map(\.canonicalPath), ["/p/api"])
+        let columns = [[PaneRecord(cwd: "/p/api"), PaneRecord(cwd: "/p/api/docs")], [PaneRecord(cwd: "/p/api/src")]]
+        XCTAssertEqual(records.first?.layout, PaneLayoutNode.fromColumns(columns))
+        XCTAssertEqual(records.first?.rows, columns)
+        XCTAssertEqual(records.first?.panes, columns.flatMap { $0 })
     }
 
     // MARK: - 머신이 끊긴 채 닫은 원격 pane(R18)

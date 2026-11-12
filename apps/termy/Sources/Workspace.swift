@@ -291,9 +291,6 @@ final class Workspace: NSView, NSSplitViewDelegate {
     /// 배치의 출처: project마다 분할 tree 하나(잎 = pane id). 모든 pane은 자기 `projectId`의 layout에 보이는 잎으로
     /// 정확히 한 번 있다. 다른 project로 `cd`한 pane의 잎은 옛 project layout에 "떠난" 잎으로만 남는다.
     private var layouts: [String: ProjectPaneLayout] = [:]
-    /// 임시 호환용(저장 형식이 아직 열 목록이다): project마다 보이는 tree를 열로 근사해 `knownProjectIds` 순서로 잇는다.
-    /// 펼친 순서는 잎 읽는 순서와 같다.
-    var rows: [[Pane]] { layoutSnapshot().flatMap { $0.tree.approximateColumns() } }
     private var paneCreationOrder: [Pane] = []
     /// Project ids the user arranged by dragging the titlebar chips. Layered
     /// over the discovery order by `knownProjectIds`; see `ProjectOrder`.

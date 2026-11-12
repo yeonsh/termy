@@ -16,11 +16,10 @@
 //
 // Not yet in schema v1 (deferred with explicit nil/optional shapes so we
 // can add them without a version bump):
-//   * pane geometry (width/height ratios for multi-pane split restore)
 //   * last-focused pane ID
 //
-// Both can be added as optional fields in a later commit once Workspace.swift
-// carries enough structure to serialize them.
+// 분할 tree(`layout`, 비율 포함)는 버전을 올리지 않고 optional 필드로 더했다. 예전 빌드가 읽도록 `rows`·`panes`도
+// 그 tree에서 계속 쓴다.
 //
 // 원격 project(머신 + 폴더)도 같은 v1 기록이다. `machine`이 있으면 원격이고, 키(`canonicalPath`)는
 // `<machine>:<folder>`라 로컬 경로와 겹치지 않으며 `displayLabel`은 `<folder basename>@<machine>`이다.
@@ -45,6 +44,8 @@ struct WorkspaceRecord: Codable, Equatable {
     var rows: [[PaneRecord]]?
     /// 원격 project의 머신(hc `machine.list`의 이름). 로컬 project와 예전 파일은 nil.
     var machine: String?
+    /// 이 project의 분할 tree(비율 포함). 이 필드 전의 파일은 nil이고 `rows`에서 만든다(`effectiveLayout`).
+    var layout: PaneLayoutNode<PaneRecord>?
 
     init(
         schemaVersion: Int = Self.currentSchemaVersion,
@@ -53,7 +54,8 @@ struct WorkspaceRecord: Codable, Equatable {
         updatedAt: Date = Date(),
         panes: [PaneRecord],
         rows: [[PaneRecord]]? = nil,
-        machine: String? = nil
+        machine: String? = nil,
+        layout: PaneLayoutNode<PaneRecord>? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.canonicalPath = canonicalPath
@@ -62,6 +64,7 @@ struct WorkspaceRecord: Codable, Equatable {
         self.panes = panes
         self.rows = rows
         self.machine = machine
+        self.layout = layout
     }
 
     /// Effective grid layout: prefer the structured `rows` when present,
@@ -70,6 +73,12 @@ struct WorkspaceRecord: Codable, Equatable {
     var effectiveRows: [[PaneRecord]] {
         if let rows, !rows.isEmpty { return rows }
         return panes.isEmpty ? [] : [panes]
+    }
+
+    /// 복원할 tree: 저장된 `layout`이 있으면 그것, 없으면(예전 기록) `effectiveRows`의 열 구조를 균등 비율로.
+    /// pane이 없으면 nil.
+    var effectiveLayout: PaneLayoutNode<PaneRecord>? {
+        layout ?? PaneLayoutNode.fromColumns(effectiveRows)
     }
 }
 

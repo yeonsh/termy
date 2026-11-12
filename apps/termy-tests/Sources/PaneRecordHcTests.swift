@@ -97,6 +97,25 @@ final class PaneRecordHcTests: XCTestCase {
         XCTAssertNil(filteredToSkipped.restorable(instance: "debug")?.filterProjectId)
     }
 
+    /// 분할 tree에서도 같은 pane을 빼고(빼기 규칙: 자식 하나 남은 split은 없앤다), 남은 것이 없는 project tree는 버린다.
+    func testRestorableDropsOtherInstanceHcPanesFromLayouts() {
+        let app = PaneLayoutNode.fromColumns([[hc("R1", instance: "release"), local("L")],
+                                              [hc("D", instance: "debug"), hc("O", instance: nil)]])!
+        let other = PaneLayoutNode.leaf(hc("R2", instance: "release", project: "other"))
+        let window = WindowRecord(frame: FrameRecord(x: 0, y: 0, width: 800, height: 600),
+                                  layouts: [ProjectLayoutRecord(projectId: "app", root: app),
+                                            ProjectLayoutRecord(projectId: "other", root: other)],
+                                  filterProjectId: "app", focusedPaneIndex: 2, projectOrder: ["app", "other"])
+        let kept = window.restorable(instance: "debug")
+        XCTAssertEqual(kept?.layouts?.map(\.projectId), ["app"], "a tree with nothing left goes")
+        XCTAssertEqual(kept?.layouts?.first?.root.map(\.paneId),
+                       PaneLayoutNode<String?>.fromColumns([["L"], ["D", "O"]]),
+                       "R1's column collapses to L: no one-child split")
+        XCTAssertEqual(kept?.rows.flatMap { $0 }, kept?.layouts?.flatMap { $0.root.leaves },
+                       "rows still flatten in leaf reading order")
+        XCTAssertEqual(kept?.focusedPaneIndex, 1, "focus follows the same pane (D)")
+    }
+
     func testRestorableIsNilWhenEveryPaneBelongsToAnotherInstance() {
         let window = WindowRecord(frame: FrameRecord(x: 0, y: 0, width: 800, height: 600),
                                   rows: [[hc("R1", instance: "release")], [hc("R2", instance: "release")]])

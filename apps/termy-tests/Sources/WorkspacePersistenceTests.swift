@@ -265,4 +265,27 @@ final class WorkspacePersistenceTests: XCTestCase {
         XCTAssertEqual(rec.effectiveRows[0].count, 1)
         XCTAssertEqual(rec.effectiveRows[1].count, 2)
     }
+
+    // MARK: - Split tree (layout)
+
+    func test_effectiveLayout_prefersLayoutThenRows() throws {
+        let a = PaneRecord(cwd: "/a"), b = PaneRecord(cwd: "/b"), c = PaneRecord(cwd: "/c")
+        let saved = PaneLayoutNode.split(.topToBottom, [
+            PaneLayoutBranch(node: .leaf(b), weight: 0.7),
+            PaneLayoutBranch(node: .leaf(a), weight: 0.3),
+        ])
+        let withLayout = WorkspaceRecord(canonicalPath: "/a", displayLabel: "a", updatedAt: Date(timeIntervalSince1970: 5),
+                                         panes: [a, b], rows: [[a], [b]], layout: saved)
+        XCTAssertEqual(withLayout.effectiveLayout, saved, "the saved tree wins over rows")
+        XCTAssertEqual(try JSONDecoder().decode(WorkspaceRecord.self, from: JSONEncoder().encode(withLayout)), withLayout)
+
+        let rowsOnly = WorkspaceRecord(canonicalPath: "/a", displayLabel: "a", panes: [a, b, c], rows: [[a], [b, c]])
+        XCTAssertNil(rowsOnly.layout)
+        XCTAssertEqual(rowsOnly.effectiveLayout, PaneLayoutNode.fromColumns([[a], [b, c]]))
+
+        let panesOnly = WorkspaceRecord(canonicalPath: "/a", displayLabel: "a", panes: [a, b], rows: nil)
+        XCTAssertEqual(panesOnly.effectiveLayout, PaneLayoutNode.fromColumns([[a, b]]))
+
+        XCTAssertNil(WorkspaceRecord(canonicalPath: "/a", displayLabel: "a", panes: []).effectiveLayout)
+    }
 }

@@ -85,10 +85,9 @@ final class WorkspaceAutosaver {
     private func performSave() async {
         guard let workspace else { return }
 
-        // Snapshot the live grid structure into a Sendable payload.
-        // rows[i] is the workspace's i-th horizontal row.
-        let wsRows: [[PaneInfo]] = workspace.rows.map { row in row.map { PaneInfo(pane: $0) } }
-        for record in Self.records(rows: wsRows, now: Date()) {
+        // project마다 보이는 분할 tree를 Sendable 값으로 떠 둔다(떠난 잎은 없다).
+        let layouts = workspace.layoutSnapshot().map { $0.tree.map { PaneInfo(pane: $0) } }
+        for record in Self.records(layouts: layouts, now: Date()) {
             try? await persistence.save(record)
         }
     }
@@ -128,47 +127,48 @@ extension WorkspaceAutosaver {
         }
     }
 
-    /// Per-project aggregation that preserves the row structure: for each
-    /// workspace row, we split it by project and append each project's
-    /// slice as a row in that project's record. A project whose panes
-    /// straddle multiple workspace rows gets its own multi-row record.
-    /// An empty workspace gives no records (never write an empty one).
-    nonisolated static func records(rows wsRows: [[PaneInfo]], now: Date) -> [WorkspaceRecord] {
+    /// 기록 키별로 묶는다: project tree마다 그 키의 pane만 남긴 tree(빼기 규칙, 비율 유지)가 그 키 기록의 `layout`이고,
+    /// `panes`는 잎 읽는 순서, `rows`는 예전 빌드가 읽을 열 근사다. 한 키가 project tree 여럿에서 나오면(드문 경우)
+    /// 그 tree들을 좌우로 균등하게 묶는다. pane이 없으면 기록도 없다(빈 기록은 쓰지 않는다).
+    nonisolated static func records(layouts: [PaneLayoutNode<PaneInfo>], now: Date) -> [WorkspaceRecord] {
         struct ProjectAccum {
             var displayLabel: String
             var machine: String?
-            var rows: [[PaneRecord]] = []
+            var trees: [PaneLayoutNode<PaneInfo>] = []
         }
         var perProject: [String: ProjectAccum] = [:]
 
-        for wsRow in wsRows {
-            var sliceByProject: [String: [PaneRecord]] = [:]
-            var encounterOrder: [String] = []
-            for info in wsRow {
-                let rec = info.paneRecord
-                if sliceByProject[info.key] == nil {
-                    encounterOrder.append(info.key)
-                    sliceByProject[info.key] = [rec]
-                } else {
-                    sliceByProject[info.key]!.append(rec)
-                }
+        for tree in layouts {
+            var keys: [String] = []
+            for info in tree.leaves {
+                if !keys.contains(info.key) { keys.append(info.key) }
                 perProject[info.key, default: ProjectAccum(displayLabel: info.label, machine: info.machine)]
                     .displayLabel = info.label
             }
-            for key in encounterOrder {
-                let slice = sliceByProject[key]!
-                perProject[key]!.rows.append(slice)
+            for key in keys {
+                guard let pruned = tree.removing(where: { $0.key != key }) else { continue }
+                perProject[key]!.trees.append(pruned)
             }
         }
 
-        return perProject.map { key, accum in
-            WorkspaceRecord(
+        return perProject.compactMap { key, accum in
+            let joined: PaneLayoutNode<PaneInfo>
+            switch accum.trees.count {
+            case 0: return nil
+            case 1: joined = accum.trees[0]
+            default:
+                let weight = 1 / Double(accum.trees.count)
+                joined = PaneLayoutNode.split(.leftToRight, accum.trees.map { .init(node: $0, weight: weight) }).normalized()
+            }
+            let layout = joined.map(\.paneRecord)
+            return WorkspaceRecord(
                 canonicalPath: key,
                 displayLabel: accum.displayLabel,
                 updatedAt: now,
-                panes: accum.rows.flatMap { $0 },
-                rows: accum.rows,
-                machine: accum.machine
+                panes: layout.leaves,
+                rows: layout.approximateColumns(),
+                machine: accum.machine,
+                layout: layout
             )
         }
     }

@@ -289,10 +289,13 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     ///
     /// 모든 pane에 id·backend·project를 남기고, hc pane에만 hook 세부 정보와 자기 instance를 남긴다(hc pane은 다시
     /// 켜면 같은 terminal에 다시 붙고, 그사이 HookDaemon이 비어 있기 때문이다). agent resume은 local pane만 한다.
+    /// project마다 보이는 분할 tree(`layoutSnapshot`)를 그대로 남기고, `rows`는 그 열 근사다. `focusedPaneIndex`는
+    /// 잎 읽는 순서의 index라 복원(`applySessionLayout`)과 예전 빌드(`rows`를 펼친 순서) 모두 같은 pane을 가리킨다.
     func sessionWindowRecord(includeAgentResume: Bool = false) -> WindowRecord? {
         guard let window, !workspace.panes.isEmpty else { return nil }
-        let rows: [[PaneRecord]] = workspace.rows.map { row in
-            row.map { pane in
+        let trees = workspace.layoutSnapshot()
+        let layouts = trees.map { entry in
+            ProjectLayoutRecord(projectId: entry.projectId, root: entry.tree.map { pane in
                 let snapshot = missionControlModel.snapshot(paneId: pane.paneId)
                 var record = PaneRecord(
                     cwd: pane.currentCwd,
@@ -308,34 +311,37 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
                 record.projectId = pane.projectId
                 record.projectKey = pane.projectKey
                 return record
-            }
+            })
         }
-        if rows.flatMap({ $0 }).isEmpty { return nil }
+        let leaves = trees.flatMap { $0.tree.leaves }
+        if leaves.isEmpty { return nil }
         let filterProjectId: String?
         switch workspace.filter {
         case .all: filterProjectId = nil
         case .project(let id): filterProjectId = id
         }
         let focusedIndex = workspace.focusedPane.flatMap { focused in
-            workspace.panes.firstIndex { $0 === focused }
+            leaves.firstIndex { $0 === focused }
         }
         return WindowRecord(
             frame: FrameRecord(window.frame),
-            rows: rows,
+            layouts: layouts,
             filterProjectId: filterProjectId,
             focusedPaneIndex: focusedIndex,
             projectOrder: workspace.knownProjectIds
         )
     }
 
-    /// Rebuild this window's panes from a saved `WindowRecord`: the saved
-    /// columns become a split tree, each leaf's pane is created in reading
-    /// order, and the workspace installs that tree (`applyRestoredLayout`).
+    /// Rebuild this window's panes from a saved `WindowRecord`: for each saved
+    /// project tree (`layoutTrees` — the columns of an older file become one
+    /// tree), its leaves' panes are created in reading order and the workspace
+    /// installs that tree (`applyRestoredLayout`).
     private func applySessionLayout(_ record: WindowRecord) {
         // local 기록은 새 셸이므로 ⌘K로 다시 열 때처럼 지금 설정을 따른다(`PaneLaunch.forReopenedRecord`).
         let hcAllowsNewPanes = HcSessionManager.allowsNewLocalPanes(defaults: .standard)
-        let created = PaneLayoutNode.fromColumns(record.rows).map { layout in
-            layout.map { paneRec -> Pane in
+        var created: [PaneLayoutNode<Pane>] = []
+        for layout in record.layoutTrees {
+            let tree = layout.map { paneRec -> Pane in
                 // An update relaunch saved this pane's live agent session —
                 // reopen the conversation where the agent was running.
                 let plan = AgentResumeCapture.restorePlan(
@@ -347,9 +353,8 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
                     paneRec, cwd: plan.cwd, splitAxis: .balanced, startupInput: plan.startupInput,
                     launch: PaneLaunch.forReopenedRecord(paneRec, defaults: .standard, hcAllowsNewPanes: hcAllowsNewPanes))
             }
-        }
-        if let created {
-            workspace.applyRestoredLayout(created)
+            workspace.applyRestoredLayout(tree)
+            created.append(tree)
         }
         // Defensive: an empty saved record would leave a paneless window.
         if workspace.panes.isEmpty {
@@ -364,9 +369,10 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         if let projectId = record.filterProjectId {
             workspace.filter = .project(projectId)
         }
-        // The index counts panes in the order the saved columns flatten to —
-        // the order they were just created in (`created.leaves`).
-        if let idx = record.focusedPaneIndex, let leaves = created?.leaves, leaves.indices.contains(idx) {
+        // The index counts panes in leaf reading order across the saved trees —
+        // the order they were just created in (= the flattened `rows`).
+        let leaves = created.flatMap { $0.leaves }
+        if let idx = record.focusedPaneIndex, leaves.indices.contains(idx) {
             workspace.focus(pane: leaves[idx])
         }
     }
@@ -560,9 +566,10 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
     /// * Alive panes for that canonical project → just switch the filter
     ///   (keeps the live agents untouched).
     /// * No alive panes → create new shells following the saved layout: the
-    ///   saved columns become a split tree, its leaves' panes are created in
-    ///   reading order, and the workspace installs that tree
-    ///   (`applyRestoredLayout`) so the panes sit the way the user left them.
+    ///   saved split tree (`effectiveLayout` — an older record's columns
+    ///   become one), its leaves' panes are created in reading order, and the
+    ///   workspace installs that tree (`applyRestoredLayout`) so the panes sit
+    ///   the way the user left them.
     /// 원격 기록(`machine` 있음)의 pane은 그 머신의 hc pane이고 project는 기록의 것이다(`RemoteProject.reopenedPane`).
     func restore(workspace record: WorkspaceRecord) {
         let ws = workspace
@@ -575,7 +582,7 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
             return
         }
         let hcAllowsNewPanes = HcSessionManager.allowsNewLocalPanes(defaults: .standard)
-        if let layout = PaneLayoutNode.fromColumns(record.effectiveRows) {
+        if let layout = record.effectiveLayout {
             let created = layout.map { saved -> Pane in
                 let paneRec = RemoteProject.reopenedPane(saved, in: record)
                 return addRestoredPane(
