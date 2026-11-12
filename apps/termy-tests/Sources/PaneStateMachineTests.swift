@@ -771,4 +771,13 @@ final class PaneStateMachineTests: XCTestCase {
         let after = PaneStateMachine.apply(codexEvent(.preToolUse), to: prev)
         XCTAssertEqual(after.state, .idle)
     }
+
+    func test_claudeStopAfterInterruptKey_isNormalTurnEnd() {
+        var prev = PaneSnapshot.empty(paneId: "p1", projectId: "proj", agentKind: .claude)
+        prev.state = .idle
+        prev.interruptedByKey = true
+        prev.turnOpen = true
+        let after = PaneStateMachine.apply(makeEvent(.stop), to: prev)
+        XCTAssertEqual(after.state, .waiting)
+    }
 }

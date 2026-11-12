@@ -378,8 +378,10 @@ enum PaneStateMachine {
             let resolvedKind = event.agentKind ?? previous.agentKind
             next.lastAssistantMessage = event.meta.lastAssistantMessage
             next.turnOpen = false
-            if previous.interruptedByKey && previous.state == .idle {
+            if previous.interruptedByKey && previous.state == .idle && resolvedKind != .claude {
                 // Codex may send Stop for an interrupted turn too: stay IDLE, no chime.
+                // Claude never sends Stop after an interrupt, so its Stop means the key
+                // misfired and the turn really ended: take the normal path.
             } else if resolvedKind == .antigravity, event.meta.reason == "ERROR" {
                 next.state = .errored
                 next.waitSource = nil
