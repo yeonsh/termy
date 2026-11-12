@@ -11,8 +11,8 @@
 //   * canonicalPath — full symlink-resolved worktree root; the persistence key
 //   * displayLabel   — basename (for ⌘K row display only)
 //   * updatedAt      — last mutation timestamp; drives ⌘K row sort order
-//   * panes[]        — ordered list of panes in creation order (matches the
-//                      current Workspace.swift pane-grid semantics)
+//   * panes[]        — every pane in leaf reading order of the project's
+//                      split tree (depth-first, earlier child first)
 //
 // Not yet in schema v1 (deferred with explicit nil/optional shapes so we
 // can add them without a version bump):
@@ -37,15 +37,21 @@ struct WorkspaceRecord: Codable, Equatable {
     /// Flat list of every pane in the workspace. Preserved alongside `rows`
     /// so older code (or hand-edited files) still round-trip without loss.
     var panes: [PaneRecord]
-    /// Ordered row structure — row 0 is the top row of the grid, each inner
-    /// array is a horizontal row of panes. Optional for backward compat with
-    /// v1 records that only had `panes`; restore infers a single-row layout
-    /// (all column splits) when this is missing.
+    /// Column structure — `rows[i]` is one column (left to right), its panes
+    /// stacked top to bottom; new builds write the column approximation of
+    /// `layout` so older builds keep reading it. Optional for backward compat
+    /// with v1 records that only had `panes`; restore then puts every pane in
+    /// one column when this is missing.
     var rows: [[PaneRecord]]?
     /// 원격 project의 머신(hc `machine.list`의 이름). 로컬 project와 예전 파일은 nil.
     var machine: String?
     /// 이 project의 분할 tree(비율 포함). 이 필드 전의 파일은 nil이고 `rows`에서 만든다(`effectiveLayout`).
+    /// 너그럽게 읽는다(`init(from:)`): 읽지 못하는 tree는 nil이다.
     var layout: PaneLayoutNode<PaneRecord>?
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, canonicalPath, displayLabel, updatedAt, panes, rows, machine, layout
+    }
 
     init(
         schemaVersion: Int = Self.currentSchemaVersion,
@@ -67,9 +73,9 @@ struct WorkspaceRecord: Codable, Equatable {
         self.layout = layout
     }
 
-    /// Effective grid layout: prefer the structured `rows` when present,
-    /// else wrap the flat `panes` list as a single horizontal row. Callers
-    /// restoring a workspace should always use this — not `panes` directly.
+    /// Effective column layout: prefer the structured `rows` when present,
+    /// else wrap the flat `panes` list as a single column. Restore goes
+    /// through `effectiveLayout`, which falls back to this.
     var effectiveRows: [[PaneRecord]] {
         if let rows, !rows.isEmpty { return rows }
         return panes.isEmpty ? [] : [panes]
@@ -79,6 +85,22 @@ struct WorkspaceRecord: Codable, Equatable {
     /// pane이 없으면 nil.
     var effectiveLayout: PaneLayoutNode<PaneRecord>? {
         layout ?? PaneLayoutNode.fromColumns(effectiveRows)
+    }
+}
+
+extension WorkspaceRecord {
+    /// `layout`만 너그럽게 읽는다: 망가졌거나 다른 빌드가 바꾼 모양의 tree는 nil로 읽고 `rows`·`panes`로 복원한다.
+    /// tree 하나 때문에 기록 전체를 격리해 그 project 배치를 잃지 않게. 나머지 필드는 지금처럼 엄격하다.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        canonicalPath = try c.decode(String.self, forKey: .canonicalPath)
+        displayLabel = try c.decode(String.self, forKey: .displayLabel)
+        updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+        panes = try c.decode([PaneRecord].self, forKey: .panes)
+        rows = try c.decodeIfPresent([[PaneRecord]].self, forKey: .rows)
+        machine = try c.decodeIfPresent(String.self, forKey: .machine)
+        layout = try? c.decodeIfPresent(PaneLayoutNode<PaneRecord>.self, forKey: .layout)
     }
 }
 

@@ -45,8 +45,12 @@ struct WindowRecord: Codable, Equatable {
     /// older builds keep reading the file.
     var projectOrder: [String]?
     /// project마다 보이는 분할 tree(`knownProjectIds` 순서, 비율 포함). 이 필드 전의 파일은 nil이고 `rows`에서 만든다.
-    /// 스키마 버전을 올리지 않으려고 optional이다.
+    /// 스키마 버전을 올리지 않으려고 optional이다. 너그럽게 읽는다(`init(from:)`): 읽지 못하는 tree가 있으면 nil이다.
     var layouts: [ProjectLayoutRecord]?
+
+    private enum CodingKeys: String, CodingKey {
+        case frame, rows, filterProjectId, focusedPaneIndex, projectOrder, layouts
+    }
 
     init(
         frame: FrameRecord,
@@ -82,6 +86,21 @@ struct WindowRecord: Codable, Equatable {
     var layoutTrees: [PaneLayoutNode<PaneRecord>] {
         if let layouts, !layouts.isEmpty { return layouts.map(\.root) }
         return PaneLayoutNode.fromColumns(rows).map { [$0] } ?? []
+    }
+}
+
+extension WindowRecord {
+    /// `layouts`만 너그럽게 읽는다: Debug와 release가 session.json을 함께 쓰므로 다른 빌드가 바꾼 모양(모르는 axis 등)의
+    /// tree가 올 수 있다. 그 하나로 decode가 실패하면 SessionPersistence가 파일 전체를 격리해 모든 창의 pane을 잃는다.
+    /// 읽지 못하면 nil로 두고 `rows`로 복원한다(`layoutTrees`). 나머지 필드는 지금처럼 엄격하다.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        frame = try c.decode(FrameRecord.self, forKey: .frame)
+        rows = try c.decode([[PaneRecord]].self, forKey: .rows)
+        filterProjectId = try c.decodeIfPresent(String.self, forKey: .filterProjectId)
+        focusedPaneIndex = try c.decodeIfPresent(Int.self, forKey: .focusedPaneIndex)
+        projectOrder = try c.decodeIfPresent([String].self, forKey: .projectOrder)
+        layouts = try? c.decodeIfPresent([ProjectLayoutRecord].self, forKey: .layouts)
     }
 }
 

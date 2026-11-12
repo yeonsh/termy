@@ -125,4 +125,25 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertEqual(oldPanes.map(\.cwd), ["/a", "/b", "/c", "/d", "/e", "/f"])
         XCTAssertEqual(old.focusedPaneIndex.map { oldPanes[$0].cwd }, "/e", "focus lands on the same pane")
     }
+
+    /// 다른 빌드가 쓴 모르는 모양의 tree 하나로 session.json 전체가 격리되면(모든 창의 pane을 잃는다) 안 된다:
+    /// `layouts`만 nil로 읽고 `rows`로 복원한다. 나머지 필드는 지금처럼 엄격하다.
+    func test_windowRecord_unreadableLayouts_decodeAsNilAndFallBackToRows() throws {
+        let unknownAxis = #"[{"projectId":"api","root":{"axis":"diagonal","children":[{"weight":1,"node":{"pane":{"cwd":"/a"}}}]}}]"#
+        for layouts in [unknownAxis, #"{"oops":1}"#, #"[{"projectId":"api"}]"#] {
+            let json = #"""
+            {"schemaVersion":1,"windows":[{"frame":{"x":0,"y":0,"width":1200,"height":760},
+              "rows":[[{"cwd":"/a"},{"cwd":"/b"}],[{"cwd":"/c"}]],"focusedPaneIndex":2,"layouts":\#(layouts)}]}
+            """#
+            let window = try XCTUnwrap(JSONDecoder().decode(SessionRecord.self, from: Data(json.utf8)).windows.first,
+                                       layouts)
+            XCTAssertNil(window.layouts, layouts)
+            XCTAssertEqual(window.layoutTrees, [PaneLayoutNode.fromColumns([[pane("/a"), pane("/b")], [pane("/c")]])!], layouts)
+            XCTAssertEqual(window.focusedPaneIndex, 2, layouts)
+        }
+
+        let withoutRows = #"{"frame":{"x":0,"y":0,"width":1,"height":1},"layouts":[]}"#
+        XCTAssertThrowsError(try JSONDecoder().decode(WindowRecord.self, from: Data(withoutRows.utf8)),
+                             "rows stays required")
+    }
 }

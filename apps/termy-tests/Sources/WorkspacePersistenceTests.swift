@@ -288,4 +288,23 @@ final class WorkspacePersistenceTests: XCTestCase {
 
         XCTAssertNil(WorkspaceRecord(canonicalPath: "/a", displayLabel: "a", panes: []).effectiveLayout)
     }
+
+    /// 다른 빌드가 쓴 모르는 모양의 `layout`은 nil로 읽고 `rows`로 복원한다(기록 전체를 격리하지 않는다).
+    func test_unreadableLayout_decodesAsNilAndFallsBackToRows() throws {
+        let unknownAxis = #"{"axis":"diagonal","children":[{"weight":1,"node":{"pane":{"cwd":"/a"}}}]}"#
+        for layout in [unknownAxis, #""oops""#, #"{"children":[]}"#] {
+            let json = #"""
+            {"schemaVersion":1,"canonicalPath":"/a","displayLabel":"a","updatedAt":0,
+             "panes":[{"cwd":"/a"},{"cwd":"/b"}],"rows":[[{"cwd":"/a"}],[{"cwd":"/b"}]],"layout":\#(layout)}
+            """#
+            let record = try JSONDecoder().decode(WorkspaceRecord.self, from: Data(json.utf8))
+            XCTAssertNil(record.layout, layout)
+            XCTAssertEqual(record.effectiveLayout,
+                           PaneLayoutNode.fromColumns([[PaneRecord(cwd: "/a")], [PaneRecord(cwd: "/b")]]), layout)
+        }
+
+        let withoutPanes = #"{"schemaVersion":1,"canonicalPath":"/a","displayLabel":"a","updatedAt":0}"#
+        XCTAssertThrowsError(try JSONDecoder().decode(WorkspaceRecord.self, from: Data(withoutPanes.utf8)),
+                             "panes stays required")
+    }
 }

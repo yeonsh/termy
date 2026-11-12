@@ -332,6 +332,54 @@ final class HcRestoreIntegrationTests: XCTestCase {
         XCTAssertNotEqual(pane.paneId, saved, "a local pane gets a new id")
     }
 
+    /// 저장된 분할 tree(비율 포함)가 복원된 뒤 다시 저장해도 그대로이고, `focusedPaneIndex`는 만든 순서가 아니라 잎
+    /// 읽는 순서의 index다(복원과 예전 빌드의 `rows`가 같은 순서를 쓴다). ⌘D로 A 오른쪽에 만든 pane은 다섯 번째로
+    /// 만들었지만 두 번째로 읽힌다.
+    func testSavedLayoutSurvivesRestoreAndFocusIndexFollowsLeafOrder() async throws {
+        let manager = HcSessionManager(endpointProvider: { nil })
+        addTeardownBlock { await manager.shutdown() }
+        install(manager)
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("termy-layout-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let alpha = root.appendingPathComponent("alpha").path, beta = root.appendingPathComponent("beta").path
+        for dir in [alpha, beta] { try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true) }
+        func local(_ cwd: String) -> PaneRecord { PaneRecord(cwd: cwd, backend: .local) }
+        // alpha: row(A:0.25, col(B:0.6, C:0.4):0.75), beta: D. 포커스는 C(잎 2).
+        let alphaTree = PaneLayoutNode.split(.leftToRight, [
+            PaneLayoutBranch(node: .leaf(local(alpha)), weight: 0.25),
+            PaneLayoutBranch(node: .split(.topToBottom, [PaneLayoutBranch(node: .leaf(local(alpha)), weight: 0.6),
+                                                         PaneLayoutBranch(node: .leaf(local(alpha)), weight: 0.4)]),
+                             weight: 0.75),
+        ])
+        let windowManager = try await restore([
+            WindowRecord(frame: FrameRecord(x: 120, y: 120, width: 900, height: 600),
+                         layouts: [ProjectLayoutRecord(projectId: "alpha", root: alphaTree),
+                                   ProjectLayoutRecord(projectId: "beta", root: .leaf(local(beta)))],
+                         focusedPaneIndex: 2),
+        ])
+        let controller = try XCTUnwrap(windowManager.controllers.first)
+        XCTAssertEqual(controller.panes.count, 4)
+        XCTAssertEqual(controller.focusedPaneId, controller.panes[2].paneId, "focus is leaf 2 (C)")
+
+        let saved = try XCTUnwrap(controller.sessionWindowRecord())
+        let layouts = try XCTUnwrap(saved.layouts)
+        XCTAssertEqual(layouts.map(\.projectId), ["alpha", "beta"])
+        XCTAssertEqual(layouts[0].root.map(\.cwd), alphaTree.map(\.cwd), "shape and weights survive restore → save")
+        XCTAssertEqual(layouts[0].root.leaves.map(\.paneId), controller.panes.prefix(3).map(\.paneId))
+        XCTAssertEqual(saved.rows.flatMap { $0 }, layouts.flatMap { $0.root.leaves })
+        XCTAssertEqual(saved.focusedPaneIndex, 2)
+
+        controller.focusPane(byId: controller.panes[0].paneId)
+        controller.splitRow(nil)
+        let added = try XCTUnwrap(controller.panes.last)
+        XCTAssertEqual(controller.focusedPaneId, added.paneId)
+        let afterSplit = try XCTUnwrap(controller.sessionWindowRecord())
+        let flat = afterSplit.rows.flatMap { $0 }
+        XCTAssertEqual(flat, try XCTUnwrap(afterSplit.layouts).flatMap { $0.root.leaves })
+        XCTAssertEqual(flat.map(\.paneId).firstIndex(of: added.paneId), 1, "the new pane reads second")
+        XCTAssertEqual(afterSplit.focusedPaneIndex, 1, "leaf reading order, not creation order (4)")
+    }
+
     /// R20. 다른 instance가 남긴 hc pane은 복원하지 않는다(그 terminal은 그 instance가 고아로 되찾는다). instance가
     /// 없는 hc 기록(이 필드 전의 파일)은 이 instance의 것이다. 저장할 때는 hc pane에만 자기 instance를 남긴다.
     func testOtherInstanceHcPanesAreNotRestored() async throws {
