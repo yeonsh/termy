@@ -6,6 +6,29 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.6 — 2026-11-13
+
+- Drag a pane by its header to move it. While you drag, a shadow box shows
+  where the pane will land and how big it will be: drop on a pane's edge to
+  split just that pane, between two panes to slot it in between, on the
+  window's edge to span that whole side, or on a pane's middle to swap the
+  two. Esc cancels. Dragging works inside one project's view, not in the
+  multi-project ALL grid or while a pane is maximized.
+- ⌘D now splits only the focused pane to the right and ⇧⌘D splits it
+  downward (menu: **Split Right** / **Split Down**). ⌘T still places a new
+  pane automatically.
+- Sizes you set by dragging a divider now stay put through filter switches,
+  restarts, and ⌘K reopen, instead of snapping back to equal sizes. A divider
+  stops before a pane gets narrower than 120pt or shorter than 80pt.
+- A pane that `cd`s into another project and comes back returns to its old
+  spot and size, as long as that project's layout wasn't changed meanwhile.
+- A WAIT left by a finished turn now clears only after you have looked at
+  that pane: it stays on the chips, the dock badge and ⌘G until you view it,
+  then settles to IDLE 30 seconds later.
+- In Claude Code, Codex and Antigravity panes, stopping a turn with Esc or
+  Ctrl-C now closes it quietly to IDLE instead of leaving a stale THINK or a
+  false WAIT alert.
+
 ## 0.3.5 — 2026-11-10
 
 - ⌘Q now asks before it quits, since programs running in panes are stopped
