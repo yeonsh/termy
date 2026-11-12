@@ -40,6 +40,14 @@ final class PaneLayoutTreeTests: XCTestCase {
         XCTAssertEqual(layoutSignature(t.moving("A", to: .swap(with: "D"))), "row(D:0.333,col(B:0.500,C:0.500):0.333,A:0.333)")
     }
 
+    func test_moving_invalidDestinationLeavesTreeUnchanged() {
+        let t = abcdLayout()
+        XCTAssertEqual(t.moving("A", to: .besideLeaf("Z", .right)), t)
+        XCTAssertEqual(t.moving("A", to: .intoSplit(path: [0], before: 0)), t)
+        XCTAssertEqual(t.moving("A", to: .intoSplit(path: [9], before: 0)), t)
+        XCTAssertEqual(t.moving("A", to: .swap(with: "Z")), t)
+    }
+
     func test_hasSameStructure_ignoresWeights() {
         let t = abcdLayout()
         XCTAssertTrue(t.moving("C", to: .besideLeaf("B", .bottom)).hasSameStructure(as: t))

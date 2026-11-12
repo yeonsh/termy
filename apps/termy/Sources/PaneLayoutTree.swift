@@ -243,7 +243,7 @@ extension PaneLayoutNode where Leaf: Equatable {
     /// swap은 `swapping`. 나머지는 도착 자리에 자리표시를 먼저 넣고 `source`를 뺀 뒤 자리표시를 `source`로 바꾼다.
     /// `source`가 유일한 잎이면 그대로 돌려준다.
     func moving(_ source: Leaf, to move: PaneLayoutMove<Leaf>) -> PaneLayoutNode {
-        if case .swap(let other) = move { return swapping(source, other) }
+        if case .swap(let other) = move { return contains(other) ? swapping(source, other) : self }
         guard leaves != [source] else { return self }
         typealias Slot = PaneLayoutSlot<Leaf>
         let tree = map { Slot.existing($0) }
@@ -258,6 +258,8 @@ extension PaneLayoutNode where Leaf: Equatable {
         case .swap:
             return self
         }
+        // 도착 자리를 찾지 못해 자리표시가 들어가지 않았으면 source만 사라지므로 그대로 둔다.
+        guard placed.leaves.count == leaves.count + 1 else { return self }
         guard let removed = placed.removing(where: { $0 == .existing(source) }) else { return self }
         return removed.map { slot in
             if case .existing(let leaf) = slot { return leaf }
