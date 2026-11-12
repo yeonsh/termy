@@ -80,6 +80,8 @@ actor HookDaemon {
 
     private var panes: [String: PaneSnapshot] = [:]
     private var seq: UInt64 = 0
+    /// Pane the user is currently looking at (set by the main-actor tracker).
+    private var viewedPaneId: String?
     private var idleTimerTask: Task<Void, Never>?
     /// accept() and read() are blocking syscalls. We pin them to a dedicated
     /// DispatchQueue so they can't stall the Swift Concurrency worker pool.
@@ -513,7 +515,7 @@ actor HookDaemon {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 5 * 1_000_000_000) // 5s tick
             await tickPromotePossiblyWaiting()
-            await tickIdle()
+            tickIdle()
         }
     }
 
@@ -538,8 +540,18 @@ actor HookDaemon {
         }
     }
 
-    private func tickIdle() async {
-        let now = Date()
+    /// Records which pane the user is looking at. Both the pane being left
+    /// and the pane being entered get `seenAt = now`, so the WAIT -> IDLE
+    /// countdown starts from the sighting. Does not yield: nothing displayed
+    /// changes.
+    func setViewedPane(_ paneId: String?, now: Date = Date()) {
+        for id in [viewedPaneId, paneId].compactMap({ $0 }) {
+            panes[id]?.seenAt = now
+        }
+        viewedPaneId = paneId
+    }
+
+    func tickIdle(now: Date = Date()) {
         for (id, snapshot) in panes where snapshot.state == .waiting {
             // A WAITING pane with an outstanding attention signal (permission,
             // mcp_elicit, ask_user_question; idle notifications only flip a stuck
@@ -552,7 +564,10 @@ actor HookDaemon {
             // SessionEnd, or an idle_prompt clearing a stale wait) clears
             // needsAttention.
             if snapshot.needsAttention { continue }
-            let since = now.timeIntervalSince(snapshot.enteredStateAt)
+            // A turn-end WAIT the user has not seen stays WAITING; the
+            // countdown starts when they look at the pane (or leave it).
+            guard let start = snapshot.idleCountdownStart(isViewed: id == viewedPaneId) else { continue }
+            let since = now.timeIntervalSince(start)
             // Sleep/wake guard: if the system was asleep > 2 min and we woke
             // up, don't bulk-flip all WAITING panes to IDLE. The user is
             // coming back to check state, not being told everything's idle.

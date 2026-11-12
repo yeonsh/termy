@@ -17,7 +17,7 @@
 //   POSSIBLY_WAITING ──(AskUserQuestion)─────────────▶ WAITING(.askUserQuestion) ♪
 //   POSSIBLY_WAITING ──(promote timer 12s elapsed)───▶ WAITING(.promotedFromPossible) ♪
 //   WAITING          ──(UserPromptSubmit)───────────▶ THINKING
-//   WAITING          ──(30s wall-clock timer)───────▶ IDLE
+//   WAITING          ──(30s after seen)─────────────▶ IDLE
 //   WAITING          ──(SessionEnd | PtyExit)───────▶ INIT
 //   WAITING(.permission)         ──(PostToolUse)──▶ THINKING (Codex resumed)
 //   WAITING(.askUserQuestion)    ──(PostToolUse AskUserQuestion)──▶ THINKING
@@ -125,6 +125,10 @@ struct PaneSnapshot: Sendable, Codable {
     /// True while the program's OSC 7501 status (herdr-core events for hc panes, the pane's own OSC handler for local panes) drives this pane's state.
     /// Hooks then fill only the detail fields. Runtime-only (not in CodingKeys).
     var programStatusActive: Bool = false
+    /// Last moment the user was looking at this pane (set when it becomes or
+    /// stops being the viewed pane). Drives the WAIT -> IDLE countdown.
+    /// Runtime-only (not in CodingKeys).
+    var seenAt: Date?
 
     private enum CodingKeys: String, CodingKey {
         case paneId, projectId, state, needsAttention, notificationReason, waitSource
@@ -659,5 +663,17 @@ enum PaneStateMachine {
             // plugin vocabulary coexist with an older termy.
             break
         }
+    }
+}
+
+extension PaneSnapshot {
+    /// Start of the 30s WAIT -> IDLE countdown, or nil if the user has not
+    /// seen this WAIT yet. Viewed now: counts from the later of entry and
+    /// the last sighting. Not viewed: counts only from a sighting made at or
+    /// after entry (i.e. the user looked, then left).
+    func idleCountdownStart(isViewed: Bool) -> Date? {
+        if isViewed { return max(enteredStateAt, seenAt ?? .distantPast) }
+        if let seenAt, seenAt >= enteredStateAt { return seenAt }
+        return nil
     }
 }
