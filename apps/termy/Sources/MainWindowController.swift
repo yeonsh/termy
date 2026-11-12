@@ -23,6 +23,8 @@ final class TermyWindow: NSWindow {
 
 final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWindowDelegate {
     private let workspace = Workspace()
+    /// Id of the pane that has focus in this window; nil when none.
+    var focusedPaneId: String? { workspace.focusedPane?.paneId }
     /// Stable identity for this window — keys the shared `MissionControlModel`
     /// pane registry and the session record.
     let windowId = UUID()

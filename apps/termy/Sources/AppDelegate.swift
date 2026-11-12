@@ -87,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self?.windowManager.prepareForUpdateRelaunch()
         }
         Notifier.shared.start()
+        ViewedPaneTracker.shared.start()
 
         // Restore the saved multi-window session, or open one fresh window
         // when there is nothing to restore.

@@ -296,7 +296,12 @@ final class Workspace: NSView, NSSplitViewDelegate {
     /// pushed back onto `filterHistory` by the `filter` didSet.
     private var suppressFilterHistoryPush = false
     var panes: [Pane] { paneCreationOrder }
-    private(set) var focusedPane: Pane?
+    private(set) var focusedPane: Pane? {
+        didSet {
+            guard oldValue !== focusedPane else { return }
+            NotificationCenter.default.post(name: Workspace.focusedPaneDidChangeNotification, object: self)
+        }
+    }
     var filter: WorkspaceFilter = .all {
         didSet {
             guard oldValue != filter else { return }
@@ -1206,4 +1211,10 @@ final class Workspace: NSView, NSSplitViewDelegate {
         override func drawDivider(in rect: NSRect) { /* transparent */ }
     }
 
+}
+
+extension Workspace {
+    /// Posted when the focused pane changes, so `ViewedPaneTracker` can tell the
+    /// hook daemon which pane the user is looking at.
+    static let focusedPaneDidChangeNotification = Notification.Name("termy.workspaceFocusedPaneDidChange")
 }

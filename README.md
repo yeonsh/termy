@@ -90,7 +90,7 @@ the project's color slides along that pane's header.
 
 - **`IDLE`** — agent is at the prompt, nothing running.
 - **`THINK`** — a tool call is in flight. The model is doing work.
-- **`WAIT`** — blocked on a permission prompt or a question. Your attention needed.
+- **`WAIT`** — blocked on a permission prompt or a question, or finished a turn you haven't looked at yet. Your attention needed.
 - **`ERR`** — the agent or its shell exited with an error. The chip stays red until you look.
 - **`INIT`** — a fresh pane, until the agent reports its first event.
 
