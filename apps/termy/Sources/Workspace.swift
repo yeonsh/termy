@@ -337,13 +337,18 @@ final class Workspace: NSView, NSSplitViewDelegate {
     /// changes — on init and on every `cd`. The mission-control bar listens
     /// so chips read "api / main" instead of "pane-<uuid>".
     var onPaneHeaderChanged: ((_ paneId: String, _ project: String, _ branch: String?) -> Void)?
+    /// pane 집합은 그대로이고 배치만 바뀌었을 때(경계선을 끌어 크기를 바꿈 등). 저장만 하면 된다.
+    var onLayoutChanged: (() -> Void)?
 
-    private var rootSplit: NSSplitView?
+    private(set) var rootSplit: NSSplitView?
     private var maximizedPane: Pane?
     private let hiddenPaneParkingView = NSView(frame: .zero)
     private var parkedPaneFrames: [ObjectIdentifier: CGRect] = [:]
     /// 그린 split마다 자식 비율(그리기 때 등록). `applySplitWeights`가 divider 위치로 옮긴다. 없으면 균등.
     private var splitWeights: [ObjectIdentifier: [Double]] = [:]
+    /// project tree를 그린 split마다 그 split의 tree path(root부터 자식 index). 경계선을 끌면 이 path의 비율을 바꾼다.
+    /// 여러 project ALL 그리드와 최대화(잎 하나)는 tree의 split이 아니라 등록하지 않는다.
+    private var splitPaths: [ObjectIdentifier: [Int]] = [:]
     private var needsPostRelayoutSplitWeights = false
     private var isApplyingSplitWeights = false
     /// Each `installRootSplit` that wraps panes in a freeze adds one token.
@@ -801,6 +806,8 @@ final class Workspace: NSView, NSSplitViewDelegate {
     ///     "pane died" rather than a filter change. Following keeps the
     ///     pane visible; user can swap filters back manually if desired.
     private func handlePaneProjectChanged(_ pane: Pane) {
+        // 닫힌 pane의 늦은 cwd 알림이 잎을 다시 넣거나 필터를 옮기지 않게.
+        guard paneCreationOrder.contains(where: { $0 === pane }) else { return }
         let oldProjectId = moveLayoutLeaf(of: pane)
         if case .project(let id) = filter {
             let filterWouldBeEmpty = !panes.contains(where: { $0.projectId == id })
@@ -1008,6 +1015,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
         // Weights belong to the splits about to be replaced; drop them so a
         // recycled ObjectIdentifier can't pick up a stale entry.
         splitWeights = [:]
+        splitPaths = [:]
         guard let drawing = currentDrawing() else {
             installRootSplit(nil)
             return
@@ -1095,6 +1103,7 @@ final class Workspace: NSView, NSSplitViewDelegate {
     ) {
         split.isVertical = axis == .leftToRight
         splitWeights[ObjectIdentifier(split)] = branches.map(\.weight)
+        splitPaths[ObjectIdentifier(split)] = path
         let frames = childFrames[path] ?? []
         for (index, branch) in branches.enumerated() {
             let childRect = frames.indices.contains(index) ? frames[index] : rect
@@ -1319,12 +1328,40 @@ final class Workspace: NSView, NSSplitViewDelegate {
         }
     }
 
+    /// 사용자가 `split`의 경계선을 끌어 놓았다. project tree를 그린 split이면 자식들의 축 방향 길이 비율을 그 tree
+    /// path의 비율로 기억해 다음 relayout도 그 크기로 그리고, `onLayoutChanged`로 저장을 요청한다. 1pt 넘게 움직인
+    /// 자식이 없으면(누르기만 함) 아무것도 바꾸지 않는다 — 떠난 잎의 자리도 그대로 남는다.
+    func captureUserResize(of split: NSSplitView) {
+        guard !isApplyingSplitWeights,
+              let path = splitPaths[ObjectIdentifier(split)],
+              let projectId = displayedProjectId,
+              var layout = layouts[projectId],
+              let visible = layout.visibleTree else { return }
+        let lengths = split.arrangedSubviews.map { split.isVertical ? $0.frame.width : $0.frame.height }
+        let total = lengths.reduce(0, +)
+        guard lengths.count > 1, total > 1 else { return }
+        let current = splitWeights[ObjectIdentifier(split)] ?? []
+        let moved = current.count != lengths.count
+            || zip(current, lengths).contains { abs(total * CGFloat($0) - $1) >= 1 }
+        guard moved else { return }
+        let weights = lengths.map { Double($0 / total) }
+        let updated = visible.settingWeights(weights, atSplitPath: path)
+        guard updated != visible else { return }
+        layout.replaceVisibleTree(updated)
+        layouts[projectId] = layout
+        splitWeights[ObjectIdentifier(split)] = weights
+        onLayoutChanged?()
+    }
+
     private func makeSplit(vertical: Bool) -> NSSplitView {
         let split = GapSplitView(frame: .zero)
         split.isVertical = vertical
         split.dividerStyle = .thin
         split.delegate = self
         split.translatesAutoresizingMaskIntoConstraints = false
+        split.onUserResizeEnded = { [weak self] split in
+            self?.captureUserResize(of: split)
+        }
         return split
     }
 
@@ -1337,8 +1374,17 @@ final class Workspace: NSView, NSSplitViewDelegate {
     /// than a hairline divider. Panes keep their rounded corners clean
     /// because each sits 4pt away from its neighbor.
     private final class GapSplitView: NSSplitView {
+        /// 경계선 끌기가 끝났을 때(놓음). NSSplitView는 경계선 위 클릭만 받는다(나머지는 자식 view가 덮는다).
+        var onUserResizeEnded: ((NSSplitView) -> Void)?
+
         override var dividerThickness: CGFloat { PaneDropPlanner.gap }
         override func drawDivider(in rect: NSRect) { /* transparent */ }
+
+        override func mouseDown(with event: NSEvent) {
+            // NSSplitView의 경계선 추적 루프는 마우스를 놓을 때 돌아온다.
+            super.mouseDown(with: event)
+            onUserResizeEnded?(self)
+        }
     }
 
 }

@@ -101,15 +101,33 @@ final class WorkspaceLayoutTests: XCTestCase {
 
         drift(b, to: betaDir)
         XCTAssertNotEqual(b.projectId, alpha, "precondition: b drifted out")
-        workspace.addPane(cwd: alphaDir)
+        let added = workspace.addPane(cwd: alphaDir)
         settle()
         drift(b, to: alphaDir)
         XCTAssertEqual(b.projectId, alpha, "precondition: b drifted back")
 
         let after = try XCTUnwrap(workspace.layoutTree(forProject: alpha))
-        XCTAssertFalse(after.hasSameStructure(as: before), "b came back to its old slot although alpha changed meanwhile")
         XCTAssertEqual(after.leaves.count, 4)
+        // b가 옛 자리로 돌아왔다면 b가 없던 동안 들어온 pane을 빼면 drift 전 모양과 같다.
+        let withoutAdded = try XCTUnwrap(after.removing { $0 == added.paneId })
+        XCTAssertFalse(withoutAdded.hasSameStructure(as: before),
+                       "b came back to its old slot although alpha changed meanwhile")
         assertLayoutInvariant()
+    }
+
+    func test_userResize_isRememberedAcrossRelayout() throws {
+        let dir = try makeProjectDir("alpha")
+        let a = workspace.addPane(cwd: dir)
+        _ = workspace.addPane(cwd: dir, splitAxis: .row)
+        settle()
+        var saves = 0
+        workspace.onLayoutChanged = { saves += 1 }
+        let root = try XCTUnwrap(workspace.rootSplit)
+        root.setPosition(300, ofDividerAt: 0)
+        workspace.captureUserResize(of: root)
+        XCTAssertEqual(saves, 1)
+        workspace.toggleMaximize(); workspace.toggleMaximize(); settle()   // relayout 두 번
+        XCTAssertEqual(frame(of: a).width, 300, accuracy: 1)
     }
 
     func test_paneClosedWhileAway_leavesNoGhostSlot() throws {

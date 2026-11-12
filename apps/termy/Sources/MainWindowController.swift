@@ -121,6 +121,11 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
             self?.autosaver?.requestSave()
             self?.windowManager?.sessionAutosaver?.requestSave()
         }
+        // 경계선을 끌어 크기만 바뀌었다 — pane 집합은 그대로이니 저장만 한다.
+        workspace.onLayoutChanged = { [weak self] in
+            self?.autosaver?.requestSave()
+            self?.windowManager?.sessionAutosaver?.requestSave()
+        }
         workspace.onFilterChanged = { [weak self] in self?.filterBar?.rebuild() }
         workspace.onPaneHeaderChanged = { [weak self] paneId, project, branch in
             self?.missionControlModel.setLabel(paneId: paneId, project: project, branch: branch)
