@@ -329,6 +329,75 @@ final class WorkspaceDragTests: XCTestCase {
         XCTAssertEqual(frame(of: a).width, aWidth + 120, accuracy: 1)
     }
 
+    /// 경계선을 끝까지 끌어도 pane은 최소 폭 아래로 줄지 않고, 저장되는 비율도 그 폭이다(양쪽 방향).
+    func test_dividerDrag_endToEnd_stopsAtMinimumWidth() throws {
+        let dir = try makeProjectDir("alpha")
+        let a = workspace.addPane(cwd: dir)
+        let b = workspace.addPane(cwd: dir, splitAxis: .row)
+        settle()
+        let root = try XCTUnwrap(workspace.rootSplit)
+        let minimum = Workspace.minimumPaneSize.width
+        let total = root.bounds.width - root.dividerThickness
+
+        try dragFirstDivider(of: root, by: CGSize(width: frame(of: b).width - 4, height: 0))
+        XCTAssertEqual(frame(of: b).width, minimum, accuracy: 1, "right pane shrank past the minimum")
+        XCTAssertEqual(try rootWeights(a.projectId)[1] * total, minimum, accuracy: 1)
+
+        try dragFirstDivider(of: root, by: CGSize(width: -(frame(of: a).width - 4), height: 0))
+        XCTAssertEqual(frame(of: a).width, minimum, accuracy: 1, "left pane shrank past the minimum")
+        XCTAssertEqual(try rootWeights(a.projectId)[0] * total, minimum, accuracy: 1)
+
+        workspace.toggleMaximize(); workspace.toggleMaximize(); settle()   // relayout 두 번
+        XCTAssertEqual(frame(of: a).width, minimum, accuracy: 1)
+    }
+
+    /// 위아래 분할은 최소 높이에서 멈춘다.
+    func test_dividerDrag_endToEnd_stopsAtMinimumHeight() throws {
+        let dir = try makeProjectDir("alpha")
+        let a = workspace.addPane(cwd: dir)
+        let b = workspace.addPane(cwd: dir, splitAxis: .column)
+        settle()
+        let root = try XCTUnwrap(workspace.rootSplit)
+        let minimum = Workspace.minimumPaneSize.height
+        let total = root.bounds.height - root.dividerThickness
+
+        try dragFirstDivider(of: root, by: CGSize(width: 0, height: -(frame(of: b).height - 4)))   // 아래로
+        XCTAssertEqual(frame(of: b).height, minimum, accuracy: 1, "bottom pane shrank past the minimum")
+        XCTAssertEqual(try rootWeights(a.projectId)[1] * total, minimum, accuracy: 1)
+    }
+
+    /// 창 폭이 바뀌어도 실제 frame == 순수 계산 frame이고, 바뀐 뒤 계산한 미리보기 == 놓은 뒤 frame (스펙 "하면 실패인 것" 2번).
+    func test_windowResize_framesStayEqualToPureLayout() throws {
+        let (a, b, c, d) = try makeABCD()
+        let originalFrame = Self.window.frame
+        defer {
+            Self.window.setFrame(originalFrame, display: false)
+            settle()
+        }
+        let uneven = try XCTUnwrap(PaneLayoutNode.fromColumns([[a], [b, c], [d]]))
+            .settingWeights([0.5, 0.3, 0.2], atSplitPath: [])
+            .settingWeights([0.7, 0.3], atSplitPath: [1])
+        workspace.applyRestoredLayout(uneven)
+        settle()
+
+        for width in [1000.0, 1400.0] {
+            Self.window.setContentSize(NSSize(width: width, height: 800))
+            settle()
+            XCTAssertEqual(workspace.bounds.width, width, accuracy: 0.5, "precondition: workspace follows the window")
+            let expected = try XCTUnwrap(workspace.layoutTree(forProject: a.projectId))
+                .frames(in: PaneDropPlanner.contentRect(for: workspace.bounds.size), gap: PaneDropPlanner.gap)
+            for (pane, name) in [(a, "A"), (b, "B"), (c, "C"), (d, "D")] {
+                assertFrame(frame(of: pane), try XCTUnwrap(expected.frame(of: pane.paneId)), "width \(width) \(name)")
+            }
+        }
+
+        let fa = frame(of: a)
+        let plan = try XCTUnwrap(workspace.dragPlan(moving: c, toFlippedPoint: CGPoint(x: fa.midX + fa.width * 0.4, y: fa.midY)))
+        XCTAssertTrue(workspace.applyDrop(plan, generation: workspace.layoutGeneration))
+        settle()
+        assertFrame(frame(of: c), plan.previewFrame, "drop after resize")
+    }
+
     // MARK: - Helpers
 
     /// `duringTracking` 블록이 남기는 값.
@@ -347,6 +416,31 @@ final class WorkspaceDragTests: XCTestCase {
         workspace.applyRestoredLayout(try XCTUnwrap(PaneLayoutNode.fromColumns([[a], [b, c], [d]])))
         settle()
         return (a, b, c, d)
+    }
+
+    /// `split`의 첫 경계선을 실제 이벤트로 `delta`(창 좌표, y-위)만큼 끌어 놓는다.
+    private func dragFirstDivider(of split: NSSplitView, by delta: CGSize) throws {
+        let first = split.arrangedSubviews[0].frame
+        let half = split.dividerThickness / 2
+        let local = split.isVertical
+            ? NSPoint(x: first.maxX + half, y: split.bounds.midY)
+            : NSPoint(x: split.bounds.midX, y: first.maxY + half)   // NSSplitView는 flipped
+        let divider = split.convert(local, to: nil)
+        let end = NSPoint(x: divider.x + delta.width, y: divider.y + delta.height)
+        try post(.leftMouseDragged, at: NSPoint(x: divider.x + delta.width / 2, y: divider.y + delta.height / 2))
+        try post(.leftMouseDragged, at: end)
+        try post(.leftMouseUp, at: end)
+        try sendMouseDown(at: divider)
+        settle()
+    }
+
+    /// project tree root split의 비율.
+    private func rootWeights(_ projectId: String) throws -> [Double] {
+        var weights: [Double]?
+        if case .split(_, let branches) = workspace.layoutTree(forProject: projectId) {
+            weights = branches.map(\.weight)
+        }
+        return try XCTUnwrap(weights, "no root split")
     }
 
     private func overlay() -> PaneDragOverlayView? {

@@ -130,6 +130,33 @@ final class WorkspaceLayoutTests: XCTestCase {
         XCTAssertEqual(frame(of: a).width, 300, accuracy: 1)
     }
 
+    /// 경계선이 어떻게든 pane을 한두 칸으로 줄였어도 저장되는 비율은 최소 폭(120pt)을 지킨다 — 다시 그리거나 다시 켜도
+    /// 그 pane이 실처럼 돌아오지 않는다.
+    func test_userResize_toSliver_storesAtLeastMinimumWidth() throws {
+        let dir = try makeProjectDir("alpha")
+        let a = workspace.addPane(cwd: dir)
+        let b = workspace.addPane(cwd: dir, splitAxis: .row)
+        settle()
+        let root = try XCTUnwrap(workspace.rootSplit)
+        let gap = root.dividerThickness
+        // pane 자체의 Auto Layout 하한(약 62pt)까지만 줄어든다 — 그래도 최소 폭보다 훨씬 좁다.
+        root.setPosition(root.bounds.width - gap - 10, ofDividerAt: 0)
+        XCTAssertLessThan(frame(of: b).width, Workspace.minimumPaneSize.width - 20,
+                          "precondition: setPosition is not limited by the drag minimum")
+
+        workspace.captureUserResize(of: root)
+
+        guard case .split(_, let branches) = workspace.layoutTree(forProject: a.projectId) else {
+            return XCTFail("no root split")
+        }
+        let total = root.bounds.width - gap
+        XCTAssertGreaterThanOrEqual(branches[1].weight * total, Workspace.minimumPaneSize.width - 0.5)
+        XCTAssertGreaterThanOrEqual(frame(of: b).width, Workspace.minimumPaneSize.width - 1,
+                                    "screen not re-laid to the stored weights")
+        workspace.toggleMaximize(); workspace.toggleMaximize(); settle()   // relayout 두 번
+        XCTAssertGreaterThanOrEqual(frame(of: b).width, Workspace.minimumPaneSize.width - 1)
+    }
+
     func test_paneClosedWhileAway_leavesNoGhostSlot() throws {
         let alphaDir = try makeProjectDir("alpha")
         let betaDir = try makeProjectDir("beta")

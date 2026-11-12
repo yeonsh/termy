@@ -1479,14 +1479,97 @@ final class Workspace: NSView, NSSplitViewDelegate {
         let moved = current.count != lengths.count
             || zip(current, lengths).contains { abs(total * CGFloat($0) - $1) >= 1 }
         guard moved else { return }
-        let weights = lengths.map { Double($0 / total) }
+        // 끄는 동안 delegate가 막지만, 어떻게든 최소보다 작아졌으면 저장하는 비율은 최소를 지킨다.
+        let minimums = split.arrangedSubviews.map { minimumLength(of: $0, vertical: split.isVertical) }
+        let kept = Self.lengths(lengths, keepingMinimums: minimums)
+        let keptTotal = kept.reduce(0, +)
+        let weights = kept.map { Double($0 / keptTotal) }
         let updated = visible.settingWeights(weights, atSplitPath: path)
         guard updated != visible else { return }
         layout.replaceVisibleTree(updated)
         layouts[projectId] = layout
         splitWeights[ObjectIdentifier(split)] = weights
+        if kept != lengths {
+            // 화면도 저장한 비율대로 — 다음 relayout까지 실처럼 남지 않게.
+            isApplyingSplitWeights = true
+            applySplitWeightsRecursively(split)
+            isApplyingSplitWeights = false
+        }
         onLayoutChanged?()
     }
+
+    /// 모자란 자식은 최소로 올리고, 그만큼을 나머지 자식에게서 길이 비율대로 덜어 낸다(덜어 낸 자식이 다시 모자라면
+    /// 되풀이). 최소의 합이 전체보다 크면 그대로 돌려준다.
+    private static func lengths(_ lengths: [CGFloat], keepingMinimums minimums: [CGFloat]) -> [CGFloat] {
+        let total = lengths.reduce(0, +)
+        guard lengths.count == minimums.count, minimums.reduce(0, +) <= total else { return lengths }
+        var result = lengths
+        var pinned = Set<Int>()
+        while true {
+            let short = result.indices.filter { !pinned.contains($0) && result[$0] < minimums[$0] }
+            guard !short.isEmpty else { return result }
+            for i in short {
+                result[i] = minimums[i]
+                pinned.insert(i)
+            }
+            let free = result.indices.filter { !pinned.contains($0) }
+            let remaining = total - pinned.reduce(0) { $0 + result[$1] }
+            let freeTotal = free.reduce(0) { $0 + lengths[$1] }
+            for i in free {
+                result[i] = freeTotal > 0 ? remaining * lengths[i] / freeTotal : remaining / CGFloat(free.count)
+            }
+        }
+    }
+
+    /// `view`(pane, 또는 tree를 그린 split)가 축(`vertical` = 좌우) 방향으로 가져야 할 최소 길이. 안쪽 split은 다음
+    /// relayout이 등록된 비율로 나누므로, 그 비율로 나눠도 어느 pane도 최소보다 작아지지 않는 길이다.
+    private func minimumLength(of view: NSView, vertical: Bool) -> CGFloat {
+        let paneMinimum = vertical ? Self.minimumPaneSize.width : Self.minimumPaneSize.height
+        guard let split = view as? NSSplitView, !split.arrangedSubviews.isEmpty else { return paneMinimum }
+        let children = split.arrangedSubviews
+        let minimums = children.map { minimumLength(of: $0, vertical: vertical) }
+        guard split.isVertical == vertical, children.count > 1 else { return minimums.max() ?? paneMinimum }
+        let registered = splitWeights[ObjectIdentifier(split)] ?? []
+        let weights = registered.count == children.count
+            ? registered : Array(repeating: 1 / Double(children.count), count: children.count)
+        let content = zip(minimums, weights).map { $1 > 0 ? $0 / CGFloat($1) : .infinity }.max() ?? 0
+        return content + split.dividerThickness * CGFloat(children.count - 1)
+    }
+
+    /// 사용자가 끄는 tree split의 경계선 `dividerIndex`가 갈 수 있는 범위(split 좌표, 경계선 앞 가장자리). 양옆 자식이
+    /// 최소 크기를 지키는 곳까지다. 끄는 중이 아니거나, tree split이 아니거나, 모든 자식에 최소를 줄 만큼 크지 않으면
+    /// nil(제한 없음) — `setPosition`(`applySplitWeights`)은 언제나 비율 그대로 놓아야 미리보기 == 실제 frame이다.
+    private func userDragRange(of splitView: NSSplitView, dividerIndex: Int) -> ClosedRange<CGFloat>? {
+        guard (splitView as? GapSplitView)?.isTrackingUserDrag == true,
+              splitPaths[ObjectIdentifier(splitView)] != nil else { return nil }
+        let children = splitView.arrangedSubviews
+        guard children.indices.contains(dividerIndex + 1) else { return nil }
+        let vertical = splitView.isVertical
+        let minimums = children.map { minimumLength(of: $0, vertical: vertical) }
+        let length = vertical ? splitView.bounds.width : splitView.bounds.height
+        let gap = splitView.dividerThickness
+        guard minimums.reduce(0, +) + gap * CGFloat(children.count - 1) <= length else { return nil }
+        // NSSplitView는 flipped라 위아래 분할도 위에서부터 min → max다.
+        let before = children[dividerIndex].frame
+        let after = children[dividerIndex + 1].frame
+        let low = (vertical ? before.minX : before.minY) + minimums[dividerIndex]
+        let high = (vertical ? after.maxX : after.maxY) - minimums[dividerIndex + 1] - gap
+        return low <= high ? low...high : nil
+    }
+
+    /// 경계선 끌기를 최소 크기에서 멈춘다. `constrainMin/MaxCoordinate`가 아니라 이 메서드인 까닭: 그 둘을 구현하면
+    /// NSSplitView가 delegate 값과 상관없이 `setPosition`까지 자식들의 지금(배치 전) frame으로 만든 범위로 자르기
+    /// 시작해 `applySplitWeights`가 비율대로 놓지 못한다(값을 그대로 돌려줘도 그렇다). 이 메서드도 `setPosition`이
+    /// 부르지만 제안 위치를 받으므로, 끄는 중이 아니면(`isTrackingUserDrag`) 그대로 돌려줘 프로그램 배치를 바꾸지 않는다.
+    func splitView(
+        _ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat, ofSubviewAt dividerIndex: Int
+    ) -> CGFloat {
+        guard let range = userDragRange(of: splitView, dividerIndex: dividerIndex) else { return proposedPosition }
+        return min(max(proposedPosition, range.lowerBound), range.upperBound)
+    }
+
+    /// 경계선을 끌어 줄일 때 pane이 지키는 최소 크기(header 26pt + 터미널 몇 줄·몇십 칸).
+    static let minimumPaneSize = CGSize(width: 120, height: 80)
 
     private func makeSplit(vertical: Bool) -> NSSplitView {
         let split = GapSplitView(frame: .zero)
@@ -1511,13 +1594,17 @@ final class Workspace: NSView, NSSplitViewDelegate {
     private final class GapSplitView: NSSplitView {
         /// 경계선 끌기가 끝났을 때(놓음). NSSplitView는 경계선 위 클릭만 받는다(나머지는 자식 view가 덮는다).
         var onUserResizeEnded: ((NSSplitView) -> Void)?
+        /// 사용자가 경계선을 끄는 중(mouseDown 추적 루프 안). 최소 크기 제한은 이때만 건다.
+        private(set) var isTrackingUserDrag = false
 
         override var dividerThickness: CGFloat { PaneDropPlanner.gap }
         override func drawDivider(in rect: NSRect) { /* transparent */ }
 
         override func mouseDown(with event: NSEvent) {
             // NSSplitView의 경계선 추적 루프는 마우스를 놓을 때 돌아온다.
+            isTrackingUserDrag = true
             super.mouseDown(with: event)
+            isTrackingUserDrag = false
             onUserResizeEnded?(self)
         }
     }
