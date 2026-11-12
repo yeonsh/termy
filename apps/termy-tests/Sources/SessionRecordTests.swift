@@ -146,4 +146,41 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(WindowRecord.self, from: Data(withoutRows.utf8)),
                              "rows stays required")
     }
+
+    /// `layouts`는 그 잎을 이어 읽은 것이 펼친 `rows`와 같을 때(같은 pane, 같은 순서)만 믿는다. 어긋나면 pane을 잃지
+    /// 않게 `rows`로 복원한다.
+    func test_windowRecord_layoutsDisagreeingWithRows_restoreFromRows() throws {
+        let fromRows = [PaneLayoutNode.fromColumns([[pane("/a"), pane("/b")], [pane("/c")]])!]
+
+        // 잎 없는 split: 읽히지만(Task 1은 children을 검사하지 않는다) 그대로 쓰면 그 창의 pane을 모두 잃는다.
+        let json = #"""
+        {"frame":{"x":0,"y":0,"width":1200,"height":760},"rows":[[{"cwd":"/a"},{"cwd":"/b"}],[{"cwd":"/c"}]],
+         "layouts":[{"projectId":"api","root":{"axis":"leftToRight","children":[]}}]}
+        """#
+        let empty = try JSONDecoder().decode(WindowRecord.self, from: Data(json.utf8))
+        XCTAssertNotNil(empty.layouts, "precondition: the leafless tree decodes")
+        XCTAssertEqual(empty.layoutTrees, fromRows)
+
+        func record(_ roots: [PaneLayoutNode<PaneRecord>]) -> WindowRecord {
+            WindowRecord(frame: frame, rows: [[pane("/a"), pane("/b")], [pane("/c")]],
+                         layouts: roots.map { ProjectLayoutRecord(projectId: "api", root: $0) })
+        }
+        XCTAssertEqual(record([PaneLayoutNode.fromColumns([[pane("/c")], [pane("/a"), pane("/b")]])!]).layoutTrees, fromRows,
+                       "different order")
+        XCTAssertEqual(record([PaneLayoutNode.fromColumns([[pane("/a"), pane("/b")]])!]).layoutTrees, fromRows,
+                       "a pane missing from the trees")
+        XCTAssertEqual(record([PaneLayoutNode.fromColumns([[pane("/a"), pane("/b")]])!, .leaf(pane("/c")),
+                               .leaf(pane("/d"))]).layoutTrees, fromRows,
+                       "a pane rows don't have")
+
+        // 저장 경로로 만든 기록(같은 pane, 같은 순서)은 tree를 그대로 쓴다. 모양이 rows의 열 근사와 달라도 된다.
+        let stacked = PaneLayoutNode.split(.topToBottom, [
+            branch(.split(.leftToRight, [branch(.leaf(pane("/a")), 0.5), branch(.leaf(pane("/b")), 0.5)]), 0.7),
+            branch(.leaf(pane("/c")), 0.3),
+        ])
+        let saved = WindowRecord(frame: frame, layouts: [ProjectLayoutRecord(projectId: "api", root: stacked),
+                                                         ProjectLayoutRecord(projectId: "web", root: .leaf(pane("/d")))])
+        XCTAssertEqual(saved.layoutTrees, [stacked, .leaf(pane("/d"))])
+        XCTAssertEqual(record([stacked]).layoutTrees, [stacked], "rows [[a,b],[c]] with a differently shaped tree")
+    }
 }

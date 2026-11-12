@@ -81,10 +81,12 @@ struct WorkspaceRecord: Codable, Equatable {
         return panes.isEmpty ? [] : [panes]
     }
 
-    /// 복원할 tree: 저장된 `layout`이 있으면 그것, 없으면(예전 기록) `effectiveRows`의 열 구조를 균등 비율로.
-    /// pane이 없으면 nil.
+    /// 복원할 tree: 저장된 `layout`은 그 잎이 펼친 `effectiveRows`와 같을 때만(같은 pane, 같은 순서) 쓴다. 없거나(예전
+    /// 기록) 어긋나면 `effectiveRows`의 열 구조를 균등 비율로. pane이 없으면 nil.
     var effectiveLayout: PaneLayoutNode<PaneRecord>? {
-        layout ?? PaneLayoutNode.fromColumns(effectiveRows)
+        let columns = effectiveRows
+        if let layout, layout.leaves == columns.flatMap({ $0 }) { return layout }
+        return PaneLayoutNode.fromColumns(columns)
     }
 }
 

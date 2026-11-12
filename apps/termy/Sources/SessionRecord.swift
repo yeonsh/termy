@@ -81,10 +81,13 @@ struct WindowRecord: Codable, Equatable {
                   projectOrder: projectOrder, layouts: layouts)
     }
 
-    /// 복원할 tree들. `layouts`가 있으면 그것만 믿고, 없으면(예전 파일) `rows`에서 만든 tree 하나(비율 균등).
-    /// 잎을 이어 읽은 순서가 `focusedPaneIndex`의 순서다.
+    /// 복원할 tree들. `layouts`는 그 잎을 이어 읽은 것이 펼친 `rows`와 같을 때만(같은 pane, 같은 순서 — 모든 저장 경로가
+    /// 지키는 것) 믿는다. 없거나(예전 파일) 어긋나면(잎 없는 split, 손으로 고친 파일 등) `rows`에서 만든 tree 하나(비율
+    /// 균등)다: pane을 잃지 않는 쪽은 언제나 `rows`다. 잎을 이어 읽은 순서가 `focusedPaneIndex`의 순서다.
     var layoutTrees: [PaneLayoutNode<PaneRecord>] {
-        if let layouts, !layouts.isEmpty { return layouts.map(\.root) }
+        if let layouts, !layouts.isEmpty, layouts.flatMap({ $0.root.leaves }) == rows.flatMap({ $0 }) {
+            return layouts.map(\.root)
+        }
         return PaneLayoutNode.fromColumns(rows).map { [$0] } ?? []
     }
 }

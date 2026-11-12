@@ -270,9 +270,10 @@ final class WorkspacePersistenceTests: XCTestCase {
 
     func test_effectiveLayout_prefersLayoutThenRows() throws {
         let a = PaneRecord(cwd: "/a"), b = PaneRecord(cwd: "/b"), c = PaneRecord(cwd: "/c")
+        // 같은 pane·같은 순서지만 모양(위아래)과 비율은 tree의 것이다. rows는 그 열 근사(좌우 두 열)일 뿐이다.
         let saved = PaneLayoutNode.split(.topToBottom, [
-            PaneLayoutBranch(node: .leaf(b), weight: 0.7),
             PaneLayoutBranch(node: .leaf(a), weight: 0.3),
+            PaneLayoutBranch(node: .leaf(b), weight: 0.7),
         ])
         let withLayout = WorkspaceRecord(canonicalPath: "/a", displayLabel: "a", updatedAt: Date(timeIntervalSince1970: 5),
                                          panes: [a, b], rows: [[a], [b]], layout: saved)
@@ -306,5 +307,34 @@ final class WorkspacePersistenceTests: XCTestCase {
         let withoutPanes = #"{"schemaVersion":1,"canonicalPath":"/a","displayLabel":"a","updatedAt":0}"#
         XCTAssertThrowsError(try JSONDecoder().decode(WorkspaceRecord.self, from: Data(withoutPanes.utf8)),
                              "panes stays required")
+    }
+
+    /// `layout`은 그 잎이 펼친 `effectiveRows`와 같을 때(같은 pane, 같은 순서)만 쓴다. 어긋나면 pane을 잃지 않게 rows다.
+    func test_effectiveLayout_disagreeingWithRows_fallsBackToRows() throws {
+        let a = PaneRecord(cwd: "/a"), b = PaneRecord(cwd: "/b")
+        let fromRows = PaneLayoutNode.fromColumns([[a], [b]])
+        func record(_ layout: PaneLayoutNode<PaneRecord>) -> WorkspaceRecord {
+            WorkspaceRecord(canonicalPath: "/a", displayLabel: "a", panes: [a, b], rows: [[a], [b]], layout: layout)
+        }
+
+        // 잎 없는 split: 읽히지만(Task 1은 children을 검사하지 않는다) 그대로 쓰면 두 pane을 모두 잃는다.
+        let json = #"""
+        {"schemaVersion":1,"canonicalPath":"/a","displayLabel":"a","updatedAt":0,
+         "panes":[{"cwd":"/a"},{"cwd":"/b"}],"rows":[[{"cwd":"/a"}],[{"cwd":"/b"}]],
+         "layout":{"axis":"leftToRight","children":[]}}
+        """#
+        let empty = try JSONDecoder().decode(WorkspaceRecord.self, from: Data(json.utf8))
+        XCTAssertNotNil(empty.layout, "precondition: the leafless tree decodes")
+        XCTAssertEqual(empty.effectiveLayout, fromRows)
+
+        XCTAssertEqual(record(PaneLayoutNode.fromColumns([[b], [a]])!).effectiveLayout, fromRows, "different order")
+        XCTAssertEqual(record(.leaf(a)).effectiveLayout, fromRows, "a pane missing from the tree")
+        XCTAssertEqual(record(PaneLayoutNode.fromColumns([[a], [b], [PaneRecord(cwd: "/c")]])!).effectiveLayout, fromRows,
+                       "a pane rows don't have")
+
+        // rows 없는 예전 기록도 `panes`(= effectiveRows)와 맞으면 tree를 쓴다.
+        let stacked = PaneLayoutNode.fromColumns([[a, b]])!
+        let panesOnly = WorkspaceRecord(canonicalPath: "/a", displayLabel: "a", panes: [a, b], layout: stacked)
+        XCTAssertEqual(panesOnly.effectiveLayout, stacked)
     }
 }
