@@ -136,7 +136,7 @@ PDFs, open there too — even when the filename has spaces or parentheses.
     </td>
     <td width="50%" align="center">
       <img src="docs/screenshots/s2.png" alt="Three-pane split layout on a single project" /><br/>
-      <sub><b>Splits, not tabs.</b> Nested <code>NSSplitView</code>s. Drag to resize. <kbd>⌘</kbd><kbd>T</kbd> adds a pane (auto-orients on aspect ratio), <kbd>⌘</kbd><kbd>D</kbd> splits the current row, <kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd> adds a new row.</sub>
+      <sub><b>Splits, not tabs.</b> Nested <code>NSSplitView</code>s. Drag to resize. <kbd>⌘</kbd><kbd>T</kbd> adds a pane (auto-orients on aspect ratio), <kbd>⌘</kbd><kbd>D</kbd> splits the focused pane right, <kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd> splits it down. Drag a pane by its header to move it.</sub>
     </td>
   </tr>
   <tr>
@@ -184,8 +184,14 @@ PDFs, open there too — even when the filename has spaces or parentheses.
   `<folder>@<machine>`, new panes and splits open on the same machine, and the
   agents there show up in the dashboard like local ones.
 - **Real splits.** <kbd>⌘</kbd><kbd>T</kbd> new pane, <kbd>⌘</kbd><kbd>D</kbd>
-  same-row split, <kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd> new-row split. Drag the
-  dividers. <kbd>⌘</kbd><kbd>⏎</kbd> toggles maximize.
+  splits the focused pane right, <kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd> splits it
+  down. Drag the dividers, and the sizes stick. <kbd>⌘</kbd><kbd>⏎</kbd> toggles
+  maximize.
+- **Drag panes around.** Drag a pane by its header and a shadow box shows where
+  it will land and how big it will be: a pane's edge splits just that pane, the
+  gap between two panes slots it in between, the window's edge spans the whole
+  side, and a pane's middle swaps the two. Esc cancels. The layout is saved per
+  project and comes back after a restart.
 - **Input that stays out of your way.** Drop files from Finder onto a pane and
   termy types the absolute paths, escaped and ready for zsh. <kbd>⇧</kbd><kbd>⏎</kbd>
   inserts a newline in Claude Code instead of submitting the prompt.

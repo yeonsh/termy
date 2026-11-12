@@ -323,10 +323,24 @@ live pane, with the pane's project, branch, and state.
 
 ### Workspace and projects
 
-A window is one `Workspace`, not a tab container. Layout is nested
-`NSSplitView`s: an outer vertical split for rows, with a horizontal split for
-the panes in each row. Moving an `NSView` between superviews preserves its
+A window is one `Workspace`, not a tab container. Each project has its own
+free split tree (`PaneLayoutNode`, in `ProjectPaneLayout`) with a weight per
+child; the shown project's tree is drawn as nested `NSSplitView`s and the
+weights place the dividers. Moving an `NSView` between superviews preserves its
 state, so PTYs keep running across filter switches.
+
+- **Splits and drag-to-move.** <kbd>⌘</kbd><kbd>D</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd>
+  split only the focused pane right / down; <kbd>⌘</kbd><kbd>T</kbd> places a
+  pane automatically. Dragging a pane's header shows a shadow box computed by
+  `PaneDropPlanner` (edge = split that pane, gap = insert between, window edge
+  = span the side, middle = swap) and changes the tree once on drop. Divider
+  drags update the weights. A pane that `cd`s into another project leaves an
+  "away" slot in its old tree and gets it back if it returns before that
+  project's layout is edited.
+- **Saved layout.** Trees and weights go to session.json (`WindowRecord.layouts`)
+  and the ⌘K records (`WorkspaceRecord.layout`). The legacy column list
+  (`rows`) is still written in the same reading order so older builds keep
+  every pane and the focus.
 
 - **Project identity.** The display label is the basename of the containing git
   worktree root, falling back to the cwd. The persistence key is the
