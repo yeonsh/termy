@@ -283,6 +283,37 @@ actor HookDaemon {
         updateContinuation.yield(DaemonUpdate(seq: seq, snapshot: snapshot))
     }
 
+    /// A standalone Esc/Ctrl-C keypress reached this pane's PTY. Agents that send no
+    /// hook on interrupt (Codex, Antigravity, Claude without 7501) would otherwise
+    /// stay THINK and later promote to a false WAIT, so close the open turn to IDLE
+    /// silently. No-op (and no yield) when the pane is not in such a turn.
+    func recordInterruptKey(paneId: String, now: Date = Date()) {
+        guard var snapshot = panes[paneId],
+              snapshot.agentKind == .claude || snapshot.agentKind == .codex || snapshot.agentKind == .antigravity,
+              !snapshot.programStatusActive,
+              snapshot.turnOpen
+        else { return }
+
+        switch (snapshot.state, snapshot.waitSource) {
+        case (.thinking, _), (.possiblyWaiting, _), (.waiting, .promotedFromPossible):
+            break
+        default:
+            return
+        }
+
+        snapshot.state = .idle
+        snapshot.needsAttention = false
+        snapshot.notificationReason = nil
+        snapshot.waitSource = nil
+        snapshot.turnOpen = false
+        snapshot.interruptedByKey = true
+        snapshot.updatedAt = now
+        snapshot.enteredStateAt = now
+        panes[paneId] = snapshot
+        seq &+= 1
+        updateContinuation.yield(DaemonUpdate(seq: seq, snapshot: snapshot))
+    }
+
     /// Read-only accessor for the UI layer.
     func snapshot(paneId: String) -> PaneSnapshot? {
         panes[paneId]

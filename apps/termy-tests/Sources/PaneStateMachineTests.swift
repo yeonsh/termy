@@ -731,4 +731,44 @@ final class PaneStateMachineTests: XCTestCase {
         XCTAssertEqual(after.agentKind, .codex)
         XCTAssertEqual(after.lastSessionId, "codex-1")
     }
+
+    // MARK: - Interrupt key recovery
+
+    private func interruptedIdle() -> PaneSnapshot {
+        var s = PaneSnapshot.empty(paneId: "p1", projectId: "proj", agentKind: .codex)
+        s.state = .idle
+        s.interruptedByKey = true
+        return s
+    }
+
+    func test_toolEventAfterInterruptKey_returnsToThinking() {
+        for kind in [HookEventKind.preToolUse, .postToolUse] {
+            let after = PaneStateMachine.apply(codexEvent(kind), to: interruptedIdle())
+            XCTAssertEqual(after.state, .thinking)
+            XCTAssertFalse(after.needsAttention)
+            XCTAssertFalse(after.interruptedByKey)
+        }
+    }
+
+    func test_stopAfterInterruptKey_staysIdleSilently() {
+        let prev = interruptedIdle()
+        let after = PaneStateMachine.apply(codexEvent(.stop), to: prev)
+        XCTAssertEqual(after.state, .idle)
+        XCTAssertFalse(after.turnOpen)
+        XCTAssertFalse(after.needsAttention)
+        XCTAssertEqual(after.enteredStateAt, prev.enteredStateAt)
+    }
+
+    func test_otherEventClearsInterruptedByKey() {
+        let after = PaneStateMachine.apply(codexEvent(.userPromptSubmit), to: interruptedIdle())
+        XCTAssertEqual(after.state, .thinking)
+        XCTAssertFalse(after.interruptedByKey)
+    }
+
+    func test_toolEventOnPlainIdle_unchanged() {
+        var prev = interruptedIdle()
+        prev.interruptedByKey = false
+        let after = PaneStateMachine.apply(codexEvent(.preToolUse), to: prev)
+        XCTAssertEqual(after.state, .idle)
+    }
 }

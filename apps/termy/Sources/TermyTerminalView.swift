@@ -81,6 +81,9 @@ final class TermyTerminalView: LocalProcessTerminalView {
     var onGridSizeChanged: ((_ cols: Int, _ rows: Int) -> Void)?
 
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        if let id = paneId, InterruptKey.isStandaloneInterrupt(data) {
+            Task { await HookDaemon.shared.recordInterruptKey(paneId: id) }
+        }
         if let remoteInput {
             remoteInput(data)
         } else {

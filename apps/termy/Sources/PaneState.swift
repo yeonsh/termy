@@ -8,6 +8,7 @@
 //   INIT             ──(SessionStart)──────────────▶ INIT          (informational)
 //   THINKING         ──(Stop)───────────────────────▶ WAITING(.turnEnd)
 //   THINKING         ──(SessionEnd)─────────────────▶ INIT
+//   THINKING         ──(Esc/Ctrl-C key, no 7501)────▶ IDLE (silent)
 //   THINKING         ──(PtyExit, exit != 0)─────────▶ ERRORED
 //   THINKING         ──(reconciler 8s silence)──────▶ POSSIBLY_WAITING (silent)
 //   POSSIBLY_WAITING ──(Pre/PostToolUse)─────────────▶ THINKING       (silent recovery)
@@ -129,6 +130,11 @@ struct PaneSnapshot: Sendable, Codable {
     /// stops being the viewed pane). Drives the WAIT -> IDLE countdown.
     /// Runtime-only (not in CodingKeys).
     var seenAt: Date?
+    /// True while the pane sits in the IDLE that a standalone Esc/Ctrl-C keypress
+    /// forced (agents with no hook for interrupts). A later Pre/PostToolUse means
+    /// the guess was wrong and silently reopens THINKING; Stop keeps IDLE.
+    /// Runtime-only (not in CodingKeys).
+    var interruptedByKey: Bool = false
 
     private enum CodingKeys: String, CodingKey {
         case paneId, projectId, state, needsAttention, notificationReason, waitSource
@@ -223,6 +229,7 @@ enum PaneStateMachine {
             return next
         }
         next.programStatusActive = true
+        next.interruptedByKey = false
         func finish(_ state: PaneState, attention: Bool, reason: String?, source: WaitSource?, turnOpen: Bool) {
             let changed = previous.state != state
                 || previous.notificationReason != reason
@@ -268,6 +275,7 @@ enum PaneStateMachine {
     private static func applyHookRules(_ event: HookEvent, to previous: PaneSnapshot) -> PaneSnapshot {
         var next = previous
         next.updatedAt = Date()
+        next.interruptedByKey = false
 
         // Stamp the pane with whichever agent originated this event.
         // Synthetic events (agent="termy") return nil here and leave the
@@ -367,7 +375,9 @@ enum PaneStateMachine {
             let resolvedKind = event.agentKind ?? previous.agentKind
             next.lastAssistantMessage = event.meta.lastAssistantMessage
             next.turnOpen = false
-            if resolvedKind == .antigravity, event.meta.reason == "ERROR" {
+            if previous.interruptedByKey && previous.state == .idle {
+                // Codex may send Stop for an interrupted turn too: stay IDLE, no chime.
+            } else if resolvedKind == .antigravity, event.meta.reason == "ERROR" {
                 next.state = .errored
                 next.waitSource = nil
                 next.enteredStateAt = next.updatedAt
@@ -533,6 +543,10 @@ enum PaneStateMachine {
                 next.needsAttention = false
                 next.waitSource = nil
                 next.enteredStateAt = next.updatedAt
+            } else if previous.interruptedByKey && previous.state == .idle {
+                // The key was not an interrupt after all: the agent is still working.
+                next.state = .thinking
+                next.enteredStateAt = next.updatedAt
             }
 
         case .postToolUse:
@@ -580,6 +594,9 @@ enum PaneStateMachine {
                 next.state = .thinking
                 next.needsAttention = false
                 next.waitSource = nil
+                next.enteredStateAt = next.updatedAt
+            } else if previous.interruptedByKey && previous.state == .idle {
+                next.state = .thinking
                 next.enteredStateAt = next.updatedAt
             }
 
