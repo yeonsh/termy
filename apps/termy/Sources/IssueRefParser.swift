@@ -133,7 +133,11 @@ enum IssueRefParser {
                 segmentLength += 1
             }
         }
-        return segmentLength == 0 ? nil : begin
+        guard segmentLength > 0 else { return nil }
+        // A name needs an ASCII letter and must end in a letter or digit.
+        let name = chars[begin..<end]
+        guard name.contains(where: { $0.isASCII && $0.isLetter }), isAlnum(name.last!) else { return nil }
+        return begin
     }
 
     private static func tokens(in chars: [Character]) -> [Token] {
@@ -149,6 +153,8 @@ enum IssueRefParser {
                   let number = Int(String(chars[(i + 1)..<j])),
                   !(j < chars.count && isASCIIWordChar(chars[j])) else { i += 1; continue }
 
+            if inURLRun(chars, at: i) { i = j; continue }
+
             var kind: IssueRefKind = marker == "!" ? .mergeRequest : .issue
             var qualifier: IssueRefQualifier?
             var start = i
@@ -159,7 +165,8 @@ enum IssueRefParser {
             } else if i == 0 || !(isASCIIWordChar(chars[i - 1]) || chars[i - 1] == "/") {
                 var gap = i
                 while gap > 0, chars[gap - 1].isWhitespace { gap -= 1 }
-                if gap < i, gap > 0, let nameBegin = nameStart(in: chars, endingBefore: gap) {
+                if gap < i, gap > 0, let nameBegin = nameStart(in: chars, endingBefore: gap),
+                   !(nameBegin > 0 && (chars[nameBegin - 1] == "#" || chars[nameBegin - 1] == "!")) {
                     apply(name: String(chars[nameBegin..<gap]), joined: false, kind: &kind, qualifier: &qualifier)
                 }
             } else {
@@ -179,6 +186,14 @@ enum IssueRefParser {
             i = j
         }
         return result
+    }
+
+    /// True when the whitespace-delimited run around `index` contains "://" (a URL fragment).
+    private static func inURLRun(_ chars: [Character], at index: Int) -> Bool {
+        var lo = index, hi = index
+        while lo > 0, !chars[lo - 1].isWhitespace { lo -= 1 }
+        while hi < chars.count, !chars[hi].isWhitespace { hi += 1 }
+        return String(chars[lo..<hi]).contains("://")
     }
 
     private static func apply(name: String, joined: Bool, kind: inout IssueRefKind,

@@ -55,4 +55,24 @@ final class IssueRefParserTests: XCTestCase {
     }
     func test_unsplitDigitsAndLongNumbers() { XCTAssertNil(ref("#12345678", at: "#1")) }
 
+
+    func test_digitsAreNotNames() {
+        XCTAssertNil(ref("#1300 #1301", at: "#1301")?.qualifier)
+        XCTAssertEqual(IssueRefParser.clues(in: "#1300 #1301"), [])
+        XCTAssertEqual(ref("fl#45 #46", at: "#46")?.qualifier, .joined("fl"))
+        XCTAssertNil(ref("step 2 #12", at: "#12")?.qualifier)
+    }
+    func test_dashRangeInheritsAndMerges() {
+        let want = [IssueRefClue(numbers: 26...28, kind: .issue, source: .name(.spaced("bdrive-core")))]
+        for text in ["bdrive-core #26-#28", "bdrive-core #26–#28"] {
+            XCTAssertEqual(ref(text, at: "#28")?.qualifier, .spaced("bdrive-core"))
+            XCTAssertEqual(IssueRefParser.clues(in: text), want)
+        }
+    }
+    func test_nameCannotEndInPunctuation() { XCTAssertNil(ref("Fixed in main. #12", at: "#12")?.qualifier) }
+    func test_urlFragmentIsNotARef() {
+        let text = "see https://example.com/page#12"
+        XCTAssertNil(ref(text, at: "#12"))
+        XCTAssertEqual(IssueRefParser.mentionedNames(in: text), [])
+    }
 }
