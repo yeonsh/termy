@@ -93,4 +93,21 @@ final class IssueRefPickerTests: XCTestCase {
         XCTAssertEqual(picked, [bdweb])
         panel.orderOut(nil)
     }
+
+    @MainActor func test_panel_showAllGrowsHeight() {
+        let panel = IssueRefPickerPanel()
+        let repos = (0..<10).map { RepoWebURL(storageKey: "github.com/o/r\($0)")! }
+        panel.present(request: request(candidates: []), allRepos: repos, at: NSPoint(x: 100, y: 600)) { _ in }
+        let small = panel.frame.height
+        panel.commitSelection()
+        XCTAssertEqual(panel.visibleRows.count, 10)
+        XCTAssertGreaterThan(panel.frame.height, small)
+        let full = panel.frame.height
+        panel.setSearchTextForTesting("r3")
+        XCTAssertEqual(panel.visibleRows.count, 1)
+        XCTAssertLessThan(panel.frame.height, full)
+        panel.setSearchTextForTesting("")
+        XCTAssertEqual(panel.frame.height, full)
+        panel.orderOut(nil)
+    }
 }

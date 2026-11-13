@@ -23,6 +23,7 @@ final class IssueRefPickerPanel: NSPanel {
     private var model: IssueRefPickerModel?
     private var rows: [IssueRefPickerRow] = []
     private var showAll = false
+    private var anchor = NSPoint.zero
     private var onPick: ((RepoWebURL) -> Void)?
 
     var visibleRows: [IssueRefPickerRow] { rows }
@@ -61,19 +62,11 @@ final class IssueRefPickerPanel: NSPanel {
         self.onPick = onPick
         model = IssueRefPickerModel(request: request, allRepos: allRepos)
         showAll = false
+        anchor = screenPoint
         titleLabel.stringValue = request.title
         searchField.stringValue = ""
         refilter()
 
-        let visibleCount = min(max(rows.count, 1), Self.maxVisibleRows)
-        let height = Self.chromeHeight + CGFloat(visibleCount) * (Self.rowHeight + 2)
-        var origin = NSPoint(x: screenPoint.x, y: screenPoint.y - height)
-        let screen = NSScreen.screens.first { $0.frame.contains(screenPoint) } ?? NSScreen.main
-        if let area = screen?.visibleFrame {
-            origin.x = min(max(origin.x, area.minX), max(area.minX, area.maxX - Self.panelWidth))
-            origin.y = min(max(origin.y, area.minY), max(area.minY, area.maxY - height))
-        }
-        setFrame(NSRect(x: origin.x, y: origin.y, width: Self.panelWidth, height: height), display: true)
         makeKeyAndOrderFront(nil)
         makeFirstResponder(searchField)
     }
@@ -116,6 +109,20 @@ final class IssueRefPickerPanel: NSPanel {
             tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             tableView.scrollRowToVisible(0)
         }
+        fitToRows()
+    }
+
+    /// 줄 수에 맞춰 높이를 정한다. 왼쪽 위 모서리는 anchor에 두고, 화면 `visibleFrame` 안으로 당긴다.
+    private func fitToRows() {
+        let visibleCount = min(max(rows.count, 1), Self.maxVisibleRows)
+        let height = Self.chromeHeight + CGFloat(visibleCount) * (Self.rowHeight + 2)
+        var origin = NSPoint(x: anchor.x, y: anchor.y - height)
+        let screen = NSScreen.screens.first { $0.frame.contains(anchor) } ?? NSScreen.main
+        if let area = screen?.visibleFrame {
+            origin.x = min(max(origin.x, area.minX), max(area.minX, area.maxX - Self.panelWidth))
+            origin.y = min(max(origin.y, area.minY), max(area.minY, area.maxY - height))
+        }
+        setFrame(NSRect(x: origin.x, y: origin.y, width: Self.panelWidth, height: height), display: isVisible)
     }
 
     /// 테스트용: 검색 칸에 글자를 넣고 delegate와 같은 갱신 경로를 탄다.
