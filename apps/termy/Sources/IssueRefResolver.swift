@@ -131,7 +131,12 @@ enum IssueRefResolver {
                     return open(found.repos[0])
                 }
                 return xFirst(found.repos, save: .none)
-            default: return limited(found.repos, name: name)
+            default:
+                if isStrong(name: name, paneRepos: ctx.paneRepos, aliases: memory.aliases) {
+                    return limited(found.repos, name: name)
+                }
+                // 약한 이름(일반 낱말)은 줄임말로 저장하지 않는다.
+                return xFirst(found.repos, save: .none)
             }
         }
 

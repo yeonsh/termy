@@ -123,8 +123,35 @@ final class IssueRefResolverTests: XCTestCase {
         XCTAssertEqual(m.saveTarget, .pick(key(3)))
     }
     func test_hcPane_hasNoThisPaneCandidate() {
-        guard let m = menu(decide(ctx(bare1300, paneRepos: []))) else { return }
+        guard let m = menu(decide(ctx(bare1300, nearby: ["bdrive-core"], paneRepos: []),
+                                  memory: IssueRefMemorySnapshot(recents: [nd3]))) else { return }
+        XCTAssertFalse(m.candidates.isEmpty)
         XCTAssertFalse(m.candidates.contains { $0.tag == .thisPane })
+    }
+    func test_saveTargets_acrossPaths() {
+        let mem = IssueRefMemorySnapshot(aliases: ["fl": flutter])
+        // force on joined alias
+        XCTAssertEqual(menu(decide(ctx(IssueRef(number: 45, kind: .issue, qualifier: .joined("fl")), force: true), memory: mem))?.saveTarget, .alias("fl"))
+        // spaced strong single + force
+        XCTAssertEqual(menu(decide(ctx(IssueRef(number: 26, kind: .issue, qualifier: .spaced("bdrive-core")), force: true)))?.saveTarget, Optional(IssueRefSaveTarget.none))
+        // spaced strong multi
+        let strongDup = KnownRepoSnapshot(repos: [KnownRepo(web: RepoWebURL(remote: "git@github.com:a/api-x.git")!, localPath: "/w/api-x"),
+                                                  KnownRepo(web: RepoWebURL(remote: "git@gitlab.com:b/api-x.git")!, localPath: "/x/api-x")])
+        let strong = menu(decide(ctx(IssueRef(number: 7, kind: .issue, qualifier: .spaced("api-x")), paneRepos: []), index: strongDup))
+        XCTAssertEqual(strong?.limitToCandidates, true)
+        XCTAssertEqual(strong?.saveTarget, .alias("api-x"))
+        // spaced weak multi: not limited, nothing saved, matches first then defaults
+        let weak = menu(decide(ctx(IssueRef(number: 7, kind: .issue, qualifier: .spaced("api")), paneRepos: [paneBdweb]),
+                               index: KnownRepoSnapshot(repos: twoSame.repos + [paneBdweb])))
+        XCTAssertEqual(weak?.limitToCandidates, false)
+        XCTAssertEqual(weak?.saveTarget, Optional(IssueRefSaveTarget.none))
+        XCTAssertEqual(weak?.candidates.map(\.repo.path), ["a/api", "b/api", "bdrive/bdweb"])
+        XCTAssertEqual(weak?.candidates.map(\.tag), [nil, nil, .thisPane])
+        // paneId nil
+        var noPane = ctx(bare1300); noPane.paneId = nil
+        XCTAssertEqual(menu(decide(noPane))?.saveTarget, Optional(IssueRefSaveTarget.none))
+        // force, bare, no clue
+        XCTAssertEqual(menu(decide(ctx(bare1300, force: true)))?.saveTarget, .pick(key()))
     }
     func test_noKnownProjects_beeps() {
         XCTAssertEqual(decide(ctx(bare1300, paneRepos: []), index: KnownRepoSnapshot(repos: [])), .beep)
