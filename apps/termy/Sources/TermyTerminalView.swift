@@ -258,6 +258,10 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// Opens a resolved markdown, PDF or image file in a preview window. Set by Pane.
     var onOpenPreviewFile: ((URL) -> Void)?
 
+    /// A Cmd+click on an issue reference (`#1300`, `fl#45`) that isn't part
+    /// of a link. Set by Pane, which decides the project and opens it.
+    var onIssueRefClick: ((IssueRefClick) -> Void)?
+
     /// Pane writes the focus-state caret color here instead of mutating
     /// `caretColor` directly. We mirror it onto `caretColor` except while
     /// an IME composition is in flight, where the cursor block would
@@ -358,7 +362,9 @@ final class TermyTerminalView: LocalProcessTerminalView {
         guard !isHiddenOrHasHiddenAncestor else { return event }
         let local = convert(event.locationInWindow, from: nil)
         guard bounds.contains(local) else { return event }
-        if openLinkUnderMouse(windowLocation: event.locationInWindow) {
+        // ⌥⌘+click on an issue reference always asks which project.
+        let forceMenu = event.modifierFlags.contains(.option)
+        if openLinkUnderMouse(windowLocation: event.locationInWindow, forceMenu: forceMenu) {
             // Monitors that run after this one never see a nil-returned
             // event, the restore monitor included; end the override here.
             endClickReportingOverride()
@@ -367,29 +373,40 @@ final class TermyTerminalView: LocalProcessTerminalView {
         return event
     }
 
-    private func openLinkUnderMouse(windowLocation: NSPoint) -> Bool {
-        guard let pos = cellPosition(at: windowLocation),
-              let action = linkClickAction(
-                atScreen: pos,
-                baseDirectories: previewBaseDirectories?() ?? [],
-                homeDirectory: NSHomeDirectory(),
-                isRegularFile: PreviewLinkResolver.fileExistsAsRegularFile,
-                listDirectory: { (try? FileManager.default.contentsOfDirectory(atPath: $0)) ?? [] }
-              )
-        else { return false }
+    private func openLinkUnderMouse(windowLocation: NSPoint, forceMenu: Bool) -> Bool {
+        guard let pos = cellPosition(at: windowLocation) else { return false }
+        let action = linkClickAction(
+            atScreen: pos,
+            baseDirectories: previewBaseDirectories?() ?? [],
+            homeDirectory: NSHomeDirectory(),
+            isRegularFile: PreviewLinkResolver.fileExistsAsRegularFile,
+            listDirectory: { (try? FileManager.default.contentsOfDirectory(atPath: $0)) ?? [] }
+        )
         switch action {
-        case .preview(let url):
+        case .preview(let url)?:
             onOpenPreviewFile?(url)
             return true
-        case .beep:
+        case .beep?:
             // Consumed so SwiftTerm's own mouseUp doesn't act on it too.
             NSSound.beep()
             return true
-        case .openURL(let url):
+        case .openURL(let url)?:
             NSWorkspace.shared.open(url)
             return true
-        case .ignore:
-            return false
+        case .ignore?, nil:
+            // Not a link: maybe an issue reference.
+            guard let onIssueRefClick,
+                  let screen = issueRefScreenContext(atScreen: pos),
+                  let hit = IssueRefParser.hit(in: screen.text, atOffset: screen.clickOffset)
+            else { return false }
+            onIssueRefClick(IssueRefClick(
+                hit: hit,
+                screen: screen,
+                forceMenu: forceMenu,
+                // A view outside a window (tests) has no screen to convert to.
+                anchorScreenPoint: window?.convertPoint(toScreen: windowLocation) ?? windowLocation
+            ))
+            return true
         }
     }
 
@@ -436,16 +453,57 @@ final class TermyTerminalView: LocalProcessTerminalView {
     /// reaches the right edge (Ink's hard wrap). nil when the link text
     /// isn't there around the click.
     private func screenText(after linkText: String, at pos: Position) -> String? {
-        let reach = 4
-        func continues(below upper: Int) -> Bool {
-            guard let upperLine = terminal.getLine(row: upper),
-                  let lowerLine = terminal.getLine(row: upper + 1)
-            else { return false }
-            if lowerLine.isWrapped { return true }
-            let cols = terminal.cols
-            return lowerLine.getTrimmedLength() > 0
-                && upperLine.getTrimmedLength() >= cols - max(2, cols / 5)
+        let (text, clickOffset, _) = joinedScreenRows(at: pos)
+
+        let chars = Substring(text)
+        guard let first = linkText.first(where: { !$0.isWhitespace }) else { return nil }
+        var start = chars.startIndex
+        var offset = 0
+        while start < chars.endIndex {
+            if chars[start] == first,
+               let end = PreviewLinkResolver.endOfMatchIgnoringWhitespace(linkText, in: chars[start...]),
+               offset <= clickOffset,
+               clickOffset < offset + chars.distance(from: start, to: end) {
+                return String(chars[end...])
+            }
+            start = chars.index(after: start)
+            offset += 1
         }
+        return nil
+    }
+
+    /// The text around screen cell `pos` for issue-reference lookup: the
+    /// rows a wrap joined to the clicked row, and every buffer row above
+    /// them (scrollback included) for clues.
+    func issueRefScreenContext(atScreen pos: Position) -> IssueRefScreenContext? {
+        guard terminal.getLine(row: pos.row) != nil else { return nil }
+        let (text, clickOffset, firstRow) = joinedScreenRows(at: pos)
+        let rows = String(decoding: terminal.getBufferAsData(), as: UTF8.self)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        let aboveCount = min(rows.count, max(0, terminal.getTopVisibleRow() + firstRow))
+        let linesAbove = rows.prefix(aboveCount).map { $0.replacingOccurrences(of: "\u{0}", with: "") }
+        return IssueRefScreenContext(text: text, clickOffset: clickOffset, linesAbove: linesAbove)
+    }
+
+    /// Whether screen row `upper + 1` continues row `upper`: soft-wrapped,
+    /// or after a line break a row continuing one that reaches the right
+    /// edge (Ink's hard wrap).
+    private func continues(below upper: Int) -> Bool {
+        guard let upperLine = terminal.getLine(row: upper),
+              let lowerLine = terminal.getLine(row: upper + 1)
+        else { return false }
+        if lowerLine.isWrapped { return true }
+        let cols = terminal.cols
+        return lowerLine.getTrimmedLength() > 0
+            && upperLine.getTrimmedLength() >= cols - max(2, cols / 5)
+    }
+
+    /// The screen rows joined to row `pos.row` (up to four either way) as
+    /// one text: soft-wrapped rows as they are, other continuations after
+    /// a "\n". `clickOffset` is the Character offset of `pos` in it;
+    /// `firstRow` is the screen row the text starts on.
+    private func joinedScreenRows(at pos: Position) -> (text: String, clickOffset: Int, firstRow: Int) {
+        let reach = 4
         var firstRow = pos.row
         while firstRow > max(0, pos.row - reach), continues(below: firstRow - 1) { firstRow -= 1 }
         var lastRow = pos.row
@@ -466,22 +524,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
             text += line.translateToString(trimRight: true, skipNullCellsFollowingWide: true)
                 .replacingOccurrences(of: "\u{0}", with: " ")
         }
-
-        let chars = Substring(text)
-        guard let first = linkText.first(where: { !$0.isWhitespace }) else { return nil }
-        var start = chars.startIndex
-        var offset = 0
-        while start < chars.endIndex {
-            if chars[start] == first,
-               let end = PreviewLinkResolver.endOfMatchIgnoringWhitespace(linkText, in: chars[start...]),
-               offset <= clickOffset,
-               clickOffset < offset + chars.distance(from: start, to: end) {
-                return String(chars[end...])
-            }
-            start = chars.index(after: start)
-            offset += 1
-        }
-        return nil
+        return (text, clickOffset, firstRow)
     }
 
     /// Markdown and PDF files first (`file://` ones included, so they preview

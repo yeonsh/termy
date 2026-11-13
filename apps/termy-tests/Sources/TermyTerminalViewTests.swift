@@ -645,6 +645,88 @@ final class TermyTerminalViewTests: XCTestCase {
         XCTAssertEqual(screenClickAction(view, row: 0, col: 5), preview(parenReport))
     }
 
+    // MARK: - Issue references
+
+    /// Wide Hangul glyphs before the number shift columns away from
+    /// character offsets; the click must still land on `#1300`.
+    @MainActor
+    func test_screenContext_koreanPrefix_hitsNumber() throws {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 200))
+        view.getTerminal().resize(cols: 100, rows: 10)
+        view.feed(text: "- 답을 기다리는 것: #1300 코디네이터 판단, bdrive-core #26~#28 수정.")
+        // "- "=0–1, 답을=2–5, 공백 6, 기다리는=7–14, 공백 15, 것=16–17, ':'=18, 공백 19, '#'=20, '1'=21
+        let ctx = try XCTUnwrap(view.issueRefScreenContext(atScreen: Position(col: 21, row: 0)))
+        XCTAssertEqual(
+            IssueRefParser.hit(in: ctx.text, atOffset: ctx.clickOffset)?.ref,
+            IssueRef(number: 1300, kind: .issue, qualifier: nil)
+        )
+    }
+
+    /// Claude Code (Ink) hard-wraps by moving the cursor: the name ends one
+    /// row and the number starts the next.
+    @MainActor
+    func test_screenContext_joinsInkHardWrap() throws {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        view.getTerminal().resize(cols: 40, rows: 10)
+        // Row 0 fills all 40 columns; Ink then does CR, cursor-down, and
+        // indents the continuation by two columns.
+        view.feed(text: "  waiting: coordinator call, bdrive-core\r\u{1b}[1B\u{1b}[2C#26 fix")
+        let ctx = try XCTUnwrap(view.issueRefScreenContext(atScreen: Position(col: 3, row: 1)))
+        XCTAssertEqual(
+            IssueRefParser.hit(in: ctx.text, atOffset: ctx.clickOffset)?.ref.qualifier,
+            .spaced("bdrive-core")
+        )
+    }
+
+    @MainActor
+    func test_screenContext_linesAboveIncludeScrollback() throws {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        view.getTerminal().resize(cols: 80, rows: 30)
+        view.feed(text: (1...40).map { "line \($0)" }.joined(separator: "\r\n"))
+
+        let ctx = try XCTUnwrap(view.issueRefScreenContext(atScreen: Position(col: 2, row: 29)))
+
+        XCTAssertEqual(ctx.text, "line 40")
+        XCTAssertGreaterThanOrEqual(ctx.linesAbove.count, 39)
+        XCTAssertEqual(ctx.linesAbove.first, "line 1")
+        XCTAssertEqual(ctx.linesAbove.last, "line 39")
+    }
+
+    /// A `#12` inside a URL is the URL's fragment, not an issue number.
+    @MainActor
+    func test_urlWithFragment_staysURL() {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 200))
+        view.getTerminal().resize(cols: 100, rows: 10)
+        view.feed(text: "see https://example.com/page#12")
+        // "see "=0–3, URL from 4, '#'=28, '1'=29
+        XCTAssertEqual(
+            view.linkClickAction(
+                atScreen: Position(col: 29, row: 0),
+                baseDirectories: [],
+                homeDirectory: "/Users/me",
+                isRegularFile: { _ in false },
+                listDirectory: { _ in [] }
+            ),
+            .openURL(URL(string: "https://example.com/page#12")!)
+        )
+    }
+
+    @MainActor
+    func test_cmdClickOnIssueRef_reportsClickAndConsumes() throws {
+        let view = Self.mouseCapturingTerminal(showing: "fl#45")
+        var clicks: [IssueRefClick] = []
+        view.onIssueRefClick = { clicks.append($0) }
+        let up = try XCTUnwrap(Self.mouseEvent(
+            .leftMouseUp,
+            at: NSPoint(x: 2, y: view.frame.height - 2),
+            modifierFlags: [.command, .option]
+        ))
+
+        XCTAssertNil(view.handleLinkClickMouseUp(up))
+        XCTAssertEqual(clicks.first?.hit.ref, IssueRef(number: 45, kind: .issue, qualifier: .joined("fl")))
+        XCTAssertEqual(clicks.first?.forceMenu, true)
+    }
+
     // MARK: - IME marked-text overlay
 
     /// Claude Code prompt `> 하하 호호` with the cursor moved back to the

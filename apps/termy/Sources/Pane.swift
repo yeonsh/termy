@@ -180,6 +180,17 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         terminal.onOpenPreviewFile = { url in
             _ = PreviewManager.shared.open(url)
         }
+        terminal.onIssueRefClick = { [weak self] click in
+            guard let self else { return }
+            let paneId = self.paneId
+            let roots = Pane.issueRefRepoRoots(
+                isRemote: self.isRemote,
+                shellCwd: self.currentCwd,
+                agentCwd: MissionControlModel.shared.snapshot(paneId: paneId)?.lastCwd,
+                workTreeRoot: GitBranch.workTreeRoot(for:)
+            )
+            Task { await IssueRefController.shared.handle(click, paneId: paneId, paneRoots: roots) }
+        }
         applyTheme()
         applyActiveAppearance(false)
 
@@ -704,6 +715,24 @@ final class Pane: NSView, LocalProcessTerminalViewDelegate {
         for directory in [shellCwd, agentCwd, workTreeRoot] {
             guard let directory, !directory.isEmpty, !result.contains(directory) else { continue }
             result.append(directory)
+        }
+        return result
+    }
+
+    /// The repos an issue reference clicked in this pane most likely
+    /// belongs to: the worktree roots of the shell's cwd, then the agent's.
+    /// A remote pane's cwd is a path on another machine, so it has none.
+    nonisolated static func issueRefRepoRoots(
+        isRemote: Bool,
+        shellCwd: String,
+        agentCwd: String?,
+        workTreeRoot: (String) -> String?
+    ) -> [String] {
+        guard !isRemote else { return [] }
+        var result: [String] = []
+        for cwd in [shellCwd, agentCwd] {
+            guard let cwd, !cwd.isEmpty, let root = workTreeRoot(cwd), !result.contains(root) else { continue }
+            result.append(root)
         }
         return result
     }

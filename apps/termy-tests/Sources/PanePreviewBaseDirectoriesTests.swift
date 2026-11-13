@@ -41,4 +41,25 @@ final class PanePreviewBaseDirectoriesTests: XCTestCase {
             []
         )
     }
+
+    /// A remote pane's cwd is a path on another machine; never read it here.
+    func test_issueRefRepoRoots_remotePaneIsEmpty() {
+        XCTAssertEqual(
+            Pane.issueRefRepoRoots(isRemote: true, shellCwd: "/w/bdweb", agentCwd: nil, workTreeRoot: { $0 }),
+            []
+        )
+    }
+
+    func test_issueRefRepoRoots_shellThenAgentDeduped() {
+        XCTAssertEqual(
+            Pane.issueRefRepoRoots(isRemote: false, shellCwd: "/w/bdweb/sub", agentCwd: "/w/bdweb",
+                                   workTreeRoot: { $0.hasPrefix("/w/bdweb") ? "/w/bdweb" : nil }),
+            ["/w/bdweb"]
+        )
+        XCTAssertEqual(
+            Pane.issueRefRepoRoots(isRemote: false, shellCwd: "/w/bdweb", agentCwd: "/w/netdrive3",
+                                   workTreeRoot: { $0 }),
+            ["/w/bdweb", "/w/netdrive3"]
+        )
+    }
 }
