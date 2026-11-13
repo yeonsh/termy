@@ -33,6 +33,9 @@ final class FontSettingsPanel: NSPanel {
     private var hcStatusLabel: NSTextField!
     private var soundCheckbox: NSButton!
     private var quitCheckbox: NSButton!
+    private var issueAliasPopUp: NSPopUpButton!
+    private var removeIssueAliasButton: NSButton!
+    var issueRefMemory: IssueRefMemory = .shared
     private let hcDefaults = UserDefaults.standard
     private let alertDefaults = UserDefaults.standard
     private var hcStatusGeneration = 0
@@ -41,7 +44,7 @@ final class FontSettingsPanel: NSPanel {
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 488),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 554),
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -216,6 +219,25 @@ final class FontSettingsPanel: NSPanel {
         quittingStack.spacing = 8
         quittingStack.translatesAutoresizingMaskIntoConstraints = false
 
+        let issueLinksHeader = NSTextField(labelWithString: "Issue Links")
+        issueLinksHeader.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        issueLinksHeader.textColor = .labelColor
+        issueLinksHeader.translatesAutoresizingMaskIntoConstraints = false
+        issueAliasPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+        issueAliasPopUp.translatesAutoresizingMaskIntoConstraints = false
+        removeIssueAliasButton = NSButton(title: "Remove", target: self, action: #selector(removeIssueAlias(_:)))
+        removeIssueAliasButton.bezelStyle = .rounded
+        removeIssueAliasButton.translatesAutoresizingMaskIntoConstraints = false
+        let issueAliasRow = NSStackView(views: [issueAliasPopUp, removeIssueAliasButton])
+        issueAliasRow.orientation = .horizontal
+        issueAliasRow.spacing = 8
+        issueAliasRow.translatesAutoresizingMaskIntoConstraints = false
+        let issueLinksStack = NSStackView(views: [issueLinksHeader, issueAliasRow])
+        issueLinksStack.orientation = .vertical
+        issueLinksStack.alignment = .leading
+        issueLinksStack.spacing = 8
+        issueLinksStack.translatesAutoresizingMaskIntoConstraints = false
+
         hcCheckbox = NSButton(checkboxWithTitle: "Run local panes in herdr-core", target: self, action: #selector(hcCheckboxChanged(_:)))
         hcCheckbox.translatesAutoresizingMaskIntoConstraints = false
         hcStatusLabel = NSTextField(labelWithString: "")
@@ -250,6 +272,7 @@ final class FontSettingsPanel: NSPanel {
         content.addSubview(previewBox)
         content.addSubview(alertsStack)
         content.addSubview(quittingStack)
+        content.addSubview(issueLinksStack)
         content.addSubview(hcStack)
         content.addSubview(buttonRow)
 
@@ -282,7 +305,11 @@ final class FontSettingsPanel: NSPanel {
             quittingStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             quittingStack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
 
-            hcStack.topAnchor.constraint(equalTo: quittingStack.bottomAnchor, constant: 16),
+            issueLinksStack.topAnchor.constraint(equalTo: quittingStack.bottomAnchor, constant: 16),
+            issueLinksStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            issueLinksStack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
+
+            hcStack.topAnchor.constraint(equalTo: issueLinksStack.bottomAnchor, constant: 16),
             hcStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             hcStack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
 
@@ -308,6 +335,38 @@ final class FontSettingsPanel: NSPanel {
         label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         label.textColor = .secondaryLabelColor
         return label
+    }
+
+    // MARK: - Issue links
+
+    var issueAliasTitles: [String] { issueAliasPopUp.itemArray.map(\.title) }
+    var isRemoveIssueAliasEnabled: Bool { removeIssueAliasButton.isEnabled }
+
+    func reloadIssueAliases() {
+        let previous = issueAliasPopUp.selectedItem?.representedObject as? String
+        issueAliasPopUp.removeAllItems()
+        let aliases = issueRefMemory.aliases
+        if aliases.isEmpty {
+            issueAliasPopUp.addItem(withTitle: "No abbreviations")
+            issueAliasPopUp.isEnabled = false
+            removeIssueAliasButton.isEnabled = false
+            return
+        }
+        for alias in aliases {
+            issueAliasPopUp.addItem(withTitle: "\(alias.name) → \(alias.repo.storageKey)")
+            issueAliasPopUp.lastItem?.representedObject = alias.name
+        }
+        if let previous, let item = issueAliasPopUp.itemArray.first(where: { ($0.representedObject as? String) == previous }) {
+            issueAliasPopUp.select(item)
+        }
+        issueAliasPopUp.isEnabled = true
+        removeIssueAliasButton.isEnabled = true
+    }
+
+    @objc func removeIssueAlias(_ sender: Any?) {
+        guard let name = issueAliasPopUp.selectedItem?.representedObject as? String else { return }
+        issueRefMemory.removeAlias(name)
+        reloadIssueAliases()
     }
 
     // MARK: - Sync
@@ -341,6 +400,7 @@ final class FontSettingsPanel: NSPanel {
         soundCheckbox.state = AlertSettings.soundEnabled(alertDefaults) ? .on : .off
         quitCheckbox.state = QuitSettings.askBeforeQuit(.standard) ? .on : .off
         hcCheckbox.state = HcFeatureSettings.localPanesEnabled(hcDefaults) ? .on : .off
+        reloadIssueAliases()
     }
 
     @discardableResult
