@@ -93,13 +93,20 @@ final class IssueRefController {
     }
 
     /// 참조에 붙은 이름이나 같은 번호를 가리키는 단서의 이름 중 목록에도 줄임말에도 없는 것이 있는가.
-    /// 다른 번호 앞의 낱말(`Task #3`, `see #12`)은 보지 않는다. 그런 낱말 때문에 메뉴마다 다시 만들지 않게.
+    /// 다른 번호 앞의 낱말(`Task #3`)과 띄어 쓴 약한 이름(`see #12`, `Fixes #12`)은 보지 않는다.
+    /// 그런 낱말 때문에 메뉴마다 다시 만들지 않게.
     private func hasUnknownName(_ ctx: IssueRefContext, in snapshot: KnownRepoSnapshot) -> Bool {
         let ref = ctx.ref
-        var names: [String] = []
-        if let name = ref.qualifier?.name { names.append(name) }
+        let aliases = memory.snapshot.aliases
+        var qualifiers: [IssueRefQualifier] = []
+        if let qualifier = ref.qualifier { qualifiers.append(qualifier) }
         for clue in ctx.clues where clue.kind == ref.kind && clue.numbers.contains(ref.number) {
-            if case .name(let qualifier) = clue.source { names.append(qualifier.name) }
+            if case .name(let qualifier) = clue.source { qualifiers.append(qualifier) }
+        }
+        let names = qualifiers.compactMap { qualifier -> String? in
+            if case .spaced(let name) = qualifier,
+               !IssueRefResolver.isStrong(name: name, paneRepos: ctx.paneRepos, aliases: aliases) { return nil }
+            return qualifier.name
         }
         return names.contains { snapshot.repos(named: $0).isEmpty && memory.alias($0) == nil }
     }

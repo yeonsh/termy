@@ -138,6 +138,40 @@ final class IssueRefControllerTests: XCTestCase {
         XCTAssertEqual(counter.value, 1)
     }
 
+    /// A plain word right before the clicked number (`see #12`) is a weak
+    /// name: it can't be a project cloned since the index was built, so the
+    /// menu shows without a rebuild.
+    func test_handle_weakSpacedName_doesNotRebuild() async throws {
+        let work = try makeWorkspace(["netdrive3": "https://gitlab.bdrive.com/bdrive/netdrive3.git"])
+        let counter = Counter()
+        let index = KnownRepoIndex(workspacePaths: { _ = counter.bump(); return [work] })
+        let controller = makeController(index: index, memory: IssueRefMemory(defaults: defaults))
+        let c = try click("see #12", on: "#12")
+        XCTAssertEqual(c.hit.ref.qualifier, .spaced("see"))
+
+        await controller.handle(c, paneId: "p1", paneRoots: [])
+
+        XCTAssertEqual(recorder.menus.count, 1)
+        XCTAssertTrue(recorder.opened.isEmpty)
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    /// A strong spaced name (`netdrive3 #1300`) the index doesn't know yet
+    /// still triggers the one rebuild.
+    func test_handle_unknownStrongSpacedName_rebuildsIndexOnce() async throws {
+        let work = try makeWorkspace(["netdrive3": "https://gitlab.bdrive.com/bdrive/netdrive3.git"])
+        let counter = Counter()
+        let index = KnownRepoIndex(workspacePaths: { counter.bump() == 1 ? [] : [work] })
+        let memory = IssueRefMemory(defaults: defaults)
+        memory.noteOpened(flutter)   // 첫 결정이 beep이 아니라 메뉴가 되게
+        let controller = makeController(index: index, memory: memory)
+
+        await controller.handle(try click("netdrive3 #1300", on: "#1300"), paneId: "p1", paneRoots: [])
+
+        XCTAssertEqual(recorder.opened, [URL(string: "https://gitlab.bdrive.com/bdrive/netdrive3/-/issues/1300")!])
+        XCTAssertEqual(counter.value, 2)
+    }
+
     /// An unknown abbreviation shows the menu over every known project;
     /// picking one there saves the abbreviation and opens it.
     func test_handle_unknownAbbreviation_menuPickSavesAlias() async throws {
