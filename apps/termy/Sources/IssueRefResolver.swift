@@ -73,11 +73,14 @@ enum IssueRefResolver {
         } ?? .none
         let pickKey: IssueRefPickKey? = ctx.paneId.map { IssueRefPickKey(paneId: $0, number: n, kind: ref.kind) }
 
-        func resolve(_ name: String) -> (repos: [RepoWebURL], viaAlias: Bool) {
-            if let alias = memory.aliases[name.lowercased()] { return ([alias], true) }
+        func matching(_ name: String) -> [RepoWebURL] {
             var seen = Set<RepoWebURL>()
             let all = index.repos(named: name) + paneIndex.repos(named: name)
-            return (all.filter { seen.insert($0).inserted }, false)
+            return all.filter { seen.insert($0).inserted }
+        }
+        func resolve(_ name: String) -> (repos: [RepoWebURL], viaAlias: Bool) {
+            if let alias = memory.aliases[name.lowercased()] { return ([alias], true) }
+            return (matching(name), false)
         }
         func open(_ repo: RepoWebURL) -> IssueRefDecision {
             .open(repo.url(number: n, kind: ref.kind), repo: repo)
@@ -107,13 +110,16 @@ enum IssueRefResolver {
         func limited(_ repos: [RepoWebURL], name: String) -> IssueRefDecision {
             menu(repos.map { IssueRefCandidate(repo: $0, tag: nil) }, limit: true, save: .alias(name))
         }
+        /// 줄임말로 정한 이름: 그냥 클릭은 줄임말 대상을 열고, ⌥⌘는 줄임말을 고쳐 쓸 메뉴를 띄운다.
+        /// 메뉴에는 줄임말 대상 다음에 같은 이름의 다른 저장소를 둔다. 줄임말을 고른 원래 후보들이다.
+        func aliased(_ target: RepoWebURL, name: String) -> IssueRefDecision {
+            ctx.forceMenu ? xFirst([target] + matching(name), save: .alias(name)) : open(target)
+        }
 
         var qualifier = ref.qualifier
         if case .joined(let name)? = qualifier {
             let found = resolve(name)
-            if found.viaAlias {
-                return ctx.forceMenu ? xFirst(found.repos, save: .alias(name)) : open(found.repos[0])
-            }
+            if found.viaAlias { return aliased(found.repos[0], name: name) }
             switch found.repos.count {
             case 1: return ctx.forceMenu ? xFirst(found.repos, save: .none) : open(found.repos[0])
             case 0:
@@ -123,6 +129,7 @@ enum IssueRefResolver {
         }
         if case .spaced(let name)? = qualifier {
             let found = resolve(name)
+            if found.viaAlias { return aliased(found.repos[0], name: name) }
             switch found.repos.count {
             case 0: qualifier = nil
             case 1:

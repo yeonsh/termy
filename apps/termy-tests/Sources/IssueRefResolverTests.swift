@@ -219,6 +219,43 @@ final class IssueRefResolverTests: XCTestCase {
         XCTAssertTrue(m.candidates.isEmpty)
         XCTAssertEqual(m.saveTarget, .alias("fl"))
     }
+    // MARK: final fix — ⌥⌘ re-picks a name resolved through an abbreviation
+
+    private var apiA: RepoWebURL { RepoWebURL(remote: "git@github.com:a/api.git")! }
+    private var apiB: RepoWebURL { RepoWebURL(remote: "git@gitlab.com:b/api.git")! }
+
+    func test_spacedAliasedName_opensAliasTarget_forceMenuOffersOthersAndSavesAlias() {
+        // 같은 이름 저장소 둘 중 틀린 쪽(b/api)을 줄임말로 골라 둔 상태
+        let mem = IssueRefMemorySnapshot(aliases: ["api": apiB])
+        let idx = KnownRepoSnapshot(repos: twoSame.repos + [paneBdweb])
+        let ref = IssueRef(number: 7, kind: .issue, qualifier: .spaced("api"))
+        XCTAssertEqual(decide(ctx(ref), index: idx, memory: mem),
+                       .open(URL(string: "https://gitlab.com/b/api/-/issues/7")!, repo: apiB))
+        guard let m = menu(decide(ctx(ref, force: true), index: idx, memory: mem)) else { return }
+        XCTAssertEqual(m.saveTarget, .alias("api"))
+        XCTAssertEqual(m.candidates.map(\.repo), [apiB, apiA, bdweb])
+        XCTAssertEqual(m.candidates.map(\.tag), [nil, nil, .thisPane])
+        XCTAssertFalse(m.limitToCandidates)
+    }
+    func test_joinedAliasedName_forceMenuOffersOtherSameNameRepoSecond() {
+        let mem = IssueRefMemorySnapshot(aliases: ["api": apiB])
+        let idx = KnownRepoSnapshot(repos: twoSame.repos + [paneBdweb])
+        guard let m = menu(decide(ctx(IssueRef(number: 7, kind: .issue, qualifier: .joined("api")), force: true),
+                                  index: idx, memory: mem)) else { return }
+        XCTAssertEqual(m.saveTarget, .alias("api"))
+        XCTAssertEqual(m.candidates.map(\.repo), [apiB, apiA, bdweb])
+        XCTAssertEqual(m.candidates.map(\.tag), [nil, nil, .thisPane])
+    }
+    func test_aliasForceMenu_cappedAtSix() {
+        let dups = (1...8).map { KnownRepo(web: RepoWebURL(remote: "git@host\($0).com:o/dup.git")!, localPath: "/w\($0)/dup") }
+        let mem = IssueRefMemorySnapshot(aliases: ["dup": dups[7].web])
+        guard let m = menu(decide(ctx(IssueRef(number: 1, kind: .issue, qualifier: .spaced("dup")), force: true),
+                                  index: KnownRepoSnapshot(repos: dups), memory: mem)) else { return }
+        XCTAssertEqual(m.candidates.count, 6)
+        XCTAssertEqual(m.candidates.first?.repo, dups[7].web)
+        XCTAssertEqual(Set(m.candidates.map(\.repo)).count, 6)
+    }
+
     func test_ruling_names() {
         let c = ctx(IssueRef(number: 1, kind: .issue, qualifier: .joined("fl")),
                     clues: [nameClue(.spaced("netdrive3"), 1...1), nameClue(.joined("fl"), 2...2),
