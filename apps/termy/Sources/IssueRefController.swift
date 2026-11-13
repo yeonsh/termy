@@ -61,7 +61,10 @@ final class IssueRefController {
     func handle(_ click: IssueRefClick, paneId: String?, paneRoots: [String]) async {
         let paneRepos = await index.paneRepos(roots: paneRoots)
         var snapshot = await index.snapshot()
-        let ctx = Self.context(for: click, paneId: paneId, paneRepos: paneRepos)
+        // 위 행 전부(scrollback 수천 행)를 훑으므로 main thread 밖에서.
+        let ctx = await Task.detached(priority: .userInitiated) {
+            IssueRefController.context(for: click, paneId: paneId, paneRepos: paneRepos)
+        }.value
         var decision = IssueRefResolver.decide(ctx, index: snapshot, memory: memory.snapshot)
         // 목록을 만든 뒤에 clone한 저장소일 수 있으니, 이 참조를 가리키는 이름을 모르면 한 번만 다시 만든다.
         if case .menu = decision, hasUnknownName(ctx, in: snapshot) {
