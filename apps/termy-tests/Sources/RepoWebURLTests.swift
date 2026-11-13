@@ -24,6 +24,29 @@ final class RepoWebURLTests: XCTestCase {
     func test_localPathsAreRejected() {
         XCTAssertNil(RepoWebURL(remote: "/Users/x/repo")); XCTAssertNil(RepoWebURL(remote: "file:///x/repo")); XCTAssertNil(RepoWebURL(remote: "../sibling.git"))
     }
+    /// Hosts or paths `URL(string:)` can't take would crash `url(number:kind:)`; they never become a RepoWebURL.
+    func test_unusableHostOrPathIsRejected() {
+        XCTAssertNil(RepoWebURL(remote: "ssh://git@[fd00::1]/team/repo.git"))
+        XCTAssertNil(RepoWebURL(remote: "git@[fd00::1]:team/repo.git"))
+        XCTAssertNil(RepoWebURL(remote: "https://exa mple.com/team/repo.git"))
+        XCTAssertNil(RepoWebURL(remote: "git@exa mple.com:team/repo.git"))
+        XCTAssertNil(RepoWebURL(remote: "https://example.com/a b/c.git"))
+        XCTAssertNil(RepoWebURL(remote: "https://example..com/team/repo.git"))
+        XCTAssertNil(RepoWebURL(remote: "https://example.com/team/re%70o.git"))
+        XCTAssertNil(RepoWebURL(storageKey: "[fd00/x/y"))
+        XCTAssertNil(RepoWebURL(storageKey: "example.com/a b/c"))
+        XCTAssertNil(RepoWebURL(storageKey: "example.com/a?b"))
+    }
+    func test_validFormsStillAccepted() {
+        XCTAssertEqual(RepoWebURL(remote: "https://GitHub.com/bdrive/bdweb.git")?.storageKey, "github.com/bdrive/bdweb")
+        XCTAssertEqual(RepoWebURL(remote: "git@github.com:bdrive/bdrive-core.git")?.storageKey, "github.com/bdrive/bdrive-core")
+        XCTAssertEqual(RepoWebURL(remote: "ssh://git@gitlab.bdrive.com:2222/bdrive/group/sub/proj.git")?.storageKey,
+                       "gitlab.bdrive.com/bdrive/group/sub/proj")
+        XCTAssertEqual(RepoWebURL(remote: "https://ysh:glpat-SECRET@gitlab.bdrive.com/bdrive/netdrive3_sdk.git")?.storageKey,
+                       "gitlab.bdrive.com/bdrive/netdrive3_sdk")
+        XCTAssertEqual(RepoWebURL(remote: "https://example.com/o/my.repo~x.git")?.storageKey, "example.com/o/my.repo~x")
+        XCTAssertEqual(RepoWebURL(storageKey: "gitlab.bdrive.com/bdrive/netdrive4_flutter")?.path, "bdrive/netdrive4_flutter")
+    }
     func test_issueAndMergeRequestURLs() {
         let gh = RepoWebURL(storageKey: "github.com/bdrive/bdweb")!
         XCTAssertEqual(gh.url(number: 1300, kind: .issue).absoluteString, "https://github.com/bdrive/bdweb/issues/1300")

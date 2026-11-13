@@ -51,14 +51,35 @@ struct RepoWebURL: Hashable, Codable, Sendable {
                   rawPath: String(storageKey[storageKey.index(after: slash)...]))
     }
 
+    /// Decoding goes through the same checks as the other initializers.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard let value = RepoWebURL(host: try c.decode(String.self, forKey: .host),
+                                     rawPath: try c.decode(String.self, forKey: .path)) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: c.codingPath,
+                                                    debugDescription: "Not a usable repository host/path"))
+        }
+        self = value
+    }
+
+    /// Every initializer ends here. Only hosts of `[a-z0-9.-]` with no empty
+    /// labels and paths of `[A-Za-z0-9._~/-]` pass, so `url(number:kind:)`
+    /// always yields a URL (an IPv6 literal or a space would not).
     private init?(host: String, rawPath: String) {
         var path = rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if path.hasSuffix(".git") { path = String(path.dropLast(4)) }
         path = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let host = host.lowercased()
-        guard !host.isEmpty, !path.isEmpty else { return nil }
+        guard !host.isEmpty, !path.isEmpty,
+              host.allSatisfy({ Self.isASCIIAlnum($0) || $0 == "." || $0 == "-" }),
+              !host.split(separator: ".", omittingEmptySubsequences: false).contains(where: \.isEmpty),
+              path.allSatisfy({ Self.isASCIIAlnum($0) || "._~/-".contains($0) }) else { return nil }
         self.host = host
         self.path = path
+    }
+
+    private static func isASCIIAlnum(_ c: Character) -> Bool {
+        c.isASCII && (c.isLetter || c.isNumber)
     }
 
     var storageKey: String { "\(host)/\(path)" }
@@ -80,6 +101,8 @@ struct RepoWebURL: Hashable, Codable, Sendable {
         case (false, .issue): tail = "-/issues"
         case (false, .mergeRequest): tail = "-/merge_requests"
         }
+        // host and path hold only characters URL(string:) accepts unescaped
+        // (checked in init?(host:rawPath:)), so this can't be nil.
         return URL(string: "https://\(host)/\(path)/\(tail)/\(number)")!
     }
 
