@@ -112,6 +112,16 @@ enum IssueRefParser {
         c.isASCII && (c.isLetter || c.isNumber)
     }
 
+    /// Whether a name or token ending at `from` still reaches the token starting at `to`.
+    /// Rows joined by the Ink hard-wrap heuristic are separated by "\n"; across one, only an Ink
+    /// continuation row counts: a single line break, then spaces/tabs, then the token. A list marker
+    /// (`- `, `* `, `⏺`, `1.`) or the token at column 0 starts a separate line.
+    private static func reachesAcrossRows(_ chars: [Character], from: Int, to: Int) -> Bool {
+        guard from < to, let lineBreak = chars[from..<to].firstIndex(where: \.isNewline) else { return true }
+        let indent = chars[(lineBreak + 1)..<to]
+        return !indent.isEmpty && indent.allSatisfy { $0 == " " || $0 == "\t" }
+    }
+
     private static func hasRangeMark(_ chars: [Character], from: Int, to: Int) -> Bool {
         guard from < to else { return false }
         return chars[from..<to].contains { $0 == "~" || $0 == "-" || $0 == "–" }
@@ -165,7 +175,8 @@ enum IssueRefParser {
             } else if i == 0 || !(isASCIIWordChar(chars[i - 1]) || chars[i - 1] == "/") {
                 var gap = i
                 while gap > 0, chars[gap - 1].isWhitespace { gap -= 1 }
-                if gap < i, gap > 0, let nameBegin = nameStart(in: chars, endingBefore: gap),
+                if gap < i, gap > 0, reachesAcrossRows(chars, from: gap, to: i),
+                   let nameBegin = nameStart(in: chars, endingBefore: gap),
                    !(nameBegin > 0 && (chars[nameBegin - 1] == "#" || chars[nameBegin - 1] == "!")) {
                     apply(name: String(chars[nameBegin..<gap]), joined: false, kind: &kind, qualifier: &qualifier)
                 }
@@ -177,7 +188,8 @@ enum IssueRefParser {
             var inherited = false
             if qualifier == nil, let prev = result.last, let prevQualifier = prev.ref.qualifier,
                start >= prev.end,
-               chars[prev.end..<start].allSatisfy({ $0.isWhitespace || inheritSeparators.contains($0) }) {
+               chars[prev.end..<start].allSatisfy({ $0.isWhitespace || inheritSeparators.contains($0) }),
+               reachesAcrossRows(chars, from: prev.end, to: start) {
                 qualifier = prevQualifier
                 inherited = true
             }

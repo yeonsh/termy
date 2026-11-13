@@ -46,6 +46,28 @@ final class IssueRefParserTests: XCTestCase {
     func test_mentionedNames() { XCTAssertEqual(IssueRefParser.mentionedNames(in: example), ["bdrive-core"]) }
 
     func test_spacedNameAcrossInkHardWrap() { XCTAssertEqual(ref("…bdrive-core\n  #26 fix", at: "#26"), IssueRef(number: 26, kind: .issue, qualifier: .spaced("bdrive-core"))) }
+    /// Rows joined by the Ink hard-wrap heuristic: a name on the row above reaches the
+    /// token only through an indented continuation row, never across a new list item.
+    func test_rowBreak_listMarkerOrColumnZero_breaksName() {
+        let listed = "- 남은 것: bdrive-core #26\n- #1300 확인"
+        let column0 = "…: bdweb, bdrive-core\n#1300 확인"
+        XCTAssertNil(ref(listed, at: "#1300")?.qualifier)
+        XCTAssertNil(ref(column0, at: "#1300")?.qualifier)
+        XCTAssertNil(ref("bdrive-core #26\n* #1300", at: "#1300")?.qualifier)
+        XCTAssertNil(ref("bdrive-core #26\n⏺ #1300", at: "#1300")?.qualifier)
+        XCTAssertNil(ref("bdrive-core #26\n1. #1300", at: "#1300")?.qualifier)
+        XCTAssertNil(ref("bdrive-core\n\n  #26", at: "#26")?.qualifier)
+        for text in [listed, column0] {
+            XCTAssertFalse(IssueRefParser.clues(in: text).contains { $0.numbers.contains(1300) }, text)
+        }
+    }
+    func test_rowBreak_indentedContinuationKeepsName() {
+        XCTAssertEqual(ref("bdrive-core\n  #26 fix", at: "#26")?.qualifier, .spaced("bdrive-core"))
+        XCTAssertEqual(ref("bdrive-core\n\t#26 fix", at: "#26")?.qualifier, .spaced("bdrive-core"))
+        XCTAssertEqual(ref("bdrive-core #26,\n  #27", at: "#27")?.qualifier, .spaced("bdrive-core"))
+        XCTAssertEqual(IssueRefParser.clues(in: "bdrive-core #26~\n  #28"),
+                       [IssueRefClue(numbers: 26...28, kind: .issue, source: .name(.spaced("bdrive-core")))])
+    }
     func test_positionsAreCharacterOffsets() {
         let hit = IssueRefParser.hit(in: example, atOffset: example.distance(from: example.startIndex, to: example.range(of: "#1300")!.lowerBound))
         XCTAssertEqual(hit?.start, example.distance(from: example.startIndex, to: example.range(of: "#1300")!.lowerBound))
