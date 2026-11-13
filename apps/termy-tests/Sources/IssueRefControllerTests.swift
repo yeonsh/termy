@@ -122,6 +122,22 @@ final class IssueRefControllerTests: XCTestCase {
         XCTAssertEqual(counter.value, 2)
     }
 
+    /// Words before other numbers (`Task #3`, `see #12`) never name a
+    /// project; they must not make the menu wait for a rebuild.
+    func test_handle_unrelatedClueNames_doNotRebuild() async throws {
+        let work = try makeWorkspace(["netdrive3": "https://gitlab.bdrive.com/bdrive/netdrive3.git"])
+        let counter = Counter()
+        let index = KnownRepoIndex(workspacePaths: { _ = counter.bump(); return [work] })
+        let controller = makeController(index: index, memory: IssueRefMemory(defaults: defaults))
+
+        await controller.handle(try click("#1300", on: "#1300", linesAbove: ["Task #3", "see #12"]),
+                                paneId: "p1", paneRoots: [])
+
+        XCTAssertEqual(recorder.menus.count, 1)
+        XCTAssertTrue(recorder.opened.isEmpty)
+        XCTAssertEqual(counter.value, 1)
+    }
+
     /// An unknown abbreviation shows the menu over every known project;
     /// picking one there saves the abbreviation and opens it.
     func test_handle_unknownAbbreviation_menuPickSavesAlias() async throws {

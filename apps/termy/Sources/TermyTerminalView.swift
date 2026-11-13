@@ -396,16 +396,14 @@ final class TermyTerminalView: LocalProcessTerminalView {
         case .ignore?, nil:
             // Not a link: maybe an issue reference.
             guard let onIssueRefClick,
-                  let screen = issueRefScreenContext(atScreen: pos),
-                  let hit = IssueRefParser.hit(in: screen.text, atOffset: screen.clickOffset)
+                  let click = issueRefClick(
+                    atScreen: pos,
+                    forceMenu: forceMenu,
+                    // A view outside a window (tests) has no screen to convert to.
+                    anchorScreenPoint: window?.convertPoint(toScreen: windowLocation) ?? windowLocation
+                  )
             else { return false }
-            onIssueRefClick(IssueRefClick(
-                hit: hit,
-                screen: screen,
-                forceMenu: forceMenu,
-                // A view outside a window (tests) has no screen to convert to.
-                anchorScreenPoint: window?.convertPoint(toScreen: windowLocation) ?? windowLocation
-            ))
+            onIssueRefClick(click)
             return true
         }
     }
@@ -478,11 +476,29 @@ final class TermyTerminalView: LocalProcessTerminalView {
     func issueRefScreenContext(atScreen pos: Position) -> IssueRefScreenContext? {
         guard terminal.getLine(row: pos.row) != nil else { return nil }
         let (text, clickOffset, firstRow) = joinedScreenRows(at: pos)
+        return IssueRefScreenContext(text: text, clickOffset: clickOffset, linesAbove: bufferRows(above: firstRow))
+    }
+
+    /// The issue reference a Cmd+click on screen cell `pos` names, with
+    /// its screen context; nil when there is none. The scrollback is read
+    /// only once a reference is found.
+    func issueRefClick(atScreen pos: Position, forceMenu: Bool, anchorScreenPoint: NSPoint) -> IssueRefClick? {
+        // Blank cells past the row's end would map past its "\n" into the
+        // row a wrap joins below.
+        guard let line = terminal.getLine(row: pos.row), pos.col < line.getTrimmedLength() else { return nil }
+        let (text, clickOffset, firstRow) = joinedScreenRows(at: pos)
+        guard let hit = IssueRefParser.hit(in: text, atOffset: clickOffset) else { return nil }
+        let screen = IssueRefScreenContext(text: text, clickOffset: clickOffset, linesAbove: bufferRows(above: firstRow))
+        return IssueRefClick(hit: hit, screen: screen, forceMenu: forceMenu, anchorScreenPoint: anchorScreenPoint)
+    }
+
+    /// Every buffer row (scrollback included) above screen row
+    /// `screenRow`, oldest first.
+    private func bufferRows(above screenRow: Int) -> [String] {
         let rows = String(decoding: terminal.getBufferAsData(), as: UTF8.self)
             .split(separator: "\n", omittingEmptySubsequences: false)
-        let aboveCount = min(rows.count, max(0, terminal.getTopVisibleRow() + firstRow))
-        let linesAbove = rows.prefix(aboveCount).map { $0.replacingOccurrences(of: "\u{0}", with: "") }
-        return IssueRefScreenContext(text: text, clickOffset: clickOffset, linesAbove: linesAbove)
+        let count = min(rows.count, max(0, terminal.getTopVisibleRow() + screenRow))
+        return rows.prefix(count).map { $0.replacingOccurrences(of: "\u{0}", with: "") }
     }
 
     /// Whether screen row `upper + 1` continues row `upper`: soft-wrapped,

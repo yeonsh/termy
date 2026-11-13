@@ -63,7 +63,7 @@ final class IssueRefController {
         var snapshot = await index.snapshot()
         let ctx = Self.context(for: click, paneId: paneId, paneRepos: paneRepos)
         var decision = IssueRefResolver.decide(ctx, index: snapshot, memory: memory.snapshot)
-        // 목록을 만든 뒤에 clone한 저장소일 수 있으니, 모르는 이름이 있으면 한 번만 다시 만든다.
+        // 목록을 만든 뒤에 clone한 저장소일 수 있으니, 이 참조를 가리키는 이름을 모르면 한 번만 다시 만든다.
         if case .menu = decision, hasUnknownName(ctx, in: snapshot) {
             snapshot = await index.rebuild()
             decision = IssueRefResolver.decide(ctx, index: snapshot, memory: memory.snapshot)
@@ -92,10 +92,16 @@ final class IssueRefController {
         openURL(repo.url(number: request.number, kind: request.kind))
     }
 
+    /// 참조에 붙은 이름이나 같은 번호를 가리키는 단서의 이름 중 목록에도 줄임말에도 없는 것이 있는가.
+    /// 다른 번호 앞의 낱말(`Task #3`, `see #12`)은 보지 않는다. 그런 낱말 때문에 메뉴마다 다시 만들지 않게.
     private func hasUnknownName(_ ctx: IssueRefContext, in snapshot: KnownRepoSnapshot) -> Bool {
-        IssueRefResolver.names(in: ctx).contains {
-            snapshot.repos(named: $0).isEmpty && memory.alias($0) == nil
+        let ref = ctx.ref
+        var names: [String] = []
+        if let name = ref.qualifier?.name { names.append(name) }
+        for clue in ctx.clues where clue.kind == ref.kind && clue.numbers.contains(ref.number) {
+            if case .name(let qualifier) = clue.source { names.append(qualifier.name) }
         }
+        return names.contains { snapshot.repos(named: $0).isEmpty && memory.alias($0) == nil }
     }
 
     /// 메뉴 검색 대상: ⌘K 목록, 줄임말 대상, 이 pane의 repo(⌘K 목록 밖일 수 있다). web URL로 중복 제거.

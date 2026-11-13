@@ -716,15 +716,39 @@ final class TermyTerminalViewTests: XCTestCase {
         let view = Self.mouseCapturingTerminal(showing: "fl#45")
         var clicks: [IssueRefClick] = []
         view.onIssueRefClick = { clicks.append($0) }
+        view.handleClickInBounds(try XCTUnwrap(Self.leftMouseDown(modifierFlags: [.command, .option])))
+        XCTAssertFalse(view.allowMouseReporting)
         let up = try XCTUnwrap(Self.mouseEvent(
             .leftMouseUp,
             at: NSPoint(x: 2, y: view.frame.height - 2),
             modifierFlags: [.command, .option]
         ))
 
-        XCTAssertNil(view.handleLinkClickMouseUp(up))
+        XCTAssertNil(view.handleLinkClickMouseUp(up), "the link monitor consumes the click")
         XCTAssertEqual(clicks.first?.hit.ref, IssueRef(number: 45, kind: .issue, qualifier: .joined("fl")))
         XCTAssertEqual(clicks.first?.forceMenu, true)
+        XCTAssertTrue(view.allowMouseReporting)
+    }
+
+    /// The blank cells after a row that a hard wrap continues map past its
+    /// "\n" into the next row; a click there must not open that row's number.
+    @MainActor
+    func test_issueRefClick_blankCellsPastHardWrappedRow_findNothing() throws {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 500, height: 200))
+        view.getTerminal().resize(cols: 50, rows: 10)
+        // Row 0 ends at column 40, close enough to the edge to count as wrapped.
+        view.feed(text: "  waiting: coordinator call, bdrive-core\r\u{1b}[1B\u{1b}[2C#26 fix")
+
+        for col in 40..<50 {
+            XCTAssertNil(
+                view.issueRefClick(atScreen: Position(col: col, row: 0), forceMenu: false, anchorScreenPoint: .zero),
+                "col \(col)"
+            )
+        }
+        let click = try XCTUnwrap(
+            view.issueRefClick(atScreen: Position(col: 3, row: 1), forceMenu: false, anchorScreenPoint: .zero)
+        )
+        XCTAssertEqual(click.hit.ref, IssueRef(number: 26, kind: .issue, qualifier: .spaced("bdrive-core")))
     }
 
     // MARK: - IME marked-text overlay
