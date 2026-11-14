@@ -379,7 +379,10 @@ private struct StatePill: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            BlinkingDot(color: stateColor, blinks: shouldBlink)
+            // Core Animation pulse (BlinkingDotView.swift) — a SwiftUI
+            // TimelineView here re-ran the dashboard layout every frame.
+            BlinkingDot(color: stateNSColor, blinks: shouldBlink)
+                .frame(width: 5, height: 5)
             Text(stateLabel)
                 .font(.system(size: 10, weight: .heavy))
                 .foregroundColor(stateColor)
@@ -399,15 +402,17 @@ private struct StatePill: View {
         state == .thinking || state == .waiting || state == .possiblyWaiting
     }
 
-    private var stateColor: Color {
+    private var stateColor: Color { Color(nsColor: stateNSColor) }
+
+    private var stateNSColor: NSColor {
         switch state {
         case .thinking, .possiblyWaiting:
             // POSSIBLY_WAITING is rendered as THINK — invisible to the user.
-            return Color(nsColor: .systemBlue)
-        case .waiting:      return Color(nsColor: .systemOrange)
-        case .errored:      return Color(nsColor: .systemRed)
-        case .idle:         return Color(nsColor: .systemGray)
-        case .initializing: return Color(nsColor: .systemGray)
+            return .systemBlue
+        case .waiting:      return .systemOrange
+        case .errored:      return .systemRed
+        case .idle:         return .systemGray
+        case .initializing: return .systemGray
         }
     }
 
@@ -420,35 +425,6 @@ private struct StatePill: View {
         case .idle:            return "IDLE"
         case .errored:         return "ERR"
         }
-    }
-}
-
-/// Smoothly-pulsing dot driven by `TimelineView(.animation)` so the phase
-/// keeps advancing without a stateful animation token (which is fragile
-/// across `repeatForever` start/stop transitions in SwiftUI). When `blinks`
-/// is false the view collapses to a steady circle and stops scheduling
-/// per-frame updates.
-private struct BlinkingDot: View {
-    let color: Color
-    let blinks: Bool
-
-    var body: some View {
-        Group {
-            if blinks {
-                TimelineView(.animation) { context in
-                    let t = context.date.timeIntervalSinceReferenceDate
-                    // ~1.3s period, opacity oscillates between 0.35 and 1.0.
-                    let phase = (sin(t * .pi / 0.65) + 1) / 2
-                    Circle()
-                        .fill(color)
-                        .opacity(0.35 + phase * 0.65)
-                }
-            } else {
-                Circle()
-                    .fill(color)
-            }
-        }
-        .frame(width: 5, height: 5)
     }
 }
 
