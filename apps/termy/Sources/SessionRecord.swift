@@ -115,8 +115,15 @@ extension WindowRecord {
     /// `layouts`에서도 같은 pane을 뺀다(빼기 규칙대로 정규화, 빈 tree는 버림). 순서를 지키며 빼므로 `rows`를 펼친 순서와
     /// 잎 읽는 순서는 계속 같다.
     func restorable(instance: String) -> WindowRecord? {
+        // 원격 머신에서 따로 도는 termy의 pane을 고아로 붙여 저장한 기록(키에 머신 접두사가 없다)도 뺀다. 그 terminal은
+        // 그 termy의 것이라 kill하지 않고 붙지만 않는다(`HcRestorePlanner.isOwnRemoteOrLocal`). projectKey가 없는 기록은
+        // 이 필드 전의 파일이고 Pane이 `<machine>:<cwd>`로 채운다.
         func kept(_ pane: PaneRecord) -> Bool {
-            pane.backend != .hc || pane.instance == nil || pane.instance == instance
+            guard pane.backend == .hc else { return true }
+            if pane.projectKey != nil, !HcRestorePlanner.isOwnRemoteOrLocal(machine: pane.machine, projectKey: pane.projectKey) {
+                return false
+            }
+            return pane.instance == nil || pane.instance == instance
         }
         let flat = rows.flatMap { $0 }
         let layoutLeaves = layouts?.flatMap { $0.root.leaves } ?? []

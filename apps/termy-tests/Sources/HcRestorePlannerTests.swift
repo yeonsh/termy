@@ -33,6 +33,19 @@ final class HcRestorePlannerTests: XCTestCase {
                        "one pane per paneId: two panes on one terminal would kill each other's shell")
     }
 
+    /// 원격 머신에서 따로 도는 termy의 local pane은 같은 `termy.instance`를 달고 이 core에 그 머신의 terminal로 보인다.
+    /// 키에 머신 접두사가 없는 그런 terminal을 붙이면 열지 않은 탭(`rv@mac-builder`)이 생기고, 닫으면 그 셸을 kill한다.
+    func testRemoteTerminalsOfAnotherTermyAreNotOrphans() {
+        let o = HcRestorePlanner.orphans(live: [
+            terminal("mac-builder/t1", pane: "X", project: "/Users/jtkim/work/rv", cwd: "/Users/jtkim/work/rv"),
+            terminal("mac-builder/t2", pane: "Y", project: nil, cwd: "/Users/jtkim"),
+            terminal("mac-builder/t3", pane: "Z", project: "bdpc01:/srv/app"),
+            terminal("bdpc01/t4", pane: "B"),
+            terminal("t5", pane: "L", project: "/Users/me/app", cwd: "/Users/me/app"),
+        ], knownPaneIds: [])
+        XCTAssertEqual(o.map(\.paneId), ["B", "L"], "remote needs `<its machine>:`; local terminals stay ours")
+    }
+
     func testRemoteOrphanProjectIdFollowsRemoteProjectRule() {
         let remote = HcOrphan(paneId: "B", address: "bdpc01/t2", machine: "bdpc01", projectKey: "bdpc01:/srv/app", cwd: "/srv/app/sub")
         XCTAssertEqual(HcRestorePlanner.projectId(for: remote), "app@bdpc01")

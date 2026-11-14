@@ -22,11 +22,22 @@ enum HcRestorePlanner {
         var taken = knownPaneIds
         var result: [HcOrphan] = []
         for terminal in live where terminal.state == "live" {
+            guard isOwnRemoteOrLocal(machine: HcAddress.machine(of: terminal.address),
+                                     projectKey: terminal.labels["termy.project"]) else { continue }
             guard let paneId = terminal.labels["termy.pane"], !paneId.isEmpty, taken.insert(paneId).inserted else { continue }
             result.append(HcOrphan(paneId: paneId, address: terminal.address, machine: HcAddress.machine(of: terminal.address),
                                    projectKey: terminal.labels["termy.project"], cwd: terminal.cwd))
         }
         return result
+    }
+
+    /// 이 termy가 연 terminal로 볼 수 있는지. local terminal은 늘 그렇다(자기 core에만 있다). 원격 terminal은 이 termy가
+    /// 원격 pane으로 열었으면 `termy.project`가 `<machine>:<folder>`다(`RemoteProject.key`). 원격 머신에서 termy가 따로
+    /// 돌면 그 local pane도 같은 `termy.instance`(release·debug)를 달고 이 core에 그 머신의 terminal로 보이는데, 키에
+    /// 머신 접두사가 없다. 그것을 붙이면 열지 않은 탭이 생기고, 그 탭을 닫으면 그 머신에서 도는 셸을 kill한다.
+    static func isOwnRemoteOrLocal(machine: String?, projectKey: String?) -> Bool {
+        guard let machine else { return true }
+        return projectKey?.hasPrefix(machine + ":") == true
     }
 
     /// 원격 고아의 project 표시 이름 `<folder basename>@<machine>`. folder는 project 키(`<machine>:<folder>`)에서,

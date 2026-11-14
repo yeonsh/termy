@@ -97,6 +97,21 @@ final class PaneRecordHcTests: XCTestCase {
         XCTAssertNil(filteredToSkipped.restorable(instance: "debug")?.filterProjectId)
     }
 
+    /// 원격 머신에서 따로 도는 termy의 pane을 고아로 붙여 저장한 기록(키에 머신 접두사가 없다)은 복원하지 않는다.
+    /// 복원하면 다시 그 terminal에 붙고, 사용자가 닫으면 그 머신의 셸을 kill한다.
+    func testRestorableDropsRemotePanesOfAnotherTermy() {
+        func remote(_ id: String, key: String?) -> PaneRecord {
+            PaneRecord(cwd: "/Users/jtkim/work/rv", paneId: id, backend: .hc, machine: "mac-builder",
+                       projectId: "rv@mac-builder", projectKey: key, instance: "release")
+        }
+        let window = WindowRecord(frame: FrameRecord(x: 0, y: 0, width: 800, height: 600),
+                                  rows: [[local("L")], [remote("F", key: "/Users/jtkim/work/rv")],
+                                         [remote("M", key: "mac-builder:/Users/jtkim/work/rv")], [remote("N", key: nil)],
+                                         [hc("H", instance: "release")]])
+        XCTAssertEqual(ids(window.restorable(instance: "release")), [["L"], ["M"], ["N"], ["H"]],
+                       "own remote (prefixed or older keyless record) and local hc panes stay")
+    }
+
     /// 분할 tree에서도 같은 pane을 빼고(빼기 규칙: 자식 하나 남은 split은 없앤다), 남은 것이 없는 project tree는 버린다.
     func testRestorableDropsOtherInstanceHcPanesFromLayouts() {
         let app = PaneLayoutNode.fromColumns([[hc("R1", instance: "release"), local("L")],
