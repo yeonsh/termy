@@ -6,6 +6,23 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.7 — 2026-11-14
+
+- Cmd+click an issue, pull request or merge request number such as `#1300`,
+  `fl#45`, `bdrive-core #26` or `!189` to open its page in the browser. termy
+  works out the project from the terminal text: a project name written next
+  to the number (`bdrive-core #26~#28` covers all three), or the same number
+  mentioned earlier in the pane's scrollback with a project name or an issue
+  URL. On github.com `#N` opens the issue or pull request; on other hosts
+  (treated as GitLab) `#N` opens the issue and `!N` the merge request.
+- When the project can't be told from the text, a small menu opens at the
+  click point with a search field, listing the pane's repo first, then
+  projects named nearby and recently opened ones. Projects come from the
+  folders you have opened with ⌘K, their submodules, and repos next to them.
+  ⌥⌘-click always shows the menu so you can pick again.
+- Short names you pick a project for, like `fl` in `fl#45`, are remembered.
+  Settings… (⌘,) has a new **Issue Links** section to remove them.
+
 ## 0.3.6 — 2026-11-13
 
 - Drag a pane by its header to move it. While you drag, a shadow box shows
