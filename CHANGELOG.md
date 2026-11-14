@@ -6,6 +6,14 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.9 — 2026-11-14
+
+- termy no longer opens tabs you never opened when it starts. If one of your
+  herdr-core machines also runs termy, that machine's own panes used to show
+  up in your window as unknown remote tabs every time you launched termy.
+  They are now left alone, and any such tabs already saved in your session
+  are dropped on the next launch without touching the shells behind them.
+
 ## 0.3.8 — 2026-11-14
 
 - termy no longer pins a CPU core at 100% while an agent is thinking or
