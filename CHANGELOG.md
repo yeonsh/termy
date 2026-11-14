@@ -6,6 +6,17 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.8 — 2026-11-14
+
+- termy no longer pins a CPU core at 100% while an agent is thinking or
+  waiting. The blinking dot on THINK and WAIT chips made the whole dashboard
+  re-measure itself on every screen refresh. The dot now blinks on its own
+  without touching the layout, so a WAIT chip nobody has looked at yet no
+  longer keeps termy busy while every agent is idle.
+- Less CPU while an agent is printing. Claude Code repaints its screen many
+  times a second, and each repaint used to redraw every row of the pane. Now
+  only the rows that changed are redrawn.
+
 ## 0.3.7 — 2026-11-14
 
 - Cmd+click an issue, pull request or merge request number such as `#1300`,
