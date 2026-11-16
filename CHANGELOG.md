@@ -6,6 +6,13 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.10 — 2026-11-17
+
+- Boxes and tables drawn with text inside code blocks now line up in the
+  markdown preview when they contain Korean, Chinese or Japanese. Those
+  characters used to take about one and a half columns instead of two, so
+  every line with them came out shorter and the borders no longer met.
+
 ## 0.3.9 — 2026-11-14
 
 - termy no longer opens tabs you never opened when it starts. If one of your
