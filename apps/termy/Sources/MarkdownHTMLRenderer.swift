@@ -121,7 +121,56 @@ struct MarkdownHTMLWriter: MarkupWalker {
         if let language = codeBlock.language, !language.isEmpty {
             classAttribute = " class=\"language-\(Self.escape(language))\""
         }
-        result += "<pre><code\(classAttribute)>\(Self.escape(codeBlock.code))</code></pre>\n"
+        result += "<pre><code\(classAttribute)>\(Self.cellAligned(codeBlock.code))</code></pre>\n"
+    }
+
+    /// Escapes code-block text and puts every non-ASCII grapheme in a fixed
+    /// cell (`c1` = 1ch, `c2` = 2ch, see MarkdownPreviewStyle) so ASCII-art
+    /// boxes line up the way they do in a terminal. Without this, Hangul and
+    /// other glyphs missing from the monospace font fall back to fonts whose
+    /// advance is not a whole number of cells (Hangul: ~1.44 cells).
+    static func cellAligned(_ code: String) -> String {
+        var out = ""
+        out.reserveCapacity(code.utf8.count)
+        for character in code {
+            let text = escape(String(character))
+            let scalars = character.unicodeScalars
+            guard let first = scalars.first, scalars.contains(where: { !$0.isASCII }),
+                  !isZeroWidth(first) else {
+                out += text
+                continue
+            }
+            let cls = isWide(character) ? "c2" : "c1"
+            out += "<span class=\"\(cls)\">\(text)</span>"
+        }
+        return out
+    }
+
+    /// A grapheme that stands alone without a base (orphan combining mark,
+    /// ZWJ, variation selector) takes no cell.
+    private static func isZeroWidth(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.properties.generalCategory {
+        case .nonspacingMark, .enclosingMark, .format: return true
+        default: return false
+        }
+    }
+
+    /// East Asian Wide/Fullwidth (UAX #11) plus emoji presentation — the
+    /// graphemes a terminal draws across two cells.
+    private static func isWide(_ character: Character) -> Bool {
+        let scalars = character.unicodeScalars
+        if scalars.contains(where: { $0.value == 0xFE0F }) { return true }
+        guard let scalar = scalars.first else { return false }
+        if scalar.properties.isEmojiPresentation { return true }
+        switch scalar.value {
+        case 0x1100...0x115F, 0x2E80...0x303E, 0x3041...0x33FF, 0x3400...0x4DBF,
+             0x4E00...0x9FFF, 0xA000...0xA4CF, 0xA960...0xA97F, 0xAC00...0xD7A3,
+             0xF900...0xFAFF, 0xFE10...0xFE19, 0xFE30...0xFE6F, 0xFF00...0xFF60,
+             0xFFE0...0xFFE6, 0x20000...0x2FFFD, 0x30000...0x3FFFD:
+            return true
+        default:
+            return false
+        }
     }
 
     mutating func visitHTMLBlock(_ html: HTMLBlock) {

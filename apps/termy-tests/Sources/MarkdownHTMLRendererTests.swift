@@ -13,6 +13,25 @@ final class MarkdownHTMLRendererTests: XCTestCase {
         XCTAssertTrue(html.contains("<pre><code class=\"language-swift\">let x: Array&lt;String&gt; = [] // &lt;tag&gt;"), html)
     }
 
+    // ASCII-art boxes in code blocks only line up if every glyph sits on a
+    // terminal-style cell grid; Hangul falls back to a proportional font that
+    // is ~1.44 cells wide, so wide/non-ASCII glyphs get fixed-width cells.
+    func test_codeBlockPinsNonASCIIGlyphsToCellGrid() {
+        let html = body("```\n│ 상태 ▾ │ a<b\n```\n")
+        XCTAssertTrue(html.contains(
+            "<pre><code><span class=\"c1\">│</span> <span class=\"c2\">상</span><span class=\"c2\">태</span> "
+            + "<span class=\"c1\">▾</span> <span class=\"c1\">│</span> a&lt;b\n</code></pre>"), html)
+    }
+
+    func test_codeBlockKeepsCombiningMarksAndEmojiInOneCell() {
+        let html = body("```\ne\u{301}👍\n```\n")
+        XCTAssertTrue(html.contains("<pre><code><span class=\"c1\">e\u{301}</span><span class=\"c2\">👍</span>\n</code></pre>"), html)
+    }
+
+    func test_inlineCodeIsNotCellAligned() {
+        XCTAssertTrue(body("`상태`\n").contains("<code>상태</code>"))
+    }
+
     func test_rawHTMLIsShownAsText() {
         let html = body("<script>alert(1)</script>\n\n<div onclick=\"x()\">hi</div>\n\nsee <b>bold</b>\n")
         XCTAssertFalse(html.contains("<script"), html)

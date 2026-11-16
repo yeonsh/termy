@@ -47,6 +47,9 @@ enum MarkdownPreviewStyle {
     code { padding: .2em .4em; background: var(--code-bg); border-radius: 6px; }
     pre { padding: 16px; overflow: auto; line-height: 1.45; background: var(--code-bg); border-radius: 6px; }
     pre code { padding: 0; background: transparent; font-size: 100%; white-space: pre; }
+    pre code .c1, pre code .c2 { display: inline-block; text-align: center; }
+    pre code .c1 { width: 1ch; }
+    pre code .c2 { width: 2ch; }
     table { display: block; width: max-content; max-width: 100%; overflow: auto; border-collapse: collapse; }
     th, td { padding: 6px 13px; border: 1px solid var(--border); }
     th { font-weight: 600; }
