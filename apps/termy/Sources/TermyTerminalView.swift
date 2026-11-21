@@ -409,7 +409,8 @@ final class TermyTerminalView: LocalProcessTerminalView {
     }
 
     /// What a Cmd+click on screen cell `pos` does; nil when there's no link
-    /// there. A link that names no file may be a path SwiftTerm cut short
+    /// there. A click on a word SwiftTerm glued onto a path goes to that
+    /// word, and a link that names no file may be a path SwiftTerm cut short
     /// at a "(" — the screen text after it gets a second look.
     func linkClickAction(
         atScreen pos: Position,
@@ -421,6 +422,22 @@ final class TermyTerminalView: LocalProcessTerminalView {
         guard let raw = terminal.link(at: .screen(pos), mode: .explicitAndImplicit) else {
             return nil
         }
+        let onScreen = linkOnScreen(raw, at: pos)
+        if let onScreen,
+           let glued = PreviewLinkResolver.resolveGluedWord(
+            linkText: onScreen.text,
+            clickOffset: onScreen.clickOffset,
+            followingText: onScreen.following,
+            baseDirectories: baseDirectories,
+            homeDirectory: homeDirectory,
+            isRegularFile: isRegularFile
+           ) {
+            switch glued {
+            case .file(let url): return .preview(url)
+            case .missing: return .beep
+            case .notPreviewable: return .ignore
+            }
+        }
         let action = Self.linkClickAction(
             for: raw,
             baseDirectories: baseDirectories,
@@ -431,10 +448,10 @@ final class TermyTerminalView: LocalProcessTerminalView {
         case .preview, .openURL:
             return action
         case .beep, .ignore:
-            guard let following = screenText(after: raw, at: pos),
+            guard let onScreen,
                   let url = PreviewLinkResolver.resolveCutOff(
                     linkText: raw,
-                    followingText: following,
+                    followingText: onScreen.following,
                     baseDirectories: baseDirectories,
                     homeDirectory: homeDirectory,
                     listDirectory: listDirectory,
@@ -445,12 +462,16 @@ final class TermyTerminalView: LocalProcessTerminalView {
         }
     }
 
-    /// The screen text after `linkText`, the link SwiftTerm found at `pos`,
-    /// to the end of the rows a wrap joined to that row: soft-wrapped rows
-    /// as they are, and after a line break a row continuing one that
-    /// reaches the right edge (Ink's hard wrap). nil when the link text
-    /// isn't there around the click.
-    private func screenText(after linkText: String, at pos: Position) -> String? {
+    /// Where `linkText`, the link SwiftTerm found at `pos`, sits in the rows
+    /// a wrap joined to that row (soft-wrapped rows as they are, and after a
+    /// line break a row continuing one that reaches the right edge — Ink's
+    /// hard wrap): the link as the screen shows it, the click's Character
+    /// offset into that, and the screen text after it. nil when the link
+    /// text isn't there around the click.
+    private func linkOnScreen(
+        _ linkText: String,
+        at pos: Position
+    ) -> (text: String, clickOffset: Int, following: String)? {
         let (text, clickOffset, _) = joinedScreenRows(at: pos)
 
         let chars = Substring(text)
@@ -462,7 +483,7 @@ final class TermyTerminalView: LocalProcessTerminalView {
                let end = PreviewLinkResolver.endOfMatchIgnoringWhitespace(linkText, in: chars[start...]),
                offset <= clickOffset,
                clickOffset < offset + chars.distance(from: start, to: end) {
-                return String(chars[end...])
+                return (String(chars[start..<end]), clickOffset - offset, String(chars[end...]))
             }
             start = chars.index(after: start)
             offset += 1

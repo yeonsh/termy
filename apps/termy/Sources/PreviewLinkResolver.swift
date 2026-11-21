@@ -102,6 +102,57 @@ enum PreviewLinkResolver {
         return path
     }
 
+    /// SwiftTerm's path regex runs a path on over a space into the next word
+    /// holding a `.`, so in `docs/a.md를 b.md로 바꾸고` the link it hands over
+    /// is `docs/a.md를 b.` and a click on `b.md` would open `docs/a.md`.
+    /// When the click (`clickOffset`, a Character offset into `linkText`)
+    /// lands on a word after a previewable path has already ended, that word
+    /// is a path of its own: completed from `followingText` (the screen text
+    /// after the link) and tried next to the path before it first, the
+    /// line's likeliest meaning, then against `baseDirectories`. nil when
+    /// the click is on the path itself, or the link is one path with spaces.
+    static func resolveGluedWord(
+        linkText: String,
+        clickOffset: Int,
+        followingText: String,
+        baseDirectories: [String],
+        homeDirectory: String,
+        isRegularFile: (String) -> Bool
+    ) -> PreviewLinkResolution? {
+        guard clickOffset >= 0, clickOffset < linkText.count else { return nil }
+        let click = linkText.index(linkText.startIndex, offsetBy: clickOffset)
+        guard !linkText[click].isWhitespace else { return nil }
+        let wordStart = linkText[..<click].lastIndex(where: \.isWhitespace).map(linkText.index(after:))
+            ?? linkText.startIndex
+        guard wordStart > linkText.startIndex,
+              let firstPath = previewPath(from: String(linkText[..<wordStart]))
+        else { return nil }
+
+        var word = String(linkText[wordStart...].prefix { !$0.isWhitespace })
+        if linkText[wordStart...].allSatisfy({ !$0.isWhitespace }) {
+            word += followingText.prefix { !$0.isWhitespace }
+        }
+        guard let path = previewPath(from: word) else { return .notPreviewable }
+
+        let folder = (firstPath as NSString).deletingLastPathComponent
+        let besideFirst: [String]
+        if folder.isEmpty {
+            besideFirst = []
+        } else if folder == "~" || folder.hasPrefix("~/") {
+            besideFirst = [(homeDirectory as NSString).appendingPathComponent(String(folder.dropFirst(2)))]
+        } else if folder.hasPrefix("/") {
+            besideFirst = [folder]
+        } else {
+            besideFirst = baseDirectories.filter { !$0.isEmpty }.map { ($0 as NSString).appendingPathComponent(folder) }
+        }
+        return resolve(
+            linkText: path,
+            baseDirectories: besideFirst + baseDirectories,
+            homeDirectory: homeDirectory,
+            isRegularFile: isRegularFile
+        )
+    }
+
     /// SwiftTerm's path regex never takes `(` or `)` into a path, so
     /// `…/전략 (보강판) 2026-10-20.pdf` arrives cut off at `…/전략`. Finds the
     /// file the screen actually names: an entry next to the cut-off path

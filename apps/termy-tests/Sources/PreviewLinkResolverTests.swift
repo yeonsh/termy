@@ -299,6 +299,65 @@ final class PreviewLinkResolverTests: XCTestCase {
         XCTAssertNil(resolveCutOff("file:///proj/docs/a", following: " (1).pdf", listing: listing))
     }
 
+    // MARK: - resolveGluedWord
+
+    private func glued(
+        _ link: String,
+        clickOn word: String,
+        following: String = "",
+        bases: [String] = ["/proj"],
+        existing: Set<String>
+    ) -> PreviewLinkResolution? {
+        let offset = link.distance(from: link.startIndex, to: link.range(of: word)!.lowerBound)
+        return PreviewLinkResolver.resolveGluedWord(
+            linkText: link,
+            clickOffset: offset,
+            followingText: following,
+            baseDirectories: bases,
+            homeDirectory: home,
+            isRegularFile: { existing.contains($0) }
+        )
+    }
+
+    func test_resolveGluedWord_bareNameOpensNextToThePathBeforeIt() {
+        XCTAssertEqual(
+            glued("docs/a.md를 b.", clickOn: "b.", following: "md로 바꾸고", existing: ["/proj/docs/b.md"]),
+            file("/proj/docs/b.md")
+        )
+    }
+
+    func test_resolveGluedWord_fallsBackToTheBases() {
+        XCTAssertEqual(
+            glued("docs/a.md를 b.", clickOn: "b.", following: "md로", existing: ["/proj/b.md"]),
+            file("/proj/b.md")
+        )
+        XCTAssertEqual(
+            glued("/x/a.md를 b.", clickOn: "b.", following: "md로", existing: ["/x/b.md"]),
+            file("/x/b.md")
+        )
+    }
+
+    func test_resolveGluedWord_wordWithItsOwnPath() {
+        XCTAssertEqual(
+            glued("docs/a.md를 /y/b.md로 c.", clickOn: "/y/b.md", existing: ["/y/b.md"]),
+            file("/y/b.md")
+        )
+    }
+
+    func test_resolveGluedWord_missingOrNotPreviewable() {
+        XCTAssertEqual(glued("docs/a.md를 b.", clickOn: "b.", following: "md로", existing: ["/proj/docs/a.md"]), .missing)
+        XCTAssertEqual(glued("docs/a.md를 v1.", clickOn: "v1.", following: "2 버전", existing: []), .notPreviewable)
+    }
+
+    /// nil means "not a glued word": the click is on the path itself, or the
+    /// link is one path with spaces in it.
+    func test_resolveGluedWord_leavesThePathItselfAlone() {
+        XCTAssertNil(glued("docs/a.md를 b.", clickOn: "docs", following: "md로", existing: []))
+        XCTAssertNil(glued("docs/a.md를 b.", clickOn: "a.md를", following: "md로", existing: []))
+        XCTAssertNil(glued("/r/My Notes 2026.md", clickOn: "2026.md", existing: []))
+        XCTAssertNil(glued("/r/My Notes 2026.md", clickOn: "Notes", existing: []))
+    }
+
     func test_imagePathsResolve() {
         let existing: Set<String> = ["/proj/shots/a.png", "/proj/a.jpeg", "/proj/a.webp", "/proj/a.svg", "/proj/b.PNG"]
         XCTAssertEqual(resolve("shots/a.png", existing: existing), file("/proj/shots/a.png"))

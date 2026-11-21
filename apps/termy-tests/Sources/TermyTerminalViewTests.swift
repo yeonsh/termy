@@ -645,6 +645,36 @@ final class TermyTerminalViewTests: XCTestCase {
         XCTAssertEqual(screenClickAction(view, row: 0, col: 5), preview(parenReport))
     }
 
+    // MARK: - A word SwiftTerm glues onto a path
+
+    /// SwiftTerm's path regex runs on over the space into the next word with
+    /// a "." in it, so the whole of `docs/…/1.1.2+22.md를 1.1.2+23.` comes
+    /// back as one link. A click on the second name opens that file (next to
+    /// the first, which the line says was renamed away), not the first.
+    @MainActor
+    func test_cmdClickOnNameGluedAfterPath_opensThatName() {
+        let view = TermyTerminalView(frame: NSRect(x: 0, y: 0, width: 1600, height: 200))
+        view.getTerminal().resize(cols: 200, rows: 10)
+        view.feed(text: "docs/release_notes/1.1.2+22.md를 1.1.2+23.md로 바꾸고, 「새로운 기능」에 넣었어요.")
+        let renamed = "/proj/docs/release_notes/1.1.2+23.md"
+        func click(_ col: Int, existing: Set<String>) -> LinkClickAction? {
+            view.linkClickAction(
+                atScreen: Position(col: col, row: 0),
+                baseDirectories: ["/proj"],
+                homeDirectory: "/Users/me",
+                isRegularFile: { existing.contains($0) },
+                listDirectory: { _ in [] }
+            )
+        }
+
+        // "docs/release_notes/1.1.2+22.md" = 0–29, 를 = 30–31, space 32, "1.1.2+23." = 33–41
+        XCTAssertEqual(click(36, existing: [renamed]), preview(renamed))
+        XCTAssertEqual(click(10, existing: [renamed]), .beep, "the old name is gone")
+        let old = "/proj/docs/release_notes/1.1.2+22.md"
+        XCTAssertEqual(click(10, existing: [old, renamed]), preview(old))
+        XCTAssertEqual(click(36, existing: [old]), .beep, "never falls back to the first path")
+    }
+
     // MARK: - Issue references
 
     /// Wide Hangul glyphs before the number shift columns away from
