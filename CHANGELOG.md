@@ -6,6 +6,15 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.11 — 2026-11-21
+
+- Cmd+click now opens the second file in a line like
+  `docs/notes/1.1.2+22.md를 1.1.2+23.md로 바꾸고`. The terminal treated
+  everything up to the second name as one long link, so clicking the second
+  file tried to open the first one instead, and only beeped when that file
+  was gone. The second name now opens its own file, looked up next to the
+  first path first.
+
 ## 0.3.10 — 2026-11-17
 
 - Boxes and tables drawn with text inside code blocks now line up in the
