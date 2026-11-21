@@ -8,7 +8,7 @@
 
 <p align="center">
   A native macOS terminal for running coding agents side by side —<br/>
-  with live per-agent state, project-aware panes, rendered Markdown &amp; PDF previews,<br/>
+  with live per-agent state, project-aware panes, rendered Markdown, PDF &amp; image previews,<br/>
   and updates that don't end your sessions.
 </p>
 
@@ -51,9 +51,10 @@ dashboard chip, filter pill — so a four-agent window stops looking like a soup
 of identical black rectangles.
 
 Drag the titlebar chips to put projects in your order. The same order drives
-<kbd>⌘</kbd><kbd>1</kbd>–<kbd>⌘</kbd><kbd>9</kbd>, the ALL view, and focus
-order. ALL packs every pane into one even grid with each project's panes kept
-together, while a single project keeps the split layout you built.
+<kbd>⌘</kbd><kbd>1</kbd>–<kbd>⌘</kbd><kbd>9</kbd> (and 10+ with a two-digit
+chord), the ALL view, and focus order. ALL packs every pane into one even grid
+with each project's panes kept together, while a single project keeps the
+split layout you built.
 
 <p align="center">
   <img src="docs/screenshots/pane-filter.png" width="620" alt="Filter bar with numbered project pills visible while holding ⌘" />
@@ -62,7 +63,8 @@ together, while a single project keeps the split layout you built.
 **Hold <kbd>⌘</kbd>** and a number appears on every filter pill. Press the
 number — you're there. <kbd>⌘</kbd><kbd>0</kbd> is always *All*;
 <kbd>⌘</kbd><kbd>1</kbd>–<kbd>⌘</kbd><kbd>9</kbd> jump straight to that
-project's pane grid. <kbd>⌘</kbd><kbd>⇧</kbd><kbd>[</kbd> and
+project's pane grid; for 10 and up, keep <kbd>⌘</kbd> down and type both
+digits. <kbd>⌘</kbd><kbd>⇧</kbd><kbd>[</kbd> and
 <kbd>⌘</kbd><kbd>⇧</kbd><kbd>]</kbd> walk the filters in order.
 
 Prefer names? <kbd>⌘</kbd><kbd>K</kbd> opens a fuzzy project switcher over
@@ -89,7 +91,10 @@ the project's color slides along that pane's header.
 
 - **`IDLE`** — agent is at the prompt, nothing running.
 - **`THINK`** — a tool call is in flight. The model is doing work.
-- **`WAIT`** — blocked on a permission prompt or a question, or finished a turn you haven't looked at yet. Your attention needed.
+- **`WAIT`** — blocked on a permission prompt or a question, or finished a
+  turn you haven't looked at yet. Your attention needed. A finished turn stays
+  on the chip, the dock badge, and <kbd>⌘</kbd><kbd>G</kbd> until you look at
+  the pane, then settles to `IDLE` 30 seconds later.
 - **`ERR`** — the agent or its shell exited with an error. The chip stays red until you look.
 - **`INIT`** — a fresh pane, until the agent reports its first event.
 
@@ -100,7 +105,10 @@ dashboard chip in order.
 
 **Hold <kbd>⌘</kbd><kbd>⌥</kbd>** and a number appears on each dashboard
 chip; press the number to focus that pane directly, even if it's in a
-different project filter.
+different project filter. The dock badge counts waiting panes, and a fresh
+`WAIT` bounces the dock icon and chimes; mute the chime in
+<kbd>⌘</kbd><kbd>,</kbd>. Esc or Ctrl-C in a Claude Code, Codex, Antigravity,
+or pi pane cancels a turn quietly to `IDLE`, with no false `WAIT` or chime.
 
 Open several windows and each strip shows the chips for **every window at
 once**. Click a chip — or tap a `WAIT` notification — and termy brings the
@@ -108,12 +116,13 @@ owning window forward and focuses the right pane.
 
 ## Files, rendered
 
-<kbd>⌘</kbd>-click a Markdown or PDF path in any pane — a spec an agent just
-wrote, a plan, a generated report — and termy opens it in its own preview
-window. Drop a Markdown or PDF file on a Markdown preview window to do the
-same. Previews follow your light or dark appearance and update live as the
-agent writes. PDF links inside a Markdown preview, and `file://` links to
-PDFs, open there too — even when the filename has spaces or parentheses.
+<kbd>⌘</kbd>-click a Markdown, PDF, or image path in any pane — a spec an
+agent just wrote, a plan, a generated report, a screenshot — and termy opens
+it in its own preview window. Drop a Markdown, PDF, or image file on a
+Markdown preview window to do the same. Previews follow your light or dark
+appearance and update live as the agent writes. PDF and image links inside a
+Markdown preview, and `file://` links to either, open there too — even when
+the filename has spaces or parentheses.
 
 - **Markdown, live.** Tables, task lists, and code blocks look the way they do
   on GitHub. When an agent edits the file, the preview updates in place and
@@ -122,8 +131,30 @@ PDFs, open there too — even when the filename has spaces or parentheses.
 - **PDF, live.** Open a PDF path the same way. A regenerated file updates the
   preview while keeping the page and zoom you were reading; a half-written
   file leaves the previous version on screen.
+- **Images, live.** PNG, JPEG, GIF, WebP, HEIC, AVIF, TIFF, BMP, and SVG
+  open the same way. Large images shrink to fit; pinch to zoom or
+  double-click to switch between fit and actual size. Animated GIFs play, a
+  checkerboard keeps transparent images visible in dark mode, and a
+  rewritten image swaps in only once the file is complete.
 - **Show in Finder.** <kbd>⌥</kbd><kbd>⌘</kbd><kbd>R</kbd>, or right-click the
   preview, opens the file's folder with the file selected.
+
+## Issues, one click away
+
+<kbd>⌘</kbd>-click an issue, pull request, or merge request number in terminal
+output — `#1300`, `fl#45`, `bdrive-core #26`, `!189` — and termy opens its
+page in your browser. It reads the project name beside the number and earlier
+in the pane's scrollback, and knows the repositories you have opened with
+<kbd>⌘</kbd><kbd>K</kbd>, their submodules, and repos next to them. On
+github.com, `#N` opens an issue or pull request; other hosts are treated as
+GitLab, where `#N` is an issue and `!N` a merge request.
+
+When the project is ambiguous, a small searchable menu opens at the click
+point: the pane's repo first, then projects named nearby and recently opened
+ones. <kbd>⌥</kbd><kbd>⌘</kbd>-click always opens the menu so you can pick
+again. Short names you pick, like `fl` in `fl#45`, are remembered; remove them
+in <kbd>⌘</kbd><kbd>,</kbd> → *Issue Links*. URLs, file paths, and OSC 8 links
+keep their usual <kbd>⌘</kbd>-click behavior.
 
 ## See it in action
 
@@ -131,7 +162,7 @@ PDFs, open there too — even when the filename has spaces or parentheses.
   <tr>
     <td width="50%" align="center">
       <img src="docs/screenshots/s1.png" alt="Pane borders colored by state" /><br/>
-      <sub><b>State shows up everywhere.</b> Pane border, sliding header activity bar, dashboard chip, and a macOS notification — driven by each agent's own hooks and plugins.</sub>
+      <sub><b>State shows up everywhere.</b> Pane border, sliding header activity bar, dashboard chip, dock badge, and a macOS notification — driven by each agent's own hooks and plugins.</sub>
     </td>
     <td width="50%" align="center">
       <img src="docs/screenshots/s2.png" alt="Three-pane split layout on a single project" /><br/>
@@ -156,21 +187,24 @@ PDFs, open there too — even when the filename has spaces or parentheses.
   CLI, and pi — mixed freely in the same window. Every integration except pi
   installs from the termy menu and reports live state through hooks or a
   plugin. pi needs no install — it reports its own state over OSC 7501. A
-  `WAIT` flip pings macOS even when termy is in the background.
+  `WAIT` flip pings macOS even when termy is in the background — dock badge,
+  notification banner, dock bounce, and a chime you can mute in Settings.
 - **Workspace that survives.** Splits, project grouping, and cwd are all
   persisted per project. Pick a project in <kbd>⌘</kbd><kbd>K</kbd> and termy
   rebuilds the pane grid you left it in.
 - **Updates that wait for you.** *Install and Relaunch* waits while an agent is
   mid-turn, then restarts once every agent has finished. Claude Code, Codex,
   and Antigravity conversations reopen in place (`claude --resume`,
-  `codex resume`, `agy --conversation`), flags included. pi conversations are
-  not resumed yet. In a hurry, choose <kbd>termy</kbd> ▸ *Restart Now to Install
-  Update*.
+  `codex resume`, `agy --conversation`), flags included. OpenCode and pi
+  conversations are not resumed yet. In a hurry, choose <kbd>termy</kbd> ▸
+  *Restart Now to Install Update*.
 - **One window per monitor.** <kbd>⌘</kbd><kbd>N</kbd> opens an independent
   window — its own pane grid, project filter, and split behaviour.
 - **Quit and come back.** Relaunch and every window returns — frames,
   positions, pane layouts, and project filters. A window stranded off-screen is
   clamped back onto a visible display.
+- **Quit guard.** <kbd>⌘</kbd><kbd>Q</kbd> asks before it quits.
+  Settings… → *Quitting* turns the prompt off.
 - **Agents that outlive termy.** Turn on *Settings…* → *Run local panes in
   herdr-core* and panes run inside herdr-core instead of a PTY termy owns.
   Quit termy or install an update and Claude Code keeps working; the next
@@ -212,8 +246,8 @@ PDFs, open there too — even when the filename has spaces or parentheses.
   and focus order. Remove folders you renamed or deleted from the
   <kbd>⌘</kbd><kbd>K</kbd> list — the folder itself is never touched.
 - **Native, not Electron.** AppKit + SwiftTerm. A signed, notarized DMG, real
-  `UserNotifications`, Full Disk Access, titlebar chrome — and Sparkle updates
-  that verify every build.
+  `UserNotifications`, dock badge, Full Disk Access, titlebar chrome — and
+  Sparkle updates that verify every build.
 
 ## Agent integrations
 
@@ -323,7 +357,7 @@ termy reopen the same conversation with `agy --conversation` after an update.
 | <kbd>⌘</kbd><kbd>⌫</kbd> | In <kbd>⌘</kbd><kbd>K</kbd>, remove the selected project from the list |
 | <kbd>⌘</kbd><kbd>[</kbd> / <kbd>⌘</kbd><kbd>]</kbd> | Previous / next pane |
 | <kbd>⌘</kbd><kbd>⌥</kbd><kbd>←↑↓→</kbd> | Focus pane in direction |
-| <kbd>⌘</kbd><kbd>D</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd> | Same-row / new-row split |
+| <kbd>⌘</kbd><kbd>D</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd> | Split focused pane right / down |
 | <kbd>⌘</kbd><kbd>T</kbd> | New pane — auto-splits, picks row/column from aspect ratio |
 | <kbd>⌘</kbd><kbd>N</kbd> | New window — its own pane grid, project filter, and splits |
 | <kbd>⌘</kbd><kbd>⏎</kbd> | Toggle maximize on the focused pane |
@@ -331,7 +365,7 @@ termy reopen the same conversation with `agy --conversation` after an update.
 | <kbd>⌘</kbd><kbd>⇧</kbd><kbd>W</kbd> | Close window |
 | <kbd>⌘</kbd><kbd>⇧</kbd><kbd>T</kbd> | Cycle theme — System → Light → Dark |
 | <kbd>⌘</kbd><kbd>+</kbd> / <kbd>⌘</kbd><kbd>−</kbd> | Increase / decrease terminal font size |
-| <kbd>⌘</kbd><kbd>,</kbd> | Settings — font, alerts, quitting |
+| <kbd>⌘</kbd><kbd>,</kbd> | Settings — font, alerts, quitting, issue links |
 | <kbd>⌥</kbd><kbd>⌘</kbd><kbd>R</kbd> | Show the previewed file in Finder |
 | <kbd>⌘</kbd><kbd>/</kbd> | Full shortcut overlay |
 
@@ -365,14 +399,20 @@ pi          ──OSC 7501─▶ pane terminal (in-process, fg must be an agent)
   It always exits `0` and times out writes after 100 ms, so it cannot stall
   an agent. pi does not use it — pi reports its own state over OSC 7501.
 - **`HookDaemon`** is an actor that receives those events. They flow through
-  **`PaneStateMachine`**, the pure reducer covered by 870+ unit tests —
-  including Claude Code's permission, question, and MCP-tool approval events.
+  **`PaneStateMachine`**, the pure reducer at the center of the 1,160+ unit
+  tests — including Claude Code's permission, question, and MCP-tool approval
+  events.
 - **OpenCode plugin.** A small `tui.js` watches the active session's
   permission, question, and busy flags and reports transitions; termy maps
   them to `IDLE`, `THINK`, `WAIT`, and `ERR`.
 - **Antigravity hooks.** Installed into `~/.gemini/config/hooks.json`, they
   report the same states and let termy reopen the same conversation with
   `agy --conversation` after an update.
+- **Issue references.** `IssueRefParser` recognizes `#1234`, `!1234`, and
+  named references in the clicked line and the pane's scrollback;
+  `KnownRepoIndex` turns names into repositories from your ⌘K history,
+  submodules, and neighbors; `IssueRefResolver` opens the page or shows the
+  picker. Credentials in remote URLs are dropped before anything is stored.
 - **Every installer is non-destructive.** termy owns only its own keys or
   file, backs up configuration before changing it, and uninstalls from the
   <kbd>termy</kbd> menu without touching your own hooks.
@@ -393,11 +433,13 @@ Shipping. The core loop is working end-to-end:
 
 - Five agents end-to-end — Claude Code, Codex CLI, OpenCode, Antigravity CLI,
   and pi (OSC 7501, no install)
-- Live dashboard with `THINK` / `WAIT` / `IDLE` / `ERR`, notifications, and
-  <kbd>⌘</kbd><kbd>G</kbd> navigation
+- Live dashboard with `THINK` / `WAIT` / `IDLE` / `ERR`, notifications, dock
+  badge, and <kbd>⌘</kbd><kbd>G</kbd> navigation
 - SwiftTerm panes with OSC 7 cwd tracking, splits, mouse-aware TUIs, and
-  <kbd>⌘</kbd>-click URLs
-- Markdown and PDF previews with live updates, drag-to-open, and Show in Finder
+  <kbd>⌘</kbd>-click URLs, files, and issue numbers
+- Markdown, PDF, and image previews with live updates, drag-to-open, and Show
+  in Finder
+- Issue, PR, and MR links with a project picker and remembered short names
 - Hook daemon + `termy-hook` + non-destructive installers for every hook-based
   integration
 - Workspace autosave, multi-window dashboard, and full session restore
@@ -407,7 +449,7 @@ Shipping. The core loop is working end-to-end:
   conversations
 - Optional herdr-core panes whose agents survive quitting termy, and remote
   projects on other machines
-- Developer ID-signed, notarized DMG pipeline and 870+ unit tests
+- Developer ID-signed, notarized DMG pipeline and 1,160+ unit tests
 
 ## Still on the list
 
@@ -419,7 +461,8 @@ per-project settings UI.
 
 - `docs/project-overview.md` — architecture, runtime, hook system constraints
 - `docs/auto-update.md` — Sparkle release and update runbook
+- `docs/release-cycle.md` — release checklist and publish runbook
 - `TODOS.md` — scoped-out work with reasoning
 - `apps/termy/Sources/` — the app
 - `apps/termy-hook/Sources/` — the hook helper CLI
-- `apps/termy-tests/Sources/` — 870+ tests across 70+ suites
+- `apps/termy-tests/Sources/` — 1,160+ tests across 90+ suites
