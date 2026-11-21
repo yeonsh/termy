@@ -6,6 +6,15 @@ extracts the matching section into the Sparkle appcast `<description>`.
 
 ## Unreleased
 
+## 0.3.12 — 2026-11-22
+
+- With ten or more projects in the title bar, you can now jump to project 10
+  and beyond from the keyboard: keep ⌘ down and type both digits (⌘1, then 0
+  for project 10). ⌘1 still jumps to project 1 right away, and with nine or
+  fewer projects ⌘1 followed by ⌘0 still means project 1, then all panes.
+  Before, ⌘1 fired as soon as it was pressed, so project 10 and up had no
+  shortcut even though their chips showed a "10" badge.
+
 ## 0.3.11 — 2026-11-21
 
 - Cmd+click now opens the second file in a line like
