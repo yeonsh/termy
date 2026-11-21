@@ -13,8 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/yeonsh/termy/releases/latest">Download for macOS</a> ·
-  <a href="https://termy.nugo.cc/">termy.nugo.cc</a> · macOS 14+
+  <a href="https://github.com/yeonsh/termy/releases/latest">Download for macOS</a> · macOS 14+
 </p>
 
 <p align="center">
