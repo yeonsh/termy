@@ -38,6 +38,8 @@ enum TermyApp {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private let windowManager = WindowManager()
+    private var filterDigitChord = ProjectFilterDigitChord()
+    private var filterChordFlagsMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -268,16 +270,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         activeController?.decreaseFontSize(sender)
     }
 
-    @IBAction func selectFilter0(_ sender: Any?) { activeController?.selectAllFilter() }
-    @IBAction func selectFilter1(_ sender: Any?) { activeController?.selectProjectFilter(at: 0) }
-    @IBAction func selectFilter2(_ sender: Any?) { activeController?.selectProjectFilter(at: 1) }
-    @IBAction func selectFilter3(_ sender: Any?) { activeController?.selectProjectFilter(at: 2) }
-    @IBAction func selectFilter4(_ sender: Any?) { activeController?.selectProjectFilter(at: 3) }
-    @IBAction func selectFilter5(_ sender: Any?) { activeController?.selectProjectFilter(at: 4) }
-    @IBAction func selectFilter6(_ sender: Any?) { activeController?.selectProjectFilter(at: 5) }
-    @IBAction func selectFilter7(_ sender: Any?) { activeController?.selectProjectFilter(at: 6) }
-    @IBAction func selectFilter8(_ sender: Any?) { activeController?.selectProjectFilter(at: 7) }
-    @IBAction func selectFilter9(_ sender: Any?) { activeController?.selectProjectFilter(at: 8) }
+    @IBAction func selectFilter0(_ sender: Any?) { jumpToFilter(digit: 0) }
+    @IBAction func selectFilter1(_ sender: Any?) { jumpToFilter(digit: 1) }
+    @IBAction func selectFilter2(_ sender: Any?) { jumpToFilter(digit: 2) }
+    @IBAction func selectFilter3(_ sender: Any?) { jumpToFilter(digit: 3) }
+    @IBAction func selectFilter4(_ sender: Any?) { jumpToFilter(digit: 4) }
+    @IBAction func selectFilter5(_ sender: Any?) { jumpToFilter(digit: 5) }
+    @IBAction func selectFilter6(_ sender: Any?) { jumpToFilter(digit: 6) }
+    @IBAction func selectFilter7(_ sender: Any?) { jumpToFilter(digit: 7) }
+    @IBAction func selectFilter8(_ sender: Any?) { jumpToFilter(digit: 8) }
+    @IBAction func selectFilter9(_ sender: Any?) { jumpToFilter(digit: 9) }
+
+    /// ⌘0..⌘9 funnel. Digits typed while ⌘ stays down chain into a
+    /// multi-digit project number (⌘1 then 0 → project 10); see
+    /// `ProjectFilterDigitChord`.
+    private func jumpToFilter(digit: Int) {
+        guard let controller = activeController else { return }
+        let event = NSApp.currentEvent
+        if event?.type == .keyDown {
+            // Holding ⌘1 must not auto-repeat into ⌘11.
+            if event?.isARepeat == true { return }
+            installFilterChordReset()
+        } else {
+            // Picked from the menu with the mouse — no ⌘ hold to chain on.
+            filterDigitChord.reset()
+        }
+        let number = filterDigitChord.press(
+            digit,
+            projectCount: controller.projectFilterCount,
+            at: ProcessInfo.processInfo.systemUptime
+        )
+        controller.selectFilter(number: number)
+    }
+
+    /// Ends a ⌘-digit chain the moment ⌘ comes up (or the app loses focus,
+    /// where the release would go unseen). Installed lazily on first use.
+    private func installFilterChordReset() {
+        guard filterChordFlagsMonitor == nil else { return }
+        filterChordFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            if !event.modifierFlags.contains(.command) {
+                self?.filterDigitChord.reset()
+            }
+            return event
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.filterDigitChord.reset() }
+        }
+    }
 
     @IBAction func cycleDashboardPrev(_ sender: Any?) {
         activeController?.cycleDashboardItem(delta: -1)
@@ -838,7 +881,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(.separator())
 
         // Direct filter jumps: ⌘0 is ALL when available; ⌘1..⌘9 start at
-        // the first project segment.
+        // the first project segment. Past nine projects, keep ⌘ down and type
+        // both digits (⌘1, 0 → project 10) — see `jumpToFilter(digit:)`.
         let showAll = menu.addItem(
             withTitle: "Show All Panes",
             action: #selector(AppDelegate.selectFilter0(_:)),

@@ -634,14 +634,13 @@ final class MainWindowController: NSWindowController, NSMenuItemValidation, NSWi
         workspace.cycleFilter(delta: 1)
     }
 
-    /// Direct filter jump — ⌘0 = ALL when available.
-    func selectAllFilter() {
-        workspace.selectAllFilter()
+    /// Direct filter jump — 0 = ALL when available, n = n-th project chip.
+    func selectFilter(number: Int) {
+        workspace.selectFilter(number: number)
     }
 
-    /// Direct project-filter jump — ⌘1 starts at the first project segment.
-    func selectProjectFilter(at index: Int) {
-        workspace.selectProjectFilter(at: index)
+    var projectFilterCount: Int {
+        workspace.knownProjectIds.count
     }
 
     /// Dashboard cycling — ⌘⌥[ / ⌘⌥]. Walks the mission-control bar in

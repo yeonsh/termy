@@ -47,6 +47,13 @@ enum WorkspaceFilterOptions {
         return .project(projectIds[number - 1])
     }
 
+    /// Filter for a ⌘-digit jump number: 0 = ALL, n = n-th project.
+    static func numberShortcutTarget(projectIds: [String], number: Int) -> WorkspaceFilter? {
+        number == 0
+            ? allShortcutTarget(projectIds: projectIds)
+            : projectShortcutTarget(projectIds: projectIds, number: number)
+    }
+
     static func shortcutHint(for option: WorkspaceFilter, projectIds: [String]) -> String? {
         switch option {
         case .all:
@@ -55,6 +62,36 @@ enum WorkspaceFilterOptions {
             guard let index = projectIds.firstIndex(of: id) else { return nil }
             return "\(index + 1)"
         }
+    }
+}
+
+/// ⌘-held multi-digit project jump. A keyboard has no "10" key, so ⌘1 must
+/// still jump to project 1 at once; a following digit typed before ⌘ is
+/// released (and within `window`) extends it — ⌘1 then 0 lands on project 10.
+/// Chains only when the longer number exists, so with nine or fewer projects
+/// ⌘1 then ⌘0 still means project 1 then ALL. The caller resets on ⌘ release.
+struct ProjectFilterDigitChord {
+    static let window: TimeInterval = 1.0
+
+    private var prefix: Int?
+    private var lastPress: TimeInterval = 0
+
+    /// Returns the number to jump to: 0 = ALL, n = n-th project (1-based).
+    mutating func press(_ digit: Int, projectCount: Int, at now: TimeInterval) -> Int {
+        defer { lastPress = now }
+        if let prefix, now - lastPress <= Self.window {
+            let extended = prefix * 10 + digit
+            if extended <= projectCount {
+                self.prefix = extended * 10 <= projectCount ? extended : nil
+                return extended
+            }
+        }
+        prefix = digit > 0 && digit * 10 <= projectCount ? digit : nil
+        return digit
+    }
+
+    mutating func reset() {
+        prefix = nil
     }
 }
 
@@ -963,19 +1000,11 @@ final class Workspace: NSView, NSSplitViewDelegate {
         filter = opts[next]
     }
 
-    func selectAllFilter() {
-        guard let target = WorkspaceFilterOptions.allShortcutTarget(
-            projectIds: knownProjectIds
-        ) else {
-            return
-        }
-        filter = target
-    }
-
-    func selectProjectFilter(at index: Int) {
-        guard let target = WorkspaceFilterOptions.projectShortcutTarget(
+    /// ⌘-digit jump: 0 = ALL (when shown), n = n-th project chip.
+    func selectFilter(number: Int) {
+        guard let target = WorkspaceFilterOptions.numberShortcutTarget(
             projectIds: knownProjectIds,
-            number: index + 1
+            number: number
         ) else {
             return
         }

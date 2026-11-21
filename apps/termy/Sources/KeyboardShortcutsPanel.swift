@@ -54,7 +54,8 @@ final class KeyboardShortcutsPanel: NSPanel {
             Shortcut(combos: [["⌘", "⌫"]], description: "In ⌘K, remove the selected project from the list"),
             Shortcut(combos: [["⌘", "⇧", "["], ["⌘", "⇧", "]"]], description: "Previous / next project filter"),
             Shortcut(combos: [["⌘", "0"]], description: "Show all panes"),
-            Shortcut(combos: [["⌘", "1–9"]], description: "Jump to project filter N")
+            Shortcut(combos: [["⌘", "1–9"]], description: "Jump to project filter N"),
+            Shortcut(combos: [["⌘", "1", "0"]], description: "Project 10+: keep ⌘ down, type both digits")
         ]),
         Section(title: "Appearance", entries: [
             Shortcut(combos: [["⌘", "⇧", "T"]], description: "Cycle theme (System → Light → Dark)"),

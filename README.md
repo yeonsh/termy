@@ -318,7 +318,7 @@ termy reopen the same conversation with `agy --conversation` after an update.
 | <kbd>⌘</kbd><kbd>⌥</kbd><kbd>G</kbd> | Jump to the next dashboard chip |
 | <kbd>⌘</kbd><kbd>⌥</kbd><kbd>1</kbd>–<kbd>9</kbd> | Jump to dashboard chip N (hold <kbd>⌘</kbd><kbd>⌥</kbd> to see numbers) |
 | <kbd>⌘</kbd><kbd>0</kbd> | Show all projects |
-| <kbd>⌘</kbd><kbd>1</kbd>–<kbd>9</kbd> | Jump to project filter N (hold <kbd>⌘</kbd> to see numbers) |
+| <kbd>⌘</kbd><kbd>1</kbd>–<kbd>9</kbd> | Jump to project filter N (hold <kbd>⌘</kbd> to see numbers). For 10 and up, keep <kbd>⌘</kbd> down and type both digits (<kbd>⌘</kbd><kbd>1</kbd><kbd>0</kbd>) |
 | <kbd>⌘</kbd><kbd>⇧</kbd><kbd>[</kbd> / <kbd>⌘</kbd><kbd>⇧</kbd><kbd>]</kbd> | Previous / next project filter |
 | <kbd>⌘</kbd><kbd>K</kbd> | Fuzzy project switcher |
 | <kbd>⌘</kbd><kbd>⌫</kbd> | In <kbd>⌘</kbd><kbd>K</kbd>, remove the selected project from the list |
